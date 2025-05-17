@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::QueryBuilder;
+use crate::{Buildable, QueryBuilder};
 
 pub struct SelectSt<S: QueryBuilder> {
     pub(crate) select_list: Vec<(Option<String>, String, Option<&'static str>)>,
@@ -21,21 +21,10 @@ pub struct join {
     pub local_column: String,
 }
 
-impl<S: QueryBuilder> SelectSt<S> {
-    pub fn init<T: AsRef<str>>(from: T) -> Self {
-        SelectSt {
-            select_list: Default::default(),
-            where_clause: Default::default(),
-            joins: vec![],
-            order_by: Default::default(),
-            limit: Default::default(),
-            shift: Default::default(),
-            ctx: Default::default(),
-            from: from.as_ref().to_string(),
-            _sqlx: PhantomData,
-        }
-    }
-    pub fn build(self) -> (String, S::Output) {
+impl<S: QueryBuilder> Buildable for SelectSt<S> {
+    type Database = S;
+
+    fn build(self) -> (String, <S as QueryBuilder>::Output) {
         S::build_query(self.ctx, |ctx| {
             let mut str = String::from("SELECT ");
 
@@ -117,5 +106,26 @@ impl<S: QueryBuilder> SelectSt<S> {
             str.push_str(";");
             str
         })
+    }
+}
+
+impl<S: QueryBuilder> SelectSt<S> {
+    pub fn init<T: AsRef<str>>(from: T) -> Self {
+        SelectSt {
+            select_list: Default::default(),
+            where_clause: Default::default(),
+            joins: vec![],
+            order_by: Default::default(),
+            limit: Default::default(),
+            shift: Default::default(),
+            ctx: Default::default(),
+            from: from.as_ref().to_string(),
+            _sqlx: PhantomData,
+        }
+    }
+
+    pub fn select(&mut self, item: String)
+    {
+        self.select_list.push((None, item, None));
     }
 }
