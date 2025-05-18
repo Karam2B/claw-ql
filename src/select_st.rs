@@ -11,7 +11,7 @@ pub struct SelectSt<S: QueryBuilder> {
     pub(crate) shift: Option<S::Fragment>,
     pub(crate) ctx: S::Context1,
     pub(crate) from: String,
-    
+
     #[allow(unused)]
     pub(crate) ident_safety: (),
     pub(crate) _sqlx: PhantomData<S>,
@@ -149,7 +149,7 @@ impl<S: QueryBuilder> SelectSt<S> {
 
     pub fn select<T>(&mut self, item: T)
     where
-        T: AcceptNoneBind,
+        T: AcceptNoneBind<IdentSafety = ()>,
     {
         self.select_list.push((None, item.accept(Unsateble), None));
     }

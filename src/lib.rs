@@ -1,12 +1,16 @@
 use sqlx::Database;
 
+pub mod build_tuple;
 pub mod execute;
 pub mod expressions;
+pub mod collections;
 pub mod quick_query;
+pub mod select_one;
 pub mod select_st;
 
 pub mod prelude {
     pub use super::execute::Execute;
+    pub use crate::expressions::exports::*;
     pub use crate::select_st::join;
     pub use crate::select_st::order_by;
     pub mod stmt {
@@ -50,17 +54,20 @@ pub(crate) mod unstable {
     pub struct Unsateble;
 }
 
+/// very similar signature to ToString, but take care of things
+/// like sql-injection and ident-safety
+///
 /// This trait decide which type can be accepted in the SQL syntax
 /// but is not binding data to the SQL buffer. identity safety is
 /// also important to consider -- does this type have sql-injection?
 /// it is accessing data it should not access or result in runtime
 /// error?
 ///
-///
 /// implimenting AcceptNoneBind is not stable for now
 /// because its linked to the IdentSafety feature which is not
 /// fully implemented or understood so far
 pub trait AcceptNoneBind {
+    type IdentSafety: IdentSafety;
     fn accept(self, _: unstable::Unsateble) -> String;
 }
 

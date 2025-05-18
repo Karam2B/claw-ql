@@ -59,9 +59,9 @@ impl QueryBuilder for sqlx::Sqlite {
         Self::accept(t, ctx)(&mut ())
     }
 }
-impl<T> Accept<T> for Sqlite 
-    where
-    T: for<'e> Encode<'e, Sqlite> + Type<Sqlite> + Send + 'static
+impl<T> Accept<T> for Sqlite
+where
+    T: for<'e> Encode<'e, Sqlite> + Type<Sqlite> + Send + 'static,
 {
     fn accept(
         this: T,

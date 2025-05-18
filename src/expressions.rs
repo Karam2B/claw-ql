@@ -10,6 +10,7 @@ pub struct Col<IS = ()> {
 }
 
 impl<IS: IdentSafety> AcceptNoneBind for Col<IS> {
+    type IdentSafety = IS;
     fn accept(self, _: Unsateble) -> String {
         format!(
             "{}{}{}",
