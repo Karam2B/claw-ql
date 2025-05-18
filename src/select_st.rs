@@ -1,29 +1,48 @@
 use std::marker::PhantomData;
 
-use crate::{Buildable, QueryBuilder};
+use crate::{Accept, AcceptNoneBind, BindItem, Buildable, QueryBuilder, unstable::Unsateble};
 
 pub struct SelectSt<S: QueryBuilder> {
     pub(crate) select_list: Vec<(Option<String>, String, Option<&'static str>)>,
     pub(crate) where_clause: Vec<S::Fragment>,
-    pub(crate) joins: Vec<(String, join)>,
+    pub(crate) joins: Vec<join>,
     pub(crate) order_by: Vec<(String, bool)>,
     pub(crate) limit: Option<S::Fragment>,
     pub(crate) shift: Option<S::Fragment>,
     pub(crate) ctx: S::Context1,
     pub(crate) from: String,
+    
+    #[allow(unused)]
+    pub(crate) ident_safety: (),
     pub(crate) _sqlx: PhantomData<S>,
 }
 
 #[allow(non_camel_case_types)]
-pub struct join {
-    pub on_table: String,
-    pub on_column: String,
-    pub local_column: String,
+pub enum join {
+    left_join {
+        foriegn_table: String,
+        foriegn_column: String,
+        local_column: String,
+    },
+}
+
+pub mod order_by {
+    pub const ASC: bool = true;
+    pub const DESC: bool = false;
+}
+
+impl join {
+    pub fn global_table(&self) -> &str {
+        match self {
+            Self::left_join { foriegn_table, .. } => foriegn_table.as_str(),
+        }
+    }
 }
 
 impl<S: QueryBuilder> Buildable for SelectSt<S> {
     type Database = S;
 
+    #[track_caller]
     fn build(self) -> (String, <S as QueryBuilder>::Output) {
         S::build_query(self.ctx, |ctx| {
             let mut str = String::from("SELECT ");
@@ -50,17 +69,20 @@ impl<S: QueryBuilder> Buildable for SelectSt<S> {
             str.push_str(" FROM ");
             str.push_str(self.from.as_ref());
 
-            for join in self.joins.into_iter() {
-                let join = format!(
-                    " {} {} ON {}.{} = {}.{}",
-                    join.0,
-                    join.1.on_table,
-                    join.1.on_table,
-                    join.1.on_column,
-                    self.from,
-                    join.1.local_column,
-                );
-                str.push_str(&join);
+            for join_ in self.joins.into_iter() {
+                match join_ {
+                    join::left_join {
+                        foriegn_table,
+                        foriegn_column,
+                        local_column,
+                    } => {
+                        let join = format!(
+                            " LEFT JOIN ON {}.{} = {}.{}",
+                            foriegn_table, foriegn_column, self.from, local_column,
+                        );
+                        str.push_str(&join);
+                    }
+                }
             }
 
             for (index, item) in self.where_clause.into_iter().enumerate() {
@@ -121,11 +143,70 @@ impl<S: QueryBuilder> SelectSt<S> {
             ctx: Default::default(),
             from: from.as_ref().to_string(),
             _sqlx: PhantomData,
+            ident_safety: (),
         }
     }
 
-    pub fn select(&mut self, item: String)
+    pub fn select<T>(&mut self, item: T)
+    where
+        T: AcceptNoneBind,
     {
-        self.select_list.push((None, item, None));
+        self.select_list.push((None, item.accept(Unsateble), None));
+    }
+
+    #[track_caller]
+    pub fn join(&mut self, j: join) {
+        if self
+            .joins
+            .iter()
+            .find(|e| e.global_table() == j.global_table())
+            .is_some()
+        {
+            panic!("table {} has been joined already", j.global_table());
+        }
+
+        self.joins.push(j);
+    }
+
+    pub fn order_by(&mut self, by: String, asc: bool) {
+        self.order_by.push((by, asc));
+    }
+
+    #[track_caller]
+    pub fn offset<T>(&mut self, shift: T)
+    where
+        S: Accept<T>,
+        T: Send + 'static,
+    {
+        if self.shift.is_some() {
+            panic!("limit has been set already");
+        }
+
+        let limit = S::handle_accept(shift, &mut self.ctx);
+
+        self.shift = Some(limit);
+    }
+
+    #[track_caller]
+    pub fn limit<T>(&mut self, limit: T)
+    where
+        S: Accept<T>,
+        T: Send + 'static,
+    {
+        if self.limit.is_some() {
+            panic!("limit has been set already");
+        }
+
+        let limit = S::handle_accept(limit, &mut self.ctx);
+
+        self.limit = Some(limit);
+    }
+    pub fn where_<T>(&mut self, item: T)
+    where
+        T: BindItem<S> + 'static,
+    {
+        let item = S::handle_bind_item(item, &mut self.ctx);
+
+        self.where_clause.push(item);
     }
 }

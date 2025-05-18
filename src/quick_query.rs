@@ -22,7 +22,6 @@ impl<S: Database> From<QuickQueryCtx<S>> for () {
     }
 }
 
-// #[cfg(feature = "sqlite")]
 impl QueryBuilder for sqlx::Sqlite {
     type Fragment = String;
 

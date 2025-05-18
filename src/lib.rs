@@ -1,7 +1,18 @@
 use sqlx::Database;
 
-pub mod select_st;
+pub mod execute;
+pub mod expressions;
 pub mod quick_query;
+pub mod select_st;
+
+pub mod prelude {
+    pub use super::execute::Execute;
+    pub use crate::select_st::join;
+    pub use crate::select_st::order_by;
+    pub mod stmt {
+        pub use crate::select_st::SelectSt;
+    }
+}
 
 pub trait QueryBuilder: Database {
     type Fragment;
@@ -26,6 +37,38 @@ pub trait QueryBuilder: Database {
         T: 'static + Send,
         Self: Accept<T>;
 }
+
+pub trait IdentSafety {
+    #[track_caller]
+    fn check(ident: &str);
+}
+impl IdentSafety for () {
+    fn check(_: &str) {}
+}
+
+pub(crate) mod unstable {
+    pub struct Unsateble;
+}
+
+/// This trait decide which type can be accepted in the SQL syntax
+/// but is not binding data to the SQL buffer. identity safety is
+/// also important to consider -- does this type have sql-injection?
+/// it is accessing data it should not access or result in runtime
+/// error?
+///
+///
+/// implimenting AcceptNoneBind is not stable for now
+/// because its linked to the IdentSafety feature which is not
+/// fully implemented or understood so far
+pub trait AcceptNoneBind {
+    fn accept(self, _: unstable::Unsateble) -> String;
+}
+
+// impl AcceptNoneBind for &str {
+//     fn to_string(self) -> String {
+//         <str>::to_string(self)
+//     }
+// }
 
 pub trait Buildable: Sized {
     type Database: QueryBuilder;
@@ -66,10 +109,5 @@ where
     DB: Database,
 {
     const LEN: usize;
-    fn into_arguments(
-        self,
-        argument: &mut DB::Arguments<'q>,
-    );
+    fn into_arguments(self, argument: &mut DB::Arguments<'q>);
 }
-
-
