@@ -3,6 +3,8 @@ use proc_macro_error::proc_macro_error;
 
 mod relation;
 mod collection_derive;
+#[cfg(test)]
+mod tests;
 
 #[proc_macro_derive(Collection)]
 #[proc_macro_error]

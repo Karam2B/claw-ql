@@ -1,4 +1,4 @@
-use proc_macro::Ident;
+use proc_macro2::Ident;
 use proc_macro_error::abort;
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -52,28 +52,19 @@ pub fn main(input: DeriveInput) -> TokenStream {
     let m_name_scoped =
         main_derive.fields.iter().map(|m| m.name_scoped.clone()).collect::<Vec<_>>();
 
-
-
     ts.extend(quote!(
-        #[derive(::cms_for_rust::macro_prelude::serde::Deserialize)]
+        #[cfg_attr(feature = "serde", derive(Deserialize))]
         pub struct #partial_ident {
-            #(pub #m_name: ::cms_for_rust::macro_prelude::derive_collection::Update<#m_ty>,)*
+            #(pub #m_name: update<#m_ty>,)*
         }
     ));
 
     ts.extend(quote!( const _: () = {
-        use ::cms_for_rust::macro_prelude::derive_collection::*;
-
-        submit! {SubmitDynCollection {
-            obj: || Box::new(PhantomData::<#d_ident>)
-        }}
-        submit!(SubmitDynMigrate{
-            obj: || Box::new(PhantomData::<#d_ident>)
-        });
+        use ::claw_ql::prelude::derive_collection::*;
 
         impl<S> Collection<S> for #d_ident 
             where 
-        S: Database + SupportNamedBind + SqlxQuery,
+        S: QueryBuilder,
         for<'s> &'s str: ColumnIndex<<S as Database>::Row>,
         #(
             #m_ty: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
@@ -81,29 +72,13 @@ pub fn main(input: DeriveInput) -> TokenStream {
         {
             type PartailCollection = #partial_ident;
 
-            fn on_migrate(stmt: &mut CreatTableSt<S>) {
-                stmt.column("id", primary_key::<S>());
-                #(
-                stmt.column(
-                    stringify!(#m_name),
-                    col_type_check_if_null::<#m_ty>(),
-                );
-                )*
-            }
-            fn on_update(
-                stmt: &mut UpdateSt<S>,
-                this: Self::PartailCollection,
-            ) -> Result<(), String>
+            fn on_select(stmt: &mut SelectSt<S>)
             {
                 #(
-                if let Update::set(val) = this.#m_name {
-                    stmt.set(stringify!(#m_name).to_string(), {
-                        val
-                    });
-                };)*
-                Ok(())
+                   stmt.select(stringify!(#m_name_scoped));
+                )*
             }
-        
+
             fn members() -> &'static [&'static str] {
                  &[
                      #(
@@ -124,12 +99,7 @@ pub fn main(input: DeriveInput) -> TokenStream {
                 stringify!(#d_ident)
             }
         
-            fn on_select(stmt: &mut SelectSt<S>)
-            {
-                #(
-                   stmt.select(stringify!(#m_name_scoped));
-                )*
-            }
+
         
             fn from_row_noscope(row: &<S as Database>::Row) -> Self
             {
@@ -145,22 +115,10 @@ pub fn main(input: DeriveInput) -> TokenStream {
                 )*}
             }
         
-            fn on_insert(
-                self,
-                stmt: &mut InsertSt<S>,
-            ) -> Result<(), String>
-            {
-                #(
-                    stmt.insert(stringify!(#m_name).to_owned(), {
-                        self.#m_name
-                    });
-                )*
-                Ok(())
-            }
-            
         }
     };));
-    ts
+
+    return ts
 }
 
 #[test]

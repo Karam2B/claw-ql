@@ -3,20 +3,12 @@ use sqlx::Database;
 pub mod build_tuple;
 pub mod execute;
 pub mod expressions;
-pub mod collections;
+pub mod operations;
 pub mod quick_query;
-pub mod select_one;
-pub mod select_st;
+pub mod statements;
+pub mod update;
 
-pub mod prelude {
-    pub use super::execute::Execute;
-    pub use crate::expressions::exports::*;
-    pub use crate::select_st::join;
-    pub use crate::select_st::order_by;
-    pub mod stmt {
-        pub use crate::select_st::SelectSt;
-    }
-}
+pub mod prelude;
 
 pub trait QueryBuilder: Database {
     type Fragment;

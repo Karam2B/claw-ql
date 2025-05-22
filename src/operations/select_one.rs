@@ -7,9 +7,9 @@ use sqlx::{ColumnIndex, Decode, Encode, Pool, Row, Type};
 use crate::{
     QueryBuilder,
     build_tuple::BuildTuple,
-    collections::{Collection, Filters},
-    prelude::stmt,
-    select_st::SelectSt,
+    operations::collections::{Collection, Filters},
+    prelude::normal::stmt,
+    statements::select_st::SelectSt,
 };
 
 pub fn get_one<S, Base>(base: PhantomData<Base>) -> SelectOne<S, Base, (), ()> {

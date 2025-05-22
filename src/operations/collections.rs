@@ -1,6 +1,6 @@
 use sqlx::Database;
 
-use crate::{QueryBuilder, select_st::SelectSt};
+use crate::{QueryBuilder, statements::select_st::SelectSt};
 
 pub trait Collection<S>: Sized + Send + Sync {
     type PartailCollection;

@@ -6,19 +6,18 @@ edition = "2024"
 [dependencies]
 claw-ql-macros = { path = "./claw-ql-macros", version = "0.1.0" }
 sqlx = { version = "0.8.5" }
-serde = { version = "1.0.203" }
-# optional dependencies
+# feature trace
 tracing = { version = "0.1.40", optional = true }
+# feature serde
+serde_json = { version = "1.0.117", optional = true }
+serde = { version = "1.0.203", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.37.0", features = ["full"] }
 pretty_assertions = "1"
-serde_json = "1.0.117"
-serde = "1.0.203"
-
-
 
 [features]
-default = ["sqlite"]
+default = ["sqlite", "serde"]
+serde = ["dep:serde_json", "dep:serde"]
 trace = ["dep:tracing"]
 sqlite = ["sqlx/sqlite"]
