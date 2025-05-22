@@ -34,3 +34,34 @@ pub trait Filters<S, C>: Sync + Send {
     where
         S: QueryBuilder;
 }
+
+#[rustfmt::skip]
+mod filters_tuple_impls {
+    use super::Filters;
+    use crate::{QueryBuilder, statements::select_st::SelectSt};
+    use paste::paste;
+
+    macro_rules! implt {
+    ($([$ty:ident, $part:literal],)*) => {
+        #[allow(unused)]
+        impl
+            <S,C, $($ty,)* >
+        Filters<S,C>
+        for
+            ($($ty,)*)
+        where
+            
+            S: QueryBuilder,
+            $($ty:  Filters<S, C>,)*
+        {
+            fn on_select(self, st: &mut SelectSt<S>) {
+                $(paste!(self.$part.on_select(st));)*
+            }
+        }
+    }
+    }
+
+    implt!();
+    implt!([R0, 0],);
+    implt!([R0, 0], [R1, 1],);
+}

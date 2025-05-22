@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use proc_macro_error::proc_macro_error;
 
-mod relation;
 mod collection_derive;
+mod relation;
 #[cfg(test)]
 mod tests;
 

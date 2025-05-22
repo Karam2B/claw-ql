@@ -9,7 +9,7 @@ license = "MIT"
 [lib]
 proc-macro = true
 
-[dev_dependencies]
+[dev-dependencies]
 pretty_assertions = "1"
 
 [dependencies]

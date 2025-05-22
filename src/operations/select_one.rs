@@ -12,7 +12,7 @@ use crate::{
     statements::select_st::SelectSt,
 };
 
-pub fn get_one<S, Base>(base: PhantomData<Base>) -> SelectOne<S, Base, (), ()> {
+pub fn get_one<S, Base>(_: PhantomData<Base>) -> SelectOne<S, Base, (), ()> {
     SelectOne {
         _pd: PhantomData,
         links: (),
@@ -63,19 +63,72 @@ pub trait GetOneWorker<S: QueryBuilder>: Sync + Send {
     fn take(self, data: Self::Inner) -> Self::Output;
 }
 
-impl<S, C, R, Q> SelectOne<S, C, R, Q>
+#[rustfmt::skip]
+mod get_one_worker_tuple_impls {
+    use sqlx::Pool;
+
+    use super::GetOneWorker;
+    use crate::{QueryBuilder, statements::select_st::SelectSt};
+    use paste::paste;
+
+    macro_rules! implt {
+    ($([$ty:ident, $part:literal],)*) => {
+        #[allow(unused)]
+        impl
+            <S, $($ty,)* >
+        GetOneWorker<S>
+        for
+            ($($ty,)*)
+        where
+            S: QueryBuilder,
+            $($ty: Sync + Send + GetOneWorker<S>,)*
+        {
+            type Output = ($($ty::Output,)*);
+            type Inner = ($($ty::Inner,)*);
+            fn on_select(&self, data: &mut Self::Inner, st: &mut SelectSt<S>) {
+                $(paste!(self.$part.on_select(&mut data.$part, st));)*
+            }
+            fn from_row(&self, data: &mut Self::Inner, row: &S::Row) {
+                $(paste!(self.$part.from_row(&mut data.$part, row));)*
+            }
+            fn sub_op<'a>(
+                &'a self,
+                data: &'a mut Self::Inner,
+                pool: Pool<S>,
+            ) -> impl std::future::Future<Output = ()> + Send {
+                async move { 
+                    $(
+                        paste!(self.$part.sub_op(
+                            &mut data.$part, pool.clone()
+                        ).await);
+                    )*
+                }
+            }
+            fn take(self, data: Self::Inner) -> Self::Output {
+                ($(paste!(self.$part.take(data.$part)),)*)
+            }
+        }
+    }
+    }
+
+    implt!();
+    implt!([R0, 0],);
+    implt!([R0, 0], [R1, 1],);
+}
+
+impl<S, C, L, F> SelectOne<S, C, L, F>
 where
     S: QueryBuilder,
     SelectSt<S>: Execute<S>,
     C: Collection<S>,
-    R: GetOneWorker<S> + Send + Sync,
-    Q: Filters<S, C>,
+    L: GetOneWorker<S> + Send + Sync,
+    F: Filters<S, C>,
     // sqlx gasim
     for<'c> &'c mut S::Connection: sqlx::Executor<'c, Database = S>,
     for<'e> i64: Encode<'e, S> + Type<S> + Decode<'e, S>,
-    str: ColumnIndex<S::Row>,
+    for<'e> &'e str: ColumnIndex<S::Row>,
 {
-    pub async fn exec_op(self, db: Pool<S>) -> Option<SelectOneOutput<C, R::Output>> {
+    pub async fn exec_op(self, db: Pool<S>) -> Option<SelectOneOutput<C, L::Output>> {
         let mut st = stmt::SelectSt::init(C::table_name().to_string());
 
         // st.select_aliased(C::table_name().to_string(), "id".to_string(), "local_id");
@@ -83,7 +136,7 @@ where
         C::on_select(&mut st);
         self.filters.on_select(&mut st);
 
-        let mut worker_data = R::Inner::default();
+        let mut worker_data = L::Inner::default();
 
         self.links.on_select(&mut worker_data, &mut st);
 

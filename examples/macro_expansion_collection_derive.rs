@@ -23,7 +23,6 @@ const _: () = {
         }
     }
 
-
     #[cfg_attr(feature = "serde", derive(Deserialize))]
     pub struct TodoPartial {
         pub title: update<String>,

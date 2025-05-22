@@ -53,9 +53,9 @@ pub fn main(input: DeriveInput) -> TokenStream {
         main_derive.fields.iter().map(|m| m.name_scoped.clone()).collect::<Vec<_>>();
 
     ts.extend(quote!(
-        #[cfg_attr(feature = "serde", derive(Deserialize))]
+        #[cfg_attr(feature = "serde", derive(::claw_ql::prelude::derive_collection::Deserialize))]
         pub struct #partial_ident {
-            #(pub #m_name: update<#m_ty>,)*
+            #(pub #m_name: ::claw_ql::prelude::derive_collection::update<#m_ty>,)*
         }
     ));
 
@@ -75,7 +75,7 @@ pub fn main(input: DeriveInput) -> TokenStream {
             fn on_select(stmt: &mut SelectSt<S>)
             {
                 #(
-                   stmt.select(stringify!(#m_name_scoped));
+                   stmt.select(col(stringify!(#m_name_scoped)));
                 )*
             }
 

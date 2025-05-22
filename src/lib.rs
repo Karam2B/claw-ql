@@ -7,6 +7,9 @@ pub mod operations;
 pub mod quick_query;
 pub mod statements;
 pub mod update;
+pub mod macros {
+    pub use claw_ql_macros::*;  
+}
 
 pub mod prelude;
 
