@@ -1,11 +1,15 @@
-use sqlx::{ColumnIndex, Decode, Row, prelude::Type};
+use sqlx::{ColumnIndex, Decode, Executor, Row, Sqlite, prelude::Type};
 use std::marker::PhantomData;
 
 use sqlx::Pool;
 
 use crate::{
     QueryBuilder,
-    operations::{SimpleOutput, collections::Collection, select_one::GetOneWorker},
+    operations::{
+        SimpleOutput,
+        collections::{Collection, OnMigrate},
+        select_one::GetOneWorker,
+    },
     prelude::{col, join, stmt::SelectSt},
 };
 
@@ -19,6 +23,36 @@ pub struct OptionalToMany<F, T> {
 pub struct OptionalToManyInverse<F, T> {
     pub foriegn_key: String,
     pub _pd: PhantomData<(F, T)>,
+}
+
+// todo add generic implementaion
+impl<From, To> OnMigrate<Sqlite> for OptionalToMany<From, To>
+where
+    From: Collection<Sqlite>,
+    To: Collection<Sqlite>,
+{
+    async fn custom_migration<'e>(
+        self,
+        exec: impl for<'q> Executor<'q, Database = Sqlite> + Clone,
+    ) {
+
+        sqlx::query(&format!(
+            "
+ALTER TABLE {from_table_name} 
+ADD COLUMN {col_name} INT
+REFERENCES {to_table_name} (id)
+{dio}
+ON DELETE SET NULL;
+",
+        from_table_name = From::table_name(),
+        to_table_name = To::table_name(),
+        col_name = format!("{}_id", To::table_name().to_lowercase()),
+            dio = ""
+        ))
+        .execute(exec.clone())
+        .await
+        .unwrap();
+    }
 }
 
 impl<S, From, To> GetOneWorker<S> for OptionalToMany<From, To>

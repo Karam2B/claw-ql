@@ -1,8 +1,9 @@
 use claw_ql::{
+    migration::{migrate, migrate_relation},
     prelude::Execute,
-    statements::create_table_st::{CreateTableSt, header},
+    statements::create_table_st::{header, CreateTableSt},
 };
-use claw_ql_macros::Collection;
+use claw_ql_macros::{relation, Collection};
 use sqlx::{Sqlite, SqlitePool};
 
 #[derive(Collection, Debug, PartialEq)]
@@ -22,32 +23,19 @@ pub struct Tag {
     pub title: String,
 }
 
-mod migrate {
-    use claw_ql::execute::Execute;
-    use claw_ql::{
-        QueryBuilder,
-        operations::collections::Collection,
-        statements::create_table_st::{CreateTableSt, header},
-    };
-    use sqlx::Executor;
+relation!(optional_to_many Todo Category);
 
-    pub async fn migrate<S: QueryBuilder, C: Collection<S>>(
-        exec: impl for<'q> Executor<'q, Database = S>,
-    ) where
-        CreateTableSt<S>: Execute<S>,
-    {
-        let mut c = CreateTableSt::<S>::init(C::table_name(), header::create);
-        C::on_migrate(&mut c);
-
-        c.execute(exec).await.unwrap();
-    }
-}
-
+#[cfg(test)]
 #[tokio::test]
 async fn main() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
-    migrate::migrate::<_, Todo>(&pool).await;
-    migrate::migrate::<_, Category>(&pool).await;
-    migrate::migrate::<_, Tag>(&pool).await;
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .init();
+
+    migrate::<_, Todo>(&pool).await;
+    migrate::<_, Category>(&pool).await;
+    migrate::<_, Tag>(&pool).await;
+    migrate_relation::<_, Todo, Category>(&pool).await;
 }
