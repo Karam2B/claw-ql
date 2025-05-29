@@ -1,15 +1,15 @@
 use sqlx::Database;
 
 pub mod build_tuple;
-pub mod links;
 pub mod execute;
 pub mod expressions;
+pub mod links;
 pub mod operations;
 pub mod quick_query;
 pub mod statements;
 pub mod update;
 pub mod macros {
-    pub use claw_ql_macros::*;  
+    pub use claw_ql_macros::*;
 }
 
 pub mod prelude;
@@ -37,6 +37,10 @@ pub trait QueryBuilder: Database {
         T: 'static + Send,
         Self: Accept<T>;
 }
+
+#[cfg(test)]
+#[test]
+fn test() {}
 
 pub trait IdentSafety {
     #[track_caller]
@@ -96,7 +100,65 @@ where
 }
 
 pub trait BindItem<S: QueryBuilder> {
-    fn bind_item(self, ctx: &mut S::Context1) -> impl FnOnce(&mut S::Context2) -> String + 'static;
+    fn bind_item(
+        self,
+        ctx: &mut S::Context1,
+    ) -> impl FnOnce(&mut S::Context2) -> String + 'static + use<Self, S>;
+}
+
+pub trait ColumPositionConstraint {}
+
+#[rustfmt::skip]
+mod impl_tuples {
+    use crate::{BindItem, ColumPositionConstraint, QueryBuilder};
+    use paste::paste;
+
+        macro_rules! implt {
+        ($([$ty:ident, $part:literal],)*) => {
+    impl<S: QueryBuilder, $($ty,)*> BindItem<S> for ($($ty,)*)
+    where
+        $($ty: BindItem<S>,)*
+    {
+        fn bind_item(
+            self,
+            s: &mut <S as QueryBuilder>::Context1,
+        ) -> impl FnOnce(&mut <S as QueryBuilder>::Context2) -> String + 'static + 
+            use<$($ty,)* S>
+        {
+            let tuple = (
+                $(paste!(self.$part.bind_item(s)),)*
+            );
+            |ctx| {
+                let mut str = String::new();
+
+                $(
+                str.push_str(&paste!(tuple.$part(ctx)));
+                str.push(' ');
+                )*
+
+                str.pop().unwrap();
+
+                str
+            }
+        }
+    }
+        }} // end of macro
+
+    impl<S: QueryBuilder> BindItem<S> for () {
+        fn bind_item(
+            self,
+            _: &mut <S as QueryBuilder>::Context1,
+        ) -> impl FnOnce(&mut <S as QueryBuilder>::Context2) -> String + 'static + use<S> {
+            |_| "".to_string()
+        }
+    }
+
+    implt!([R0, 0],);
+    implt!([R0, 0], [R1, 1],);
+
+    impl ColumPositionConstraint for () {}
+    impl<T0> ColumPositionConstraint for (T0,) {}
+    impl<T0, T1> ColumPositionConstraint for (T0, T1) {}
 }
 
 pub trait Accept<This>: QueryBuilder + Send {

@@ -24,11 +24,10 @@ pub struct Tag {
 relation!(optional_to_many Todo Category);
 // relation!(Todo optional_toi_many Catproc-macro map is missing error entry for crate Crate(Id(401e))egory);
 
+
 #[tokio::main]
 async fn main() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-
-    panic!();
 
     sqlx::query(
         r#"

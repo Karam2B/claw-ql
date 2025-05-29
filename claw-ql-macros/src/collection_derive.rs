@@ -61,16 +61,27 @@ pub fn main(input: DeriveInput) -> TokenStream {
 
     ts.extend(quote!( const _: () = {
         use ::claw_ql::prelude::macro_derive_collection::*;
+        use ::clau_ql::statements::create_table_st::CreateTableSt;
 
         impl<S> Collection<S> for #d_ident 
             where 
-        S: QueryBuilder,
+        S: QueryBuilder + DatabaseDefaultPrimaryKey,
         for<'s> &'s str: ColumnIndex<<S as Database>::Row>,
         #(
             #m_ty: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
         )*
         {
             type PartailCollection = #partial_ident;
+
+            fn on_migrate(stmt: &mut CreatTableSt<S>) {
+                stmt.column("id", primary_key::<S>());
+                #(
+                stmt.column(
+                    stringify!(#m_name),
+                    col_type_check_if_null::<#m_ty>(),
+                );
+                )*
+            }
 
             fn on_select(stmt: &mut SelectSt<S>)
             {

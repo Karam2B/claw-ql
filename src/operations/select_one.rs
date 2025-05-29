@@ -27,15 +27,15 @@ pub trait GetOneWorker<S: QueryBuilder>: Sync + Send {
     fn take(self, data: Self::Inner) -> Self::Output;
 }
 
-pub fn get_one<S, Base>(_: PhantomData<Base>) -> SelectOne<S, Base, (), ()> {
-    SelectOne {
+pub fn get_one<S, Base>(_: PhantomData<Base>) -> GetOne<S, Base, (), ()> {
+    GetOne {
         _pd: PhantomData,
         links: (),
         filters: (),
     }
 }
 
-pub struct SelectOne<S, C, L, F> {
+pub struct GetOne<S, C, L, F> {
     links: L,
     filters: F,
     _pd: PhantomData<(S, C)>,
@@ -48,7 +48,7 @@ pub struct SelectOneOutput<C, D> {
     pub links: D,
 }
 
-impl<S, Base, L, F> SelectOne<S, Base, L, F>
+impl<S, Base, L, F> GetOne<S, Base, L, F>
 where
     S: QueryBuilder,
     L: BuildTuple,
@@ -57,31 +57,31 @@ where
     pub fn relation<To>(
         self,
         to: PhantomData<To>,
-    ) -> SelectOne<S, Base, L::Bigger<<Relation<To> as LinkData<Base>>::Spec>, F>
+    ) -> GetOne<S, Base, L::Bigger<<Relation<To> as LinkData<Base>>::Spec>, F>
     where
         Relation<To>: LinkData<Base, Spec: GetOneWorker<S> + Send>,
     {
-        SelectOne {
+        GetOne {
             links: self.links.into_bigger(Relation(to).spec()),
             filters: self.filters,
             _pd: PhantomData,
         }
     }
-    pub fn link<D>(self, ty: D) -> SelectOne<S, Base, L::Bigger<D::Spec>, F>
+    pub fn link<D>(self, ty: D) -> GetOne<S, Base, L::Bigger<D::Spec>, F>
     where
         D: LinkData<Base, Spec: GetOneWorker<S> + Send>,
     {
-        SelectOne {
+        GetOne {
             links: self.links.into_bigger(ty.spec()),
             filters: self.filters,
             _pd: PhantomData,
         }
     }
-    pub fn filter<N>(self, ty: N) -> SelectOne<S, N, L, F::Bigger<N>>
+    pub fn filter<N>(self, ty: N) -> GetOne<S, N, L, F::Bigger<N>>
     where
         N: Filters<S, Base>,
     {
-        SelectOne {
+        GetOne {
             links: self.links,
             filters: self.filters.into_bigger(ty),
             _pd: PhantomData,
@@ -144,7 +144,7 @@ mod get_one_worker_tuple_impls {
     implt!([R0, 0], [R1, 1],);
 }
 
-impl<S, C, L, F> SelectOne<S, C, L, F>
+impl<S, C, L, F> GetOne<S, C, L, F>
 where
     S: QueryBuilder,
     SelectSt<S>: Execute<S>,

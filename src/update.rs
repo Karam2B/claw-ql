@@ -4,7 +4,7 @@
 /// implies intent to set a value or keep it.
 /// update::set(None) means to set a value to null
 ///
-/// there is no way arround having different implementation
+/// there is no way around having different implementation
 /// for serde trait, because Option<Option<T>> does not know
 /// the difference between `{}` and `{val:null}` or might confuse
 /// Some(None) with None
@@ -104,7 +104,7 @@ mod impl_deserialize {
         {
             match T::deserialize(deserializer) {
                 Ok(ok) => Ok(update::set(ok)),
-                Err(err) => Err(()),
+                Err(_err) => Err(()),
             }
         }
     }

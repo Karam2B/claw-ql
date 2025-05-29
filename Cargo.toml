@@ -16,9 +16,11 @@ serde = { version = "1.0.203", optional = true }
 [dev-dependencies]
 tokio = { version = "1.37.0", features = ["full"] }
 pretty_assertions = "1"
+sqlx = { version = "0.8.5", features = ["runtime-tokio"] }
 
 [features]
 default = ["sqlite", "serde"]
+waiting_min_specialization = []
 serde = ["dep:serde_json", "dep:serde"]
 trace = ["dep:tracing"]
 sqlite = ["sqlx/sqlite"]
