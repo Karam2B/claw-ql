@@ -11,7 +11,8 @@ pub struct Col<IS = ()> {
 
 impl<IS: IdentSafety> AcceptNoneBind for Col<IS> {
     type IdentSafety = IS;
-    fn accept(self, _: Unsateble) -> String {
+    fn accept(self, _: &IS, _: Unsateble) -> String {
+
         format!(
             "{}{}{}",
             match self.table {
@@ -34,8 +35,12 @@ pub struct ColEq<T, IS = ()> {
 }
 
 impl<IS: IdentSafety> Col<IS> {
+    pub fn table(mut self, table: &str) -> Self {
+        self.alias = Some(table.to_string());
+        self
+    }
     pub fn alias(mut self, alias: &str) -> Self {
-        self.table = Some(alias.to_string());
+        self.alias = Some(alias.to_string());
         self
     }
     pub fn eq<T1>(self, value: T1) -> ColEq<T1, IS> {

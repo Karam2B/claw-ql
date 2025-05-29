@@ -53,14 +53,14 @@ pub fn main(input: DeriveInput) -> TokenStream {
         main_derive.fields.iter().map(|m| m.name_scoped.clone()).collect::<Vec<_>>();
 
     ts.extend(quote!(
-        #[cfg_attr(feature = "serde", derive(::claw_ql::prelude::derive_collection::Deserialize))]
+        #[cfg_attr(feature = "serde", derive(::claw_ql::prelude::macro_derive_collection::Deserialize))]
         pub struct #partial_ident {
-            #(pub #m_name: ::claw_ql::prelude::derive_collection::update<#m_ty>,)*
+            #(pub #m_name: ::claw_ql::prelude::macro_derive_collection::update<#m_ty>,)*
         }
     ));
 
     ts.extend(quote!( const _: () = {
-        use ::claw_ql::prelude::derive_collection::*;
+        use ::claw_ql::prelude::macro_derive_collection::*;
 
         impl<S> Collection<S> for #d_ident 
             where 

@@ -1,6 +1,7 @@
 use sqlx::Database;
 
 pub mod build_tuple;
+pub mod links;
 pub mod execute;
 pub mod expressions;
 pub mod operations;
@@ -63,7 +64,7 @@ pub(crate) mod unstable {
 /// fully implemented or understood so far
 pub trait AcceptNoneBind {
     type IdentSafety: IdentSafety;
-    fn accept(self, _: unstable::Unsateble) -> String;
+    fn accept(self, is: &Self::IdentSafety, _: unstable::Unsateble) -> String;
 }
 
 // impl AcceptNoneBind for &str {

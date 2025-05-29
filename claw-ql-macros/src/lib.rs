@@ -19,15 +19,15 @@ pub fn collection(input: TokenStream) -> TokenStream {
     collection_derive::main(derive).into()
 }
 
-// #[proc_macro]
-// #[proc_macro_error]
-// pub fn relation(input: TokenStream) -> TokenStream {
-//     let input = match syn::parse::<relation::Input>(input) {
-//         Ok(data) => data,
-//         Err(err) => {
-//             return err.to_compile_error().into();
-//         }
-//     };
-//
-//     relation::main(input).into()
-// }
+#[proc_macro]
+#[proc_macro_error]
+pub fn relation(input: TokenStream) -> TokenStream {
+    let input = match syn::parse::<relation::Input>(input) {
+        Ok(data) => data,
+        Err(err) => {
+            return err.to_compile_error().into();
+        }
+    };
+
+    relation::main(input).into()
+}

@@ -110,30 +110,34 @@ pub fn optional_to_many(rest: TwoIdent) -> TokenStream {
     let foriegn_key = format!("{}_id", to.to_string().to_lowercase());
     quote! {
         const _: () = {
-            use ::cms_for_rust::macro_prelude::relation_macro::*;
-            impl Linked<#to> for #from {
-                type Spec = OptionalToMany;
-                fn spec() -> Self::Spec {
+            use ::claw_ql::prelude::macro_relation::*;
+            impl LinkData<#to> for Relation<#from> {
+                type Spec = OptionalToMany<#to, #from>;
+                fn spec(self) -> Self::Spec {
                     OptionalToMany {
                         foriegn_key: #foriegn_key.to_string(),
+                        _pd: PhantomData
                     }
                 }
             }
-            impl Linked<#from> for #to {
-                type Spec = OptionalToManyInverse;
-                fn spec() -> Self::Spec {
-                    OptionalToManyInverse
-                }
-            }
-            submit! {
-                SubmitDynRelation {
-                    obj: || {
-                        Arc::new(
-                            OptionalToManyDynamic::<#from, #to>::new()
-                        )
+            impl LinkData<#from> for Relation<#to> {
+                type Spec = OptionalToManyInverse<#from, #to>;
+                fn spec(self) -> Self::Spec {
+                    OptionalToManyInverse{
+                        foriegn_key: #foriegn_key.to_string(),
+                        _pd: PhantomData
                     }
                 }
             }
+            // submit! {
+            //     SubmitDynRelation {
+            //         obj: || {
+            //             Arc::new(
+            //                 OptionalToManyDynamic::<#from, #to>::new()
+            //             )
+            //         }
+            //     }
+            // }
             // // todo!()
             // submit! {
             //     SubmitDynRelation {

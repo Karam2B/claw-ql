@@ -8,9 +8,24 @@ use crate::{
     QueryBuilder,
     build_tuple::BuildTuple,
     operations::collections::{Collection, Filters},
-    prelude::normal::stmt,
+    prelude::stmt,
     statements::select_st::SelectSt,
 };
+
+use super::{LinkData, Relation};
+
+pub trait GetOneWorker<S: QueryBuilder>: Sync + Send {
+    type Inner: Default + Send + Sync;
+    type Output;
+    fn on_select(&self, data: &mut Self::Inner, st: &mut SelectSt<S>);
+    fn from_row(&self, data: &mut Self::Inner, row: &S::Row);
+    fn sub_op<'this>(
+        &'this self,
+        data: &'this mut Self::Inner,
+        pool: Pool<S>,
+    ) -> impl Future<Output = ()> + Send + 'this;
+    fn take(self, data: Self::Inner) -> Self::Output;
+}
 
 pub fn get_one<S, Base>(_: PhantomData<Base>) -> SelectOne<S, Base, (), ()> {
     SelectOne {
@@ -33,12 +48,36 @@ pub struct SelectOneOutput<C, D> {
     pub links: D,
 }
 
-impl<S, Base, L, Q> SelectOne<S, Base, L, Q>
+impl<S, Base, L, F> SelectOne<S, Base, L, F>
 where
+    S: QueryBuilder,
     L: BuildTuple,
-    Q: BuildTuple,
+    F: BuildTuple,
 {
-    pub fn filter<N>(self, ty: N) -> SelectOne<S, N, L, Q::Bigger<N>>
+    pub fn relation<To>(
+        self,
+        to: PhantomData<To>,
+    ) -> SelectOne<S, Base, L::Bigger<<Relation<To> as LinkData<Base>>::Spec>, F>
+    where
+        Relation<To>: LinkData<Base, Spec: GetOneWorker<S> + Send>,
+    {
+        SelectOne {
+            links: self.links.into_bigger(Relation(to).spec()),
+            filters: self.filters,
+            _pd: PhantomData,
+        }
+    }
+    pub fn link<D>(self, ty: D) -> SelectOne<S, Base, L::Bigger<D::Spec>, F>
+    where
+        D: LinkData<Base, Spec: GetOneWorker<S> + Send>,
+    {
+        SelectOne {
+            links: self.links.into_bigger(ty.spec()),
+            filters: self.filters,
+            _pd: PhantomData,
+        }
+    }
+    pub fn filter<N>(self, ty: N) -> SelectOne<S, N, L, F::Bigger<N>>
     where
         N: Filters<S, Base>,
     {
@@ -50,18 +89,7 @@ where
     }
 }
 
-pub trait GetOneWorker<S: QueryBuilder>: Sync + Send {
-    type Inner: Default + Send + Sync;
-    type Output;
-    fn on_select(&self, data: &mut Self::Inner, st: &mut SelectSt<S>);
-    fn from_row(&self, data: &mut Self::Inner, row: &S::Row);
-    fn sub_op<'this>(
-        &'this self,
-        data: &'this mut Self::Inner,
-        pool: Pool<S>,
-    ) -> impl Future<Output = ()> + Send + 'this;
-    fn take(self, data: Self::Inner) -> Self::Output;
-}
+
 
 #[rustfmt::skip]
 mod get_one_worker_tuple_impls {

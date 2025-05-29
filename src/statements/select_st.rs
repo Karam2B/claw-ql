@@ -151,7 +151,8 @@ impl<S: QueryBuilder> SelectSt<S> {
     where
         T: AcceptNoneBind<IdentSafety = ()>,
     {
-        self.select_list.push((None, item.accept(Unsateble), None));
+        self.select_list
+            .push((None, item.accept(&self.ident_safety, Unsateble), None));
     }
 
     #[track_caller]
