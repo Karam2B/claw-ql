@@ -4,6 +4,8 @@ pub mod build_tuple;
 pub mod execute;
 pub mod expressions;
 pub mod links;
+pub mod migration;
+pub mod collections;
 pub mod operations;
 pub mod quick_query;
 pub mod statements;
