@@ -1,10 +1,7 @@
-use claw_ql::{
-    migration::{migrate, migrate_relation},
-    prelude::Execute,
-    statements::create_table_st::{header, CreateTableSt},
-};
-use claw_ql_macros::{relation, Collection};
-use sqlx::{Sqlite, SqlitePool};
+use claw_ql::migration::{migrate, migrate_relation};
+use claw_ql_macros::{Collection, relation};
+use sqlx::SqlitePool;
+use tracing::Level;
 
 #[derive(Collection, Debug, PartialEq)]
 pub struct Todo {
@@ -25,14 +22,13 @@ pub struct Tag {
 
 relation!(optional_to_many Todo Category);
 
-#[cfg(test)]
 #[tokio::test]
 async fn main() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .init();
+    tracing_subscriber::fmt()
+        .with_max_level(Level::DEBUG)
+        .init();
 
     migrate::<_, Todo>(&pool).await;
     migrate::<_, Category>(&pool).await;

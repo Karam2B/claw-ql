@@ -8,9 +8,10 @@
 /// for serde trait, because Option<Option<T>> does not know
 /// the difference between `{}` and `{val:null}` or might confuse
 /// Some(None) with None
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[derive(Default, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 #[allow(non_camel_case_types)]
 pub enum update<T> {
+    #[default]
     keep,
     set(T),
 }

@@ -54,6 +54,7 @@ pub fn main(input: DeriveInput) -> TokenStream {
 
     ts.extend(quote!(
         #[cfg_attr(feature = "serde", derive(::claw_ql::prelude::macro_derive_collection::Deserialize))]
+        #[derive(Default, Debug)]
         pub struct #partial_ident {
             #(pub #m_name: ::claw_ql::prelude::macro_derive_collection::update<#m_ty>,)*
         }
