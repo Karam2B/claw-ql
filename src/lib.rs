@@ -1,11 +1,14 @@
+use std::marker::PhantomData;
+
 use sqlx::Database;
 
 pub mod build_tuple;
+pub mod collections;
 pub mod execute;
 pub mod expressions;
 pub mod links;
 pub mod migration;
-pub mod collections;
+
 pub mod operations;
 pub mod quick_query;
 pub mod statements;
@@ -15,6 +18,7 @@ pub mod macros {
 }
 
 pub mod prelude;
+
 
 pub trait QueryBuilder: Database {
     type Fragment;
@@ -177,4 +181,19 @@ where
 {
     const LEN: usize;
     fn into_arguments(self, argument: &mut DB::Arguments<'q>);
+}
+
+pub trait IntoPhantom<T> {
+    fn into_pd(self, _: PhantomData<T>) -> T;
+}
+
+impl<From_, Into> IntoPhantom<Into> for From_
+where
+    Into: From<From_>,
+   
+{
+    #[inline]
+    fn into_pd(self, _: PhantomData<Into>) -> Into {
+        self.into()
+    }
 }

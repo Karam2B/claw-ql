@@ -4,8 +4,6 @@ use serde::Serialize;
 
 pub mod collections;
 pub mod select_one;
-#[cfg(feature = "serde")]
-pub mod dynamic_client;
 
 pub trait LinkData<From> {
     type Spec;
@@ -26,17 +24,3 @@ pub struct IdOutput<C> {
     #[serde(skip)]
     pub _pd: PhantomData<C>,
 }
-
-// impl<From, To> LinkData<From> for Relation<To>
-// where
-//     From: Related<To>,
-// {
-//     type Worker =
-//         RelationWorker<From::Spec, From, To>;
-//     fn init(self) -> Self::Worker {
-//         RelationWorker {
-//             rel_spec: From::spec(),
-//             _pd: PhantomData,
-//         }
-//     }
-// }

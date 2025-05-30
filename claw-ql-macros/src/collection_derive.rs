@@ -38,38 +38,38 @@ pub fn main(input: DeriveInput) -> TokenStream {
         }
     }
 
-    let d_ident = &input.ident;
-    let partial_ident = Ident::new(&format!("{}Partial", d_ident), proc_macro2::Span::call_site());
+    let table_name_camel_case = &input.ident;
+    let partial_ident = Ident::new(&format!("{}Partial", table_name_camel_case), proc_macro2::Span::call_site());
 
     let mut main_derive = MainDerive { 
         fields: vec![],
-        table_lower_case: d_ident.to_string().to_lowercase(),
+        table_lower_case: table_name_camel_case.to_string().to_lowercase(),
     };
     main_derive.visit_derive_input(&input);
 
-    let m_ty = main_derive.fields.iter().map(|m| m.ty.clone()).collect::<Vec<_>>();
-    let m_name = main_derive.fields.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
-    let m_name_scoped =
+    let member_ty = main_derive.fields.iter().map(|m| m.ty.clone()).collect::<Vec<_>>();
+    let member_name = main_derive.fields.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
+    let member_name_scoped =
         main_derive.fields.iter().map(|m| m.name_scoped.clone()).collect::<Vec<_>>();
 
     ts.extend(quote!(
         #[cfg_attr(feature = "serde", derive(::claw_ql::prelude::macro_derive_collection::Deserialize))]
         #[derive(Default, Debug)]
         pub struct #partial_ident {
-            #(pub #m_name: ::claw_ql::prelude::macro_derive_collection::update<#m_ty>,)*
+            #(pub #member_name: ::claw_ql::prelude::macro_derive_collection::update<#member_ty>,)*
         }
     ));
 
     ts.extend(quote!( const _: () = {
         use ::claw_ql::prelude::macro_derive_collection::*;
 
-        impl<S> Collection<S> for #d_ident 
+        impl<S> Collection<S> for #table_name_camel_case 
             where 
         S: QueryBuilder + DatabaseDefaultPrimaryKey,
         for<'s> &'s str: ColumnIndex<<S as Database>::Row>,
         <S as DatabaseDefaultPrimaryKey>::KeyType: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
         #(
-            #m_ty: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
+            #member_ty: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
         )*
         {
             type PartailCollection = #partial_ident;
@@ -78,8 +78,8 @@ pub fn main(input: DeriveInput) -> TokenStream {
                 stmt.column("id", primary_key::<S>());
                 #(
                 stmt.column(
-                    stringify!(#m_name),
-                    col_type_check_if_null::<#m_ty>(),
+                    stringify!(#member_name),
+                    col_type_check_if_null::<#member_ty>(),
                 );
                 )*
             }
@@ -87,14 +87,17 @@ pub fn main(input: DeriveInput) -> TokenStream {
             fn on_select(stmt: &mut SelectSt<S>)
             {
                 #(
-                   stmt.select(col(stringify!(#m_name_scoped)));
+                   stmt.select(col(stringify!(#member_name)).
+                    table(stringify!(#table_name_camel_case)).
+                    alias(#member_name_scoped)
+                   );
                 )*
             }
 
             fn members() -> &'static [&'static str] {
                  &[
                      #(
-                         stringify!(#m_name),
+                         stringify!(#member_name),
                      )*
                  ]
             }
@@ -102,13 +105,13 @@ pub fn main(input: DeriveInput) -> TokenStream {
             fn members_scoped() -> &'static [&'static str] {
                  &[
                      #(
-                         #m_name_scoped,
+                         #member_name_scoped,
                      )*
                  ]
             }
         
             fn table_name() -> &'static str {
-                stringify!(#d_ident)
+                stringify!(#table_name_camel_case)
             }
         
 
@@ -116,14 +119,14 @@ pub fn main(input: DeriveInput) -> TokenStream {
             fn from_row_noscope(row: &<S as Database>::Row) -> Self
             {
                 Self { #(
-                    #m_name: row.get(stringify!(#m_name)),
+                    #member_name: row.get(stringify!(#member_name)),
                 )*}
             }
         
             fn from_row_scoped(row: &<S as Database>::Row) -> Self
             {
                 Self { #(
-                        #m_name: row.get(#m_name_scoped),
+                        #member_name: row.get(#member_name_scoped),
                 )*}
             }
         

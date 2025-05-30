@@ -20,7 +20,7 @@ impl<IS: IdentSafety> AcceptNoneBind for Col<IS> {
             },
             self.col,
             match self.alias {
-                Some(alias) => format!("AS {alias}"),
+                Some(alias) => format!(" AS {alias}"),
                 None => "".to_string(),
             }
         )
@@ -35,7 +35,7 @@ pub struct ColEq<T, IS = ()> {
 
 impl<IS: IdentSafety> Col<IS> {
     pub fn table(mut self, table: &str) -> Self {
-        self.alias = Some(table.to_string());
+        self.table = Some(table.to_string());
         self
     }
     pub fn alias(mut self, alias: &str) -> Self {

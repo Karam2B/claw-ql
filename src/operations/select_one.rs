@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::execute::Execute;
+use crate::{execute::Execute, prelude::col};
 use serde::Serialize;
 use sqlx::{ColumnIndex, Decode, Encode, Pool, Row, Type};
 
@@ -89,8 +89,6 @@ where
     }
 }
 
-
-
 #[rustfmt::skip]
 mod get_one_worker_tuple_impls {
     use sqlx::Pool;
@@ -159,7 +157,12 @@ where
     pub async fn exec_op(self, db: Pool<S>) -> Option<SelectOneOutput<C, L::Output>> {
         let mut st = stmt::SelectSt::init(C::table_name().to_string());
 
-        // st.select_aliased(C::table_name().to_string(), "id".to_string(), "local_id");
+        #[rustfmt::skip]
+        st.select(
+            col("id").
+            table(C::table_name()).
+            alias("local_id")
+        );
 
         C::on_select(&mut st);
         self.filters.on_select(&mut st);
@@ -171,7 +174,7 @@ where
         let res = st
             .fetch_optional(&db, |r| {
                 let id: i64 = r.get("local_id");
-                let attr = C::from_row_noscope(&r);
+                let attr = C::from_row_scoped(&r);
                 self.links.from_row(&mut worker_data, &r);
                 Ok(SelectOneOutput {
                     id,

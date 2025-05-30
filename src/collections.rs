@@ -27,7 +27,6 @@ pub trait Collection<Q>: Sized + Send + Sync {
     fn members() -> &'static [&'static str];
     fn members_scoped() -> &'static [&'static str];
     fn table_name() -> &'static str;
-
     fn from_row_noscope(row: &Q::Row) -> Self
     where
         Q: Database;

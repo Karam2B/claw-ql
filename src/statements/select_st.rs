@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use crate::{Accept, AcceptNoneBind, BindItem, Buildable, QueryBuilder, unstable::Unsateble};
 
 pub struct SelectSt<S: QueryBuilder> {
-    pub(crate) select_list: Vec<(Option<String>, String, Option<&'static str>)>,
+    pub(crate) select_list: Vec<String>,
     pub(crate) where_clause: Vec<S::Fragment>,
     pub(crate) joins: Vec<join>,
     pub(crate) order_by: Vec<(String, bool)>,
@@ -55,15 +55,7 @@ impl<S: QueryBuilder> Buildable for SelectSt<S> {
                 if index != 0 {
                     str.push_str(", ");
                 }
-                if let Some(table) = item.0 {
-                    str.push_str(table.as_ref());
-                    str.push_str(".");
-                }
-                str.push_str(item.1.as_ref());
-                if let Some(alias) = item.2 {
-                    str.push_str(" AS ");
-                    str.push_str(alias);
-                }
+                str.push_str(item.as_ref());
             }
 
             str.push_str(" FROM ");
@@ -152,7 +144,7 @@ impl<S: QueryBuilder> SelectSt<S> {
         T: AcceptNoneBind<IdentSafety = ()>,
     {
         self.select_list
-            .push((None, item.accept(&self.ident_safety, Unsateble), None));
+            .push(item.accept(&self.ident_safety, Unsateble));
     }
 
     #[track_caller]
