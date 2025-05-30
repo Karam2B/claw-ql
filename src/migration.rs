@@ -10,25 +10,26 @@ use crate::{
 };
 use sqlx::Executor;
 
-pub async fn migrate_relation<S, C, T>(exec: impl for<'q> Executor<'q, Database = S> + Clone)
-where
+pub async fn migrate_relation<S, C, T>(
+    exec: impl for<'q> Executor<'q, Database = S> + Clone,
+    relation: Relation<C, T>,
+) where
     S: QueryBuilder,
     CreateTableSt<S>: Execute<S>,
-    C: Collection<S>,
-    Relation<T>: LinkData<C, Spec: OnMigrate<S>>,
+    PhantomData<C>: Collection<S>,
+    Relation<C, T>: LinkData<C, Spec: OnMigrate<S>>,
 {
-    let mut c = CreateTableSt::<S>::init(header::create, C::table_name());
-    C::on_migrate(&mut c);
-    let spec = Relation(PhantomData::<T>).spec();
+    let spec = relation.spec();
     spec.custom_migration(exec).await;
 }
 
 pub async fn migrate<S: QueryBuilder, C: Collection<S>>(
+    collection: C,
     exec: impl for<'q> Executor<'q, Database = S>,
 ) where
     CreateTableSt<S>: Execute<S>,
 {
-    let mut c = CreateTableSt::<S>::init(header::create, C::table_name());
-    C::on_migrate(&mut c);
+    let mut c = CreateTableSt::<S>::init(header::create, collection.table_name());
+    collection.on_migrate(&mut c);
     c.execute(exec).await.unwrap();
 }

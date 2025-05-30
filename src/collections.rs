@@ -11,7 +11,8 @@ use crate::{
 
 pub trait Collection<Q>: Sized + Send + Sync {
     type PartailCollection;
-    fn on_migrate(stmt: &mut CreateTableSt<Q>)
+    type Yeild;
+    fn on_migrate(&self, stmt: &mut CreateTableSt<Q>)
     where
         Q: QueryBuilder;
     // fn on_update(
@@ -20,17 +21,17 @@ pub trait Collection<Q>: Sized + Send + Sync {
     // ) -> Result<(), String>
     // where
     //     S: Database + SupportNamedBind;
-    fn on_select(stmt: &mut SelectSt<Q>)
+    fn on_select(&self, stmt: &mut SelectSt<Q>)
     where
         Q: QueryBuilder;
 
-    fn members() -> &'static [&'static str];
-    fn members_scoped() -> &'static [&'static str];
-    fn table_name() -> &'static str;
-    fn from_row_noscope(row: &Q::Row) -> Self
+    fn members(&self) -> &'static [&'static str];
+    fn members_scoped(&self) -> &'static [&'static str];
+    fn table_name(&self) -> &'static str;
+    fn from_row_noscope(&self, row: &Q::Row) -> Self::Yeild
     where
         Q: Database;
-    fn from_row_scoped(row: &Q::Row) -> Self
+    fn from_row_scoped(&self, row: &Q::Row) -> Self::Yeild
     where
         Q: Database;
 }
@@ -58,9 +59,9 @@ where
         S: QueryBuilder,
         for<'q> <S>::Arguments<'q>: IntoArguments<'q, S>,
     {
-        async {
-            let mut c = CreateTableSt::init(header::create, C::table_name());
-            C::on_migrate(&mut c);
+        async move {
+            let mut c = CreateTableSt::init(header::create, self.table_name());
+            self.on_migrate(&mut c);
             c.execute(exec).await.unwrap();
         }
     }

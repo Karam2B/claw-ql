@@ -16,9 +16,9 @@ pub mod update;
 pub mod macros {
     pub use claw_ql_macros::*;
 }
+pub mod schema;
 
 pub mod prelude;
-
 
 pub trait QueryBuilder: Database {
     type Fragment;
@@ -183,14 +183,13 @@ where
     fn into_arguments(self, argument: &mut DB::Arguments<'q>);
 }
 
-pub trait IntoPhantom<T> {
+pub trait IntoInferFromPhantom<T> {
     fn into_pd(self, _: PhantomData<T>) -> T;
 }
 
-impl<From_, Into> IntoPhantom<Into> for From_
+impl<From_, Into> IntoInferFromPhantom<Into> for From_
 where
     Into: From<From_>,
-   
 {
     #[inline]
     fn into_pd(self, _: PhantomData<Into>) -> Into {

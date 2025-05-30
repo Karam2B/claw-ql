@@ -63,7 +63,7 @@ pub fn main(input: DeriveInput) -> TokenStream {
     ts.extend(quote!( const _: () = {
         use ::claw_ql::prelude::macro_derive_collection::*;
 
-        impl<S> Collection<S> for #table_name_camel_case 
+        impl<S> Collection<S> for PhantomData<#table_name_camel_case> 
             where 
         S: QueryBuilder + DatabaseDefaultPrimaryKey,
         for<'s> &'s str: ColumnIndex<<S as Database>::Row>,
@@ -73,8 +73,9 @@ pub fn main(input: DeriveInput) -> TokenStream {
         )*
         {
             type PartailCollection = #partial_ident;
+            type Yeild = #table_name_camel_case;
 
-            fn on_migrate(stmt: &mut CreateTableSt<S>) {
+            fn on_migrate(&self, stmt: &mut CreateTableSt<S>) {
                 stmt.column("id", primary_key::<S>());
                 #(
                 stmt.column(
@@ -84,7 +85,7 @@ pub fn main(input: DeriveInput) -> TokenStream {
                 )*
             }
 
-            fn on_select(stmt: &mut SelectSt<S>)
+            fn on_select(&self, stmt: &mut SelectSt<S>)
             {
                 #(
                    stmt.select(col(stringify!(#member_name)).
@@ -94,7 +95,7 @@ pub fn main(input: DeriveInput) -> TokenStream {
                 )*
             }
 
-            fn members() -> &'static [&'static str] {
+            fn members(&self) -> &'static [&'static str] {
                  &[
                      #(
                          stringify!(#member_name),
@@ -102,7 +103,7 @@ pub fn main(input: DeriveInput) -> TokenStream {
                  ]
             }
         
-            fn members_scoped() -> &'static [&'static str] {
+            fn members_scoped(&self) -> &'static [&'static str] {
                  &[
                      #(
                          #member_name_scoped,
@@ -110,20 +111,20 @@ pub fn main(input: DeriveInput) -> TokenStream {
                  ]
             }
         
-            fn table_name() -> &'static str {
+            fn table_name(&self) -> &'static str {
                 stringify!(#table_name_camel_case)
             }
         
 
         
-            fn from_row_noscope(row: &<S as Database>::Row) -> Self
+            fn from_row_noscope(&self, row: &<S as Database>::Row) -> Self::Yeild
             {
                 Self { #(
                     #member_name: row.get(stringify!(#member_name)),
                 )*}
             }
         
-            fn from_row_scoped(row: &<S as Database>::Row) -> Self
+            fn from_row_scoped(&self, row: &<S as Database>::Row) -> Self::Yeild
             {
                 Self { #(
                         #member_name: row.get(#member_name_scoped),

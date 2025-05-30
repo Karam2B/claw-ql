@@ -57,12 +57,12 @@ where
     pub fn relation<To>(
         self,
         to: PhantomData<To>,
-    ) -> GetOne<S, Base, L::Bigger<<Relation<To> as LinkData<Base>>::Spec>, F>
+    ) -> GetOne<S, Base, L::Bigger<<Relation<Base, To> as LinkData<Base>>::Spec>, F>
     where
-        Relation<To>: LinkData<Base, Spec: GetOneWorker<S> + Send>,
+        Relation<Base, To>: LinkData<Base, Spec: GetOneWorker<S> + Send>,
     {
         GetOne {
-            links: self.links.into_bigger(Relation(to).spec()),
+            links: self.links.into_bigger(Relation{ from: PhantomData, to }.spec()),
             filters: self.filters,
             _pd: PhantomData,
         }
