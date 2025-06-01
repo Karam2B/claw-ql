@@ -7,12 +7,12 @@ pub mod select_one;
 #[cfg(feature = "serde")]
 pub mod dynamic_client;
 
-pub trait LinkData<From> {
+pub trait LinkData<B> {
     type Spec;
     fn spec(self) -> Self::Spec;
 }
 
-pub struct Relation<To>(pub(crate) PhantomData<To>);
+pub struct Relation<T>(pub(crate) PhantomData<T>);
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SimpleOutput<C> {

@@ -16,7 +16,7 @@ pub struct CreateTableSt<S: QueryBuilder> {
 
 #[allow(non_upper_case_globals)]
 pub mod header {
-    pub const create: &'static str = "CREATE TABLE";
+    pub const create: &'static str = "CREATE";
     pub const create_temp: &'static str = "CREATE TEMP";
     pub const create_temp_if_not_exists: &'static str = "CREATE TEMP IF NOT EXISTS";
     pub const create_table_if_not_exists: &'static str = "CREATE TABLE IF NOT EXISTS";

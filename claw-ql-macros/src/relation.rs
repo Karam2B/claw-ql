@@ -112,18 +112,18 @@ pub fn optional_to_many(rest: TwoIdent) -> TokenStream {
         const _: () = {
             use ::claw_ql::prelude::macro_relation::*;
             impl LinkData<#to> for Relation<#from> {
-                type Spec = OptionalToManyInverse<#to, #from>;
+                type Spec = OptionalToMany<#to, #from>;
                 fn spec(self) -> Self::Spec {
-                    OptionalToManyInverse {
+                    OptionalToMany {
                         foriegn_key: #foriegn_key.to_string(),
                         _pd: PhantomData
                     }
                 }
             }
             impl LinkData<#from> for Relation<#to> {
-                type Spec = OptionalToMany<#from, #to>;
+                type Spec = OptionalToManyInverse<#from, #to>;
                 fn spec(self) -> Self::Spec {
-                    OptionalToMany {
+                    OptionalToManyInverse{
                         foriegn_key: #foriegn_key.to_string(),
                         _pd: PhantomData
                     }
