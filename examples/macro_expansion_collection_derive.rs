@@ -8,21 +8,6 @@ pub struct Todo {
 const _: () = {
     use claw_ql::prelude::macro_derive_collection::*;
 
-    // pub struct TodoHandle;
-    // pub struct TitleHandle;
-    // #[allow(non_upper_case_globals)]
-    // impl Todo {
-    //     pub const handle: TodoHandle = TodoHandle;
-    //     pub const partial_keep: TodoPartial = TodoPartial {
-    //         title: update::keep,
-    //         done: update::keep,
-    //         description: update::keep,
-    //     };
-    //     pub const fn title_handle() -> TitleHandle {
-    //         TitleHandle
-    //     }
-    // }
-
     #[cfg_attr(feature = "serde", derive(Deserialize))]
     pub struct TodoPartial {
         pub title: update<String>,
@@ -40,6 +25,11 @@ const _: () = {
     {
         type PartailCollection = TodoPartial;
 
+        fn on_migrate(stmt: &mut CreateTableSt<S>)
+        where
+            S: claw_ql::QueryBuilder,
+        {
+        }
         fn on_select(stmt: &mut SelectSt<S>)
         where
             S: QueryBuilder,

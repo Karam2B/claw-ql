@@ -57,12 +57,14 @@ pub mod is_null {
 
     use sqlx::Type;
 
-    use crate::{BindItem, QueryBuilder};
+    use crate::{BindItem, ColumPositionConstraint, QueryBuilder};
 
     pub trait IsNull {
         fn is_null() -> bool;
     }
     pub struct ColumnTypeCheckIfNull<T>(pub PhantomData<T>);
+
+    impl<T> ColumPositionConstraint for ColumnTypeCheckIfNull<T> {}
 
     impl<S, T> BindItem<S> for ColumnTypeCheckIfNull<T>
     where
@@ -119,10 +121,13 @@ pub mod is_null {
 pub mod primary_key {
     use std::marker::PhantomData;
 
-    use crate::{BindItem, QueryBuilder};
+    use crate::{BindItem, ColumPositionConstraint, QueryBuilder};
 
     pub struct PrimaryKey<S>(pub PhantomData<S>);
+
     use sqlx::prelude::Type;
+
+    impl<T> ColumPositionConstraint for PrimaryKey<T> {}
 
     impl<S> BindItem<S> for PrimaryKey<S>
     where
