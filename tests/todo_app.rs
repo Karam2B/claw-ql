@@ -2,10 +2,14 @@ use std::marker::PhantomData;
 
 use claw_ql::{
     migration::{migrate, migrate_relation},
-    operations::select_one::{SelectOneOutput, get_one},
+    operations::{
+        Relation,
+        select_one::{SelectOneOutput, get_one},
+    },
+    schema::Schema,
 };
 use claw_ql_macros::{Collection, relation};
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool};
 use tracing::Level;
 
 #[derive(Collection, Debug, PartialEq)]
@@ -35,10 +39,27 @@ async fn main() {
         .with_max_level(Level::DEBUG)
         .init();
 
-    migrate::<_, Todo>(&pool).await;
-    migrate::<_, Category>(&pool).await;
-    migrate::<_, Tag>(&pool).await;
-    migrate_relation::<_, Todo, Category>(&pool).await;
+    let schema = Schema::default()
+        .infer_db::<Sqlite>()
+        .add_collection(PhantomData::<Todo>)
+        .add_collection(PhantomData::<Tag>)
+        .add_collection(PhantomData::<Category>)
+        .add_relation::<Todo, Category>()
+        .last_link_is_crud();
+
+    schema.migrate(&pool).await;
+
+    migrate(&pool, PhantomData::<Todo>).await;
+    migrate(&pool, PhantomData::<Tag>).await;
+    migrate(&pool, PhantomData::<Category>).await;
+    migrate_relation(
+        &pool,
+        Relation {
+            from: PhantomData::<Todo>,
+            to: PhantomData::<Category>,
+        },
+    )
+    .await;
 
     sqlx::query(
         r#"

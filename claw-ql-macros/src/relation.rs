@@ -38,69 +38,69 @@ pub fn many_to_many(rest: TwoIdent) -> TokenStream {
     let to = rest.to;
     let from = rest.from;
     quote! {
-        const _: () = {
-            use ::cms_for_rust::macro_prelude::relation_macro::*;
-            impl Linked<#to> for #from {
-                type Spec = ManyToMany;
-                fn spec() -> Self::Spec {
-                    ManyToMany {
-                        conjuction_table: format!(
-                            "{}{}",
-                            <#from as Collection<Sqlite>>::table_name(),
-                            <#to as Collection<Sqlite>>::table_name(),
-                        ),
-                        // this should be the inverse
-                        base_id: format!(
-                            "{}_id",
-                            <#from as Collection<Sqlite>>::table_name().to_lowercase()
-                        ),
-                        destination_id: format!(
-                            "{}_id",
-                            <#to as Collection<Sqlite>>::table_name().to_lowercase()
-                        ),
-                    }
-                }
-            }
-            impl Linked<#from> for #to {
-                type Spec = ManyToMany;
-                fn spec() -> Self::Spec {
-                    ManyToMany {
-                        conjuction_table: format!(
-                            "{}{}",
-                            <#from as Collection<Sqlite>>::table_name(),
-                            <#to as Collection<Sqlite>>::table_name(),
-                        ),
-                        // this should be the inverse
-                        base_id: format!(
-                            "{}_id",
-                            <#to as Collection<Sqlite>>::table_name().to_lowercase()
-                        ),
-                        destination_id: format!(
-                            "{}_id",
-                            <#from as Collection<Sqlite>>::table_name().to_lowercase()
-                        ),
-                    }
-                }
-            }
-            submit! {
-                SubmitDynRelation {
-                    obj: || {
-                        Arc::new(
-                            ManyToManyDynamic::<#to, #from>::new()
-                        )
-                    }
-                }
-            }
-            submit! {
-                SubmitDynRelation {
-                    obj: || {
-                        Arc::new(
-                            ManyToManyDynamic::<#from, #to>::new()
-                        )
-                    }
-                }
-            }
-        };
+        // const _: () = {
+        //     use ::cms_for_rust::macro_prelude::relation_macro::*;
+        //     impl Linked<#to> for #from {
+        //         type Spec = ManyToMany;
+        //         fn spec() -> Self::Spec {
+        //             ManyToMany {
+        //                 conjuction_table: format!(
+        //                     "{}{}",
+        //                     <#from as Collection<Sqlite>>::table_name(),
+        //                     <#to as Collection<Sqlite>>::table_name(),
+        //                 ),
+        //                 // this should be the inverse
+        //                 base_id: format!(
+        //                     "{}_id",
+        //                     <#from as Collection<Sqlite>>::table_name().to_lowercase()
+        //                 ),
+        //                 destination_id: format!(
+        //                     "{}_id",
+        //                     <#to as Collection<Sqlite>>::table_name().to_lowercase()
+        //                 ),
+        //             }
+        //         }
+        //     }
+        //     impl Linked<#from> for #to {
+        //         type Spec = ManyToMany;
+        //         fn spec() -> Self::Spec {
+        //             ManyToMany {
+        //                 conjuction_table: format!(
+        //                     "{}{}",
+        //                     <#from as Collection<Sqlite>>::table_name(),
+        //                     <#to as Collection<Sqlite>>::table_name(),
+        //                 ),
+        //                 // this should be the inverse
+        //                 base_id: format!(
+        //                     "{}_id",
+        //                     <#to as Collection<Sqlite>>::table_name().to_lowercase()
+        //                 ),
+        //                 destination_id: format!(
+        //                     "{}_id",
+        //                     <#from as Collection<Sqlite>>::table_name().to_lowercase()
+        //                 ),
+        //             }
+        //         }
+        //     }
+        //     submit! {
+        //         SubmitDynRelation {
+        //             obj: || {
+        //                 Arc::new(
+        //                     ManyToManyDynamic::<#to, #from>::new()
+        //                 )
+        //             }
+        //         }
+        //     }
+        //     submit! {
+        //         SubmitDynRelation {
+        //             obj: || {
+        //                 Arc::new(
+        //                     ManyToManyDynamic::<#from, #to>::new()
+        //                 )
+        //             }
+        //         }
+        //     }
+        // };
     }
 }
 
@@ -111,7 +111,7 @@ pub fn optional_to_many(rest: TwoIdent) -> TokenStream {
     quote! {
         const _: () = {
             use ::claw_ql::prelude::macro_relation::*;
-            impl LinkData<#to> for Relation<#from> {
+            impl LinkData<#to> for Relation<#to, #from> {
                 type Spec = OptionalToManyInverse<#to, #from>;
                 fn spec(self) -> Self::Spec {
                     OptionalToManyInverse {
@@ -120,7 +120,7 @@ pub fn optional_to_many(rest: TwoIdent) -> TokenStream {
                     }
                 }
             }
-            impl LinkData<#from> for Relation<#to> {
+            impl LinkData<#from> for Relation<#from, #to> {
                 type Spec = OptionalToMany<#from, #to>;
                 fn spec(self) -> Self::Spec {
                     OptionalToMany {

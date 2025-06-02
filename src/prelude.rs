@@ -8,6 +8,7 @@ pub mod stmt {
 }
 
 pub mod macro_derive_collection {
+    pub use core::marker::PhantomData;
     pub use crate::QueryBuilder;
     pub use crate::expressions::exports::col_type_check_if_null;
     pub use crate::expressions::exports::primary_key;

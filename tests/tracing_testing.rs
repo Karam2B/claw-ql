@@ -1,7 +1,7 @@
 mod tracing_testing {
     use std::marker::PhantomData;
 
-    use claw_ql::IntoPhantom;
+    use claw_ql::IntoInferFromPhantom;
     use sqlx::SqlitePool;
     use sqlx::query;
     use tracing::instrument::WithSubscriber;

@@ -1,7 +1,5 @@
-use std::marker::PhantomData;
-
 use serde::Serialize;
-
+use std::marker::PhantomData;
 pub mod collections;
 pub mod select_one;
 
@@ -10,7 +8,10 @@ pub trait LinkData<From> {
     fn spec(self) -> Self::Spec;
 }
 
-pub struct Relation<To>(pub(crate) PhantomData<To>);
+pub struct Relation<From, To> {
+    pub from: PhantomData<From>,
+    pub to: PhantomData<To>,
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SimpleOutput<C> {

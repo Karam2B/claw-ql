@@ -1,7 +1,12 @@
+
 pub trait BuildTuple {
     const LEN: usize;
     type Bigger<N>;
     fn into_bigger<N>(self, n: N) -> Self::Bigger<N>;
+}
+
+pub trait TupleLastItem<const INDEX: i8> {
+    type Last;
 }
 
 impl BuildTuple for () {
@@ -20,12 +25,23 @@ impl<T0> BuildTuple for (T0,) {
     }
 }
 
+impl<T0, T1> TupleLastItem<2> for (T0,T1) {
+    type Last = (T0, T1);
+}
+impl<T0> TupleLastItem<1> for (T0,) {
+    type Last = T0;
+}
+
 impl<T0, T1> BuildTuple for (T0, T1) {
     const LEN: usize = 2;
     type Bigger<N> = (T0, T1, N);
     fn into_bigger<N>(self, n: N) -> Self::Bigger<N> {
         (self.0, self.1, n)
     }
+}
+
+impl<T0, T1> TupleLastItem<1> for (T0,T1) {
+    type Last = T1;
 }
 
 impl<T0, T1, T2> BuildTuple for (T0, T1, T2) {
@@ -36,12 +52,22 @@ impl<T0, T1, T2> BuildTuple for (T0, T1, T2) {
     }
 }
 
+
+impl<T0, T1, T2> TupleLastItem<1> for (T0,T1, T2) {
+    type Last = T2;
+}
+
 impl<T0, T1, T2, T3> BuildTuple for (T0, T1, T2, T3) {
     const LEN: usize = 4;
     type Bigger<N> = (T0, T1, T2, T3, N);
     fn into_bigger<N>(self, n: N) -> Self::Bigger<N> {
         (self.0, self.1, self.2, self.3, n)
     }
+}
+
+
+impl<T0, T1, T2, T3> TupleLastItem<1> for (T0,T1, T2, T3) {
+    type Last = T3;
 }
 
 impl<T0, T1, T2, T3, T4> BuildTuple for (T0, T1, T2, T3, T4) {
@@ -52,8 +78,12 @@ impl<T0, T1, T2, T3, T4> BuildTuple for (T0, T1, T2, T3, T4) {
     }
 }
 
-impl<T0, T1, T2, T3, T4, T5> BuildTuple
-    for (T0, T1, T2, T3, T4, T5)
+
+impl<T0, T1, T2, T3, T4> TupleLastItem<1> for (T0,T1, T2, T3, T4) {
+    type Last = T4;
+}
+
+impl<T0, T1, T2, T3, T4, T5> BuildTuple for (T0, T1, T2, T3, T4, T5)
 {
     const LEN: usize = 6;
     type Bigger<N> = (T0, T1, T2, T3, T4, T5, N);
@@ -62,8 +92,7 @@ impl<T0, T1, T2, T3, T4, T5> BuildTuple
     }
 }
 
-impl<T0, T1, T2, T3, T4, T5, T6> BuildTuple
-    for (T0, T1, T2, T3, T4, T5, T6)
+impl<T0, T1, T2, T3, T4, T5, T6> BuildTuple for (T0, T1, T2, T3, T4, T5, T6)
 {
     const LEN: usize = 7;
     type Bigger<N> = (T0, T1, T2, T3, T4, T5, T6, N);
@@ -75,8 +104,7 @@ impl<T0, T1, T2, T3, T4, T5, T6> BuildTuple
     }
 }
 
-impl<T0, T1, T2, T3, T4, T5, T6, T7> BuildTuple
-    for (T0, T1, T2, T3, T4, T5, T6, T7)
+impl<T0, T1, T2, T3, T4, T5, T6, T7> BuildTuple for (T0, T1, T2, T3, T4, T5, T6, T7)
 {
     const LEN: usize = 8;
     type Bigger<N> = (T0, T1, T2, T3, T4, T5, T6, T7, N);
