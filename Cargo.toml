@@ -21,8 +21,9 @@ pretty_assertions = "1"
 sqlx = { version = "0.8.5", features = ["runtime-tokio"] }
 
 [features]
-default = ["sqlite", "serde"]
+default = ["sqlite", "serde", "beta"]
 waiting_min_specialization = []
+beta = []
 serde = ["dep:serde_json", "dep:serde"]
 trace = ["dep:tracing"]
 sqlite = ["sqlx/sqlite"]

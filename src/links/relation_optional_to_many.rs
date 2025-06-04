@@ -1,5 +1,4 @@
 use sqlx::{ColumnIndex, Decode, Executor, Row, Sqlite, prelude::Type};
-use std::marker::PhantomData;
 
 use sqlx::Pool;
 
@@ -8,7 +7,7 @@ use crate::{
     operations::{
         SimpleOutput,
         collections::{Collection, OnMigrate},
-        select_one::GetOneWorker,
+        select_one::SelectOneFragment,
     },
     prelude::{col, join, stmt::SelectSt},
 };
@@ -16,13 +15,15 @@ use crate::{
 #[derive(Clone)]
 pub struct OptionalToMany<F, T> {
     pub foriegn_key: String,
-    pub _pd: PhantomData<(F, T)>,
+    pub from: F, 
+    pub to: T,
 }
 
 #[derive(Clone)]
 pub struct OptionalToManyInverse<F, T> {
     pub foriegn_key: String,
-    pub _pd: PhantomData<(F, T)>,
+    pub from: F,
+    pub to: T,
 }
 
 // todo add generic implementaion
@@ -32,7 +33,7 @@ where
     To: Collection<Sqlite>,
 {
     async fn custom_migration<'e>(
-        self,
+        &self,
         exec: impl for<'q> Executor<'q, Database = Sqlite> + Clone,
     ) {
 
@@ -44,9 +45,9 @@ REFERENCES {to_table_name} (id)
 {dio}
 ON DELETE SET NULL;
 ",
-        from_table_name = From::table_name(),
-        to_table_name = To::table_name(),
-        col_name = format!("{}_id", To::table_name().to_lowercase()),
+        from_table_name = self.from.table_name(),
+        to_table_name = self.to.table_name(),
+        col_name = format!("{}_id", self.to.table_name().to_lowercase()),
             dio = ""
         ))
         .execute(exec.clone())
@@ -55,32 +56,34 @@ ON DELETE SET NULL;
     }
 }
 
-impl<S, From, To> GetOneWorker<S> for OptionalToMany<From, To>
+impl<S, From, To> SelectOneFragment<S> for OptionalToMany<From, To>
 where
     S: QueryBuilder,
     To: Send + Sync + Collection<S>,
+    To::Yeild : Send + Sync,
     From: Send + Sync + Collection<S>,
+    From::Yeild : Send + Sync,
     for<'c> &'c str: ColumnIndex<S::Row>,
     for<'q> i64: Decode<'q, S>,
     i64: Type<S>,
 {
-    type Output = Option<SimpleOutput<To>>;
-    type Inner = Option<(i64, To)>;
+    type Output = Option<SimpleOutput<To::Yeild>>;
+    type Inner = Option<(i64, To::Yeild)>;
 
     fn on_select(&self, _: &mut Self::Inner, st: &mut SelectSt<S>) {
         st.join(join::left_join {
-            foriegn_table: To::table_name().to_string(),
+            foriegn_table: self.to.table_name().to_string(),
             foriegn_column: "id".to_string(),
             local_column: self.foriegn_key.to_string(),
         });
-        st.select(col(&self.foriegn_key).table(From::table_name()));
-        To::on_select(st);
+        st.select(col(&self.foriegn_key).table(self.from.table_name()));
+        self.to.on_select(st);
     }
 
     fn from_row(&self, data: &mut Self::Inner, row: &S::Row) {
         let id: Option<i64> = row.get(self.foriegn_key.as_str());
         if let Some(id) = id {
-            let value = To::from_row_scoped(row);
+            let value = self.to.from_row_scoped(row);
             *data = Some((id, value));
         }
     }

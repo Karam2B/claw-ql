@@ -5,8 +5,9 @@ use crate::{Accept, AcceptNoneBind, BindItem, Buildable, QueryBuilder, unstable:
 pub struct SelectSt<S: QueryBuilder> {
     pub(crate) select_list: Vec<String>,
     pub(crate) where_clause: Vec<S::Fragment>,
-    pub(crate) joins: Vec<join>,
+    pub(crate) joins: Vec<Box<dyn Join>>,
     pub(crate) order_by: Vec<(String, bool)>,
+    pub(crate) group_by: Option<String>,
     pub(crate) limit: Option<S::Fragment>,
     pub(crate) shift: Option<S::Fragment>,
     pub(crate) ctx: S::Context1,
@@ -17,26 +18,65 @@ pub struct SelectSt<S: QueryBuilder> {
     pub(crate) _sqlx: PhantomData<S>,
 }
 
+pub trait Join: 'static {
+    fn display_from(self: Box<Self>, from: &str) -> String;
+    fn global_table(&self) -> &str;
+}
+
 #[allow(non_camel_case_types)]
-pub enum join {
-    left_join {
-        foriegn_table: String,
-        foriegn_column: String,
-        local_column: String,
-    },
+pub mod join {
+    use super::Join;
+
+    pub struct join {
+        pub foriegn_table: String,
+        pub foriegn_column: String,
+        pub local_column: String,
+    }
+
+    impl Join for join {
+        fn display_from(self: Box<Self>, from: &str) -> String {
+            let Self {
+                foriegn_table,
+                foriegn_column,
+                local_column,
+            } = *self;
+            format!(
+                " JOIN {foriegn_table} ON {foriegn_table}.{foriegn_column} = {self_from}.{local_column}",
+                self_from = from,
+            )
+        }
+        fn global_table(&self) -> &str {
+            self.foriegn_table.as_str()
+        }
+    }
+
+    pub struct left_join {
+        pub foriegn_table: String,
+        pub foriegn_column: String,
+        pub local_column: String,
+    }
+    impl Join for left_join {
+        fn display_from(self: Box<Self>, from: &str) -> String {
+            let Self {
+                foriegn_table,
+                foriegn_column,
+                local_column,
+            } = *self;
+            format!(
+                " LEFT JOIN {foriegn_table} ON {foriegn_table}.{foriegn_column} = {self_from}.{local_column}",
+                self_from = from,
+            )
+        }
+
+        fn global_table(&self) -> &str {
+            self.foriegn_table.as_str()
+        }
+    }
 }
 
 pub mod order_by {
     pub const ASC: bool = true;
     pub const DESC: bool = false;
-}
-
-impl join {
-    pub fn global_table(&self) -> &str {
-        match self {
-            Self::left_join { foriegn_table, .. } => foriegn_table.as_str(),
-        }
-    }
 }
 
 impl<S: QueryBuilder> Buildable for SelectSt<S> {
@@ -62,19 +102,7 @@ impl<S: QueryBuilder> Buildable for SelectSt<S> {
             str.push_str(self.from.as_ref());
 
             for join_ in self.joins.into_iter() {
-                match join_ {
-                    join::left_join {
-                        foriegn_table,
-                        foriegn_column,
-                        local_column,
-                    } => {
-                        let join = format!(
-                            " LEFT JOIN ON {}.{} = {}.{}",
-                            foriegn_table, foriegn_column, self.from, local_column,
-                        );
-                        str.push_str(&join);
-                    }
-                }
+                str.push_str(&join_.display_from(self.from.as_str()));
             }
 
             for (index, item) in self.where_clause.into_iter().enumerate() {
@@ -90,6 +118,11 @@ impl<S: QueryBuilder> Buildable for SelectSt<S> {
                 }
 
                 str.push_str(&item);
+            }
+
+            if let Some(group_by) = self.group_by {
+                str.push_str(" GROUP BY ");
+                str.push_str(&group_by);
             }
 
             if self.order_by.len() != 0 {
@@ -136,9 +169,16 @@ impl<S: QueryBuilder> SelectSt<S> {
             from: from.as_ref().to_string(),
             _sqlx: PhantomData,
             ident_safety: (),
+            group_by: None,
         }
     }
 
+    pub fn group_by<T>(&mut self, item: T)
+    where
+        T: AcceptNoneBind<IdentSafety = ()>,
+    {
+        self.group_by = Some(item.accept(&self.ident_safety, Unsateble));
+    }
     pub fn select<T>(&mut self, item: T)
     where
         T: AcceptNoneBind<IdentSafety = ()>,
@@ -148,17 +188,18 @@ impl<S: QueryBuilder> SelectSt<S> {
     }
 
     #[track_caller]
-    pub fn join(&mut self, j: join) {
+    pub fn join(&mut self, j: impl Join) {
+        let global_table = j.global_table();
         if self
             .joins
             .iter()
-            .find(|e| e.global_table() == j.global_table())
+            .find(|e| e.global_table() == global_table)
             .is_some()
         {
-            panic!("table {} has been joined already", j.global_table());
+            panic!("table {} has been joined already", global_table);
         }
 
-        self.joins.push(j);
+        self.joins.push(Box::new(j));
     }
 
     pub fn order_by(&mut self, by: String, asc: bool) {

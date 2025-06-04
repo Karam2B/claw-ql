@@ -105,27 +105,34 @@ pub fn many_to_many(rest: TwoIdent) -> TokenStream {
 }
 
 pub fn optional_to_many(rest: TwoIdent) -> TokenStream {
+    let to_lower_case = Ident::new(rest.to.to_string().to_lowercase().as_str(), rest.to.span());
     let to = rest.to;
+    let from_lower_case = Ident::new(
+        rest.from.to_string().to_lowercase().as_str(),
+        rest.from.span(),
+    );
     let from = rest.from;
     let foriegn_key = format!("{}_id", to.to_string().to_lowercase());
     quote! {
         const _: () = {
             use ::claw_ql::prelude::macro_relation::*;
-            impl LinkData<#to> for Relation<#to, #from> {
-                type Spec = OptionalToManyInverse<#to, #from>;
-                fn spec(self) -> Self::Spec {
+            impl LinkData<#to_lower_case> for Relation<#to_lower_case, #from_lower_case> {
+                type Spec = OptionalToManyInverse<#to_lower_case, #from_lower_case>;
+                fn spec(self, from: #to_lower_case) -> Self::Spec {
                     OptionalToManyInverse {
                         foriegn_key: #foriegn_key.to_string(),
-                        _pd: PhantomData
+                        from,
+                        to: #from_lower_case,
                     }
                 }
             }
-            impl LinkData<#from> for Relation<#from, #to> {
-                type Spec = OptionalToMany<#from, #to>;
-                fn spec(self) -> Self::Spec {
+            impl LinkData<#from_lower_case> for Relation<#from_lower_case, #to_lower_case> {
+                type Spec = OptionalToMany<#from_lower_case, #to_lower_case>;
+                fn spec(self, from: #from_lower_case) -> Self::Spec {
                     OptionalToMany {
                         foriegn_key: #foriegn_key.to_string(),
-                        _pd: PhantomData
+                        from,
+                        to: #to_lower_case,
                     }
                 }
             }

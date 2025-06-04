@@ -19,8 +19,8 @@ pub async fn migrate_relation<S, C, T>(
     PhantomData<C>: Collection<S>,
     Relation<C, T>: LinkData<C, Spec: OnMigrate<S>>,
 {
-    let spec = relation.spec();
-    spec.custom_migration(exec).await;
+    // let spec = relation.spec();
+    // spec.custom_migration(exec).await;
 }
 
 pub async fn migrate<S: QueryBuilder, C: Collection<S>>(
