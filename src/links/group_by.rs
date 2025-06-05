@@ -1,23 +1,23 @@
-use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use std::ops::Not;
 
-use crate::dynamic_client::json_client::{JsonCollection, JsonLink};
 use crate::QueryBuilder;
+use crate::any_set::AnySet;
 use crate::collections::{Collection, OnMigrate};
+use crate::dynamic_client::json_client::JsonCollection;
 use crate::prelude::col;
 use crate::prelude::macro_relation::OptionalToMany;
-use crate::schema::AnySet;
-use crate::schema::json_client::JsonCollection;
 use crate::verbatim::verbatim;
 use crate::{
     collections::CollectionBasic,
-    operations::{LinkData, Relation, select_one::SelectOneFragment},
+    operations::select_one::SelectOneFragment,
     prelude::{join::join, stmt::SelectSt},
 };
 use sqlx::{ColumnIndex, Executor};
 use sqlx::{Sqlite, sqlite::SqliteRow};
 
+use super::relation::{Relation, RelationEntry};
 use super::relation_many_to_many::ManyToMany;
+use super::{DynamicLink, LinkData};
 
 #[allow(non_camel_case_types)]
 pub struct count<T>(pub T);
@@ -32,54 +32,6 @@ pub struct CountSpec<From, To> {
 trait CountingSupportedIn {}
 impl<T0, T1> CountingSupportedIn for ManyToMany<T0, T1> {}
 impl<From, To> CountingSupportedIn for OptionalToMany<From, To> {}
-
-pub struct DynamicCount;
-
-// no op
-impl<S> OnMigrate<S> for DynamicCount {
-    async fn custom_migration<'e>(&self, _: impl for<'q> Executor<'q, Database = S> + Clone)
-    where
-        S: QueryBuilder,
-    {
-    }
-}
-
-impl count<()> {
-    pub fn dynamic_link() -> DynamicCount {
-        DynamicCount
-    }
-}
-
-pub trait DynamicLink<S> {
-    fn on_finish(&self, link_ctx: &AnySet) -> Result<(), String>;
-}
-pub trait DynamicLinkAssociatedEntry {
-    fn register_entry_in_context(&self) -> Option<Self::Entry>;
-    type Entry: Any;
-}
-
-pub struct DynamicManyToMany {}
-
-impl<S> DynamicLink<S> for DynamicCount {
-    fn on_finish(&self, link_ctx: &AnySet) -> Result<(), String> {
-        let dynamic = link_ctx.get::<DynamicManyToMany>().ok_or(
-            "cant relation of many_to_many, make sure to register 'count' after all many_to_many_s",
-        )?;
-
-        Ok(())
-    }
-}
-
-impl DynamicLinkAssociatedEntry for DynamicCount {
-    type Entry = ();
-    fn register_entry_in_context(&self) -> Option<Self::Entry> {
-        None
-    }
-}
-
-impl<S> JsonLink<S> for DynamicCount {
-    fn on_each_json_request(&self, link_ctx: AnySet, base_col: &dyn JsonCollection<S>) {}
-}
 
 impl<From, To> LinkData<From> for count<To>
 where
@@ -139,13 +91,57 @@ where
 
     fn sub_op<'this>(
         &'this self,
-        data: &'this mut Self::Inner,
-        pool: sqlx::Pool<Sqlite>,
+        _data: &'this mut Self::Inner,
+        _pool: sqlx::Pool<Sqlite>,
     ) -> impl Future<Output = ()> + Send + use<'this, From, To> {
         async { /* no op */ }
     }
 
     fn take(self, data: Self::Inner) -> Self::Output {
         CountResult(data.unwrap())
+    }
+}
+
+// no op
+impl<S> OnMigrate<S> for count<()> {
+    async fn custom_migration<'e>(&self, _: impl for<'q> Executor<'q, Database = S> + Clone)
+    where
+        S: QueryBuilder,
+    {
+        // no-op count is on-request only
+    }
+}
+
+impl count<()> {
+    pub fn dynamic_link() -> count<()> {
+        count(())
+    }
+}
+
+impl<S: 'static> DynamicLink<S> for count<()> {
+    fn on_finish(&self, build_ctx: &AnySet) -> Result<(), String> {
+        let dynamic = build_ctx.get::<Vec<RelationEntry>>().ok_or(
+            "count: there was no relation added to the client, are you sure this is not a mistake",
+        )?;
+        if dynamic.iter().any(|e| e.ty == "many_to_many").not() {
+            Err("count: there was no many_to_many relation, is this an error")?;
+        }
+
+        Ok(())
+    }
+    type Entry = ();
+    fn on_register(&self, _entry: &mut Self::Entry) {}
+
+    fn json_entry() -> &'static str {
+        "count"
+    }
+    fn on_each_json_request(
+        &self,
+        _base_col: &dyn JsonCollection<S>,
+        _input: serde_json::Value,
+        _ctx: &Self::Entry,
+    ) -> Option<Result<Box<dyn crate::dynamic_client::json_client::SelectOneJsonFragment<S>>, String>>
+    {
+        todo!("`impl DynamicLink for count<()>` is not complete")
     }
 }

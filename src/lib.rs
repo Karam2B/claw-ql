@@ -234,6 +234,12 @@ pub mod any_set {
                 None => InsertOption::WasNew,
             }
         }
+        pub fn get_mut<T: Any>(&mut self) -> Option<&mut T> {
+            let type_id = TypeId::of::<T>();
+            let get = self.inner.get_mut(&type_id);
+
+            get.map(|e| e.as_mut().downcast_mut::<T>().unwrap())
+        }
         pub fn get<T: Any>(&self) -> Option<&T> {
             let type_id = TypeId::of::<T>();
             let get = self.inner.get(&type_id);

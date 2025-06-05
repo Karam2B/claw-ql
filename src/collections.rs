@@ -13,31 +13,31 @@ pub trait CollectionBasic {
     fn table_name(&self) -> &'static str;
 }
 
-pub trait Collection<Q>: Sized + Send + Sync + CollectionBasic {
+pub trait Collection<S>: Sized + Send + Sync + CollectionBasic {
     type PartailCollection;
     type Yeild;
-    fn on_migrate(&self, stmt: &mut CreateTableSt<Q>)
-    where
-        Q: QueryBuilder;
+    // fn on_migrate(&self, stmt: &mut CreateTableSt<Q>)
+    // where
+    //     Q: QueryBuilder;
     // fn on_update(
     //     stmt: &mut UpdateSt<S>,
     //     this: Self::PartailCollection,
     // ) -> Result<(), String>
     // where
     //     S: Database + SupportNamedBind;
-    fn on_select(&self, stmt: &mut SelectSt<Q>)
+    fn on_select(&self, stmt: &mut SelectSt<S>)
     where
-        Q: QueryBuilder;
+        S: QueryBuilder;
 
     // fn members(&self) -> &'static [&'static str];
     // fn members_scoped(&self) -> &'static [&'static str];
     // fn table_name(&self) -> &'static str;
-    fn from_row_noscope(&self, row: &Q::Row) -> Self::Yeild
+    fn from_row_noscope(&self, row: &S::Row) -> Self::Yeild
     where
-        Q: Database;
-    fn from_row_scoped(&self, row: &Q::Row) -> Self::Yeild
+        S: Database;
+    fn from_row_scoped(&self, row: &S::Row) -> Self::Yeild
     where
-        Q: Database;
+        S: Database;
 }
 
 pub trait OnMigrate<S> {
@@ -47,29 +47,6 @@ pub trait OnMigrate<S> {
     ) -> impl Future<Output = ()>
     where
         S: QueryBuilder;
-}
-
-pub struct MigrateCollection<C>(pub C);
-
-impl<C, S> OnMigrate<S> for MigrateCollection<C>
-where
-    S: QueryBuilder<Output = <S as Database>::Arguments<'static>>,
-    C: Collection<S>,
-    for<'q> S::Arguments<'q>: IntoArguments<'q, S>,
-{
-    fn custom_migration<'e>(
-        &self,
-        exec: impl for<'q> Executor<'q, Database = S> + Clone,
-    ) -> impl Future<Output = ()>
-    where
-        S: QueryBuilder,
-    {
-        async move {
-            let mut c = CreateTableSt::init(header::create, self.0.table_name());
-            self.0.on_migrate(&mut c);
-            c.execute(exec).await.unwrap();
-        }
-    }
 }
 
 // #[rustfmt::skip]

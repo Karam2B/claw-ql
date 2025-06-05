@@ -1,7 +1,6 @@
-use std::mem::take;
-
 use _private::InnerExecutable;
 use sqlx::{Database, Executor};
+use std::mem::take;
 
 use crate::{Buildable, QueryBuilder};
 
@@ -10,7 +9,8 @@ pub trait Execute<S: Database>: Sized {
     fn execute<E>(
         self,
         executor: E,
-    ) -> impl Future<Output = Result<S::QueryResult, sqlx::Error>> + Send
+    ) -> impl Future<Output = Result<S::QueryResult, sqlx::Error>>
+    + Send
     where
         E: for<'e> sqlx::Executor<'e, Database = S>,
     {
@@ -91,9 +91,13 @@ pub trait Execute<S: Database>: Sized {
 impl<T, S> Execute<S> for T
 where
     T: Buildable<Database = S> + Sized,
-    S: QueryBuilder<Output = <S as Database>::Arguments<'static>>,
+    S: QueryBuilder<
+        Output = <S as Database>::Arguments<'static>,
+    >,
 {
-    fn build(self) -> (String, <S as Database>::Arguments<'static>) {
+    fn build(
+        self,
+    ) -> (String, <S as Database>::Arguments<'static>) {
         self.build()
     }
 }
@@ -109,12 +113,15 @@ mod _private {
 }
 
 impl<'s, 'q, S: Database> InnerExecutable<'s, 'q, S> {
-    pub async fn execute<E>(self, executor: E) -> Result<S::QueryResult, sqlx::Error>
+    pub async fn execute<E>(
+        self,
+        executor: E,
+    ) -> Result<S::QueryResult, sqlx::Error>
     where
         for<'c> E: Executor<'q, Database = S>,
     {
         #[cfg(feature = "trace")]
-        debug!("execute: {}", self.stmt);
+        tracing::debug!("execute");
         executor
             .execute(InnerExecutable {
                 // SAFETY: the output of execute is free of
@@ -144,7 +151,7 @@ impl<'s, 'q, S: Database> InnerExecutable<'s, 'q, S> {
         for<'c> E: Executor<'c, Database = S>,
     {
         #[cfg(feature = "trace")]
-        debug!("fetch one: {}", self.stmt);
+        tracing::debug!("fetch one");
         let execute = InnerExecutable {
             // SAFETY: the output of execute is free of
             // any reference of self, which means that
@@ -180,7 +187,7 @@ impl<'s, 'q, S: Database> InnerExecutable<'s, 'q, S> {
         for<'c> E: Executor<'c, Database = S>,
     {
         #[cfg(feature = "trace")]
-        debug!("fetch all: {}", self.stmt);
+        tracing::debug!("fetch all");
         let execute = InnerExecutable {
             // SAFETY: the output of execute is free of
             // any reference of self, which means that
@@ -215,7 +222,7 @@ impl<'s, 'q, S: Database> InnerExecutable<'s, 'q, S> {
         for<'c> E: Executor<'c, Database = S>,
     {
         #[cfg(feature = "trace")]
-        debug!("fetch optional: {}", self.stmt);
+        tracing::debug!("fetch optional");
         let execute = InnerExecutable {
             // SAFETY: the output of execute is free of
             // any reference of self, which means that
@@ -242,8 +249,9 @@ impl<'s, 'q, S: Database> InnerExecutable<'s, 'q, S> {
     }
 }
 
-
-impl<'q, DB: Database> sqlx::Execute<'q, DB> for InnerExecutable<'q, 'q, DB> {
+impl<'q, DB: Database> sqlx::Execute<'q, DB>
+    for InnerExecutable<'q, 'q, DB>
+{
     fn sql(&self) -> &'q str {
         self.stmt
     }
@@ -258,7 +266,10 @@ impl<'q, DB: Database> sqlx::Execute<'q, DB> for InnerExecutable<'q, 'q, DB> {
 
     fn take_arguments(
         &mut self,
-    ) -> Result<Option<<DB as Database>::Arguments<'q>>, sqlx::error::BoxDynError> {
+    ) -> Result<
+        Option<<DB as Database>::Arguments<'q>>,
+        sqlx::error::BoxDynError,
+    > {
         Ok(Some(take(&mut self.buffer)))
     }
 }

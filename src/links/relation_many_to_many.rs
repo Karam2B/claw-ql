@@ -1,11 +1,17 @@
+use std::ops::Not;
+
 use crate::QueryBuilder;
 use crate::collections::Collection;
+use crate::dynamic_client::json_client::SelectOneJsonFragment;
 use crate::{
     collections::OnMigrate,
     operations::{SimpleOutput, select_one::SelectOneFragment},
     prelude::stmt::SelectSt,
 };
+use serde::Serialize;
 use sqlx::{Sqlite, sqlite::SqliteRow};
+
+use super::relation::DynamicLinkForRelation;
 
 #[derive(Clone)]
 pub struct ManyToMany<T1, T2> {
@@ -108,5 +114,29 @@ where
 
     fn take(self, data: Self::Inner) -> Self::Output {
         data.1
+    }
+}
+
+impl<S: QueryBuilder, T0, T1> DynamicLinkForRelation<S> for ManyToMany<T0, T1>
+where
+    Self: Clone,
+    T0: 'static,
+    T1: 'static,
+    ManyToMany<T0, T1>: SelectOneFragment<S, Output: Serialize, Inner: 'static>,
+{
+    fn global_ident(&self) -> &'static str {
+        "many_to_many"
+    }
+
+    fn on_each_select_one_request(
+        &self,
+        input: serde_json::Value,
+    ) -> Result<Box<dyn SelectOneJsonFragment<S>>, String> {
+        if input.is_object().not() {
+            return Err("many_to_many relation is only input is {}".to_string());
+        }
+        let this = self.clone();
+
+        Ok(Box::new((this, Default::default())))
     }
 }

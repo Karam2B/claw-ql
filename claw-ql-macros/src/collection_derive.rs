@@ -76,6 +76,36 @@ pub fn main(input: DeriveInput) -> TokenStream {
             }
         }
 
+impl<S> OnMigrate<S> for #table_name_lower_case_ident
+where
+    S: QueryBuilder<Output = <S as Database>::Arguments<'static>>,
+    for<'q> S::Arguments<'q>: IntoArguments<'q, S>,
+    S: QueryBuilder + DatabaseDefaultPrimaryKey,
+    <S as DatabaseDefaultPrimaryKey>::KeyType: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
+    #(
+        #member_ty: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
+    )*
+{
+    fn custom_migration<'e>(
+        &self,
+        exec: impl for<'q> Executor<'q, Database = S> + Clone,
+    ) -> impl Future<Output = ()>
+    where
+    {
+        async move {
+            let mut stmt = CreateTableSt::init(header::create, self.table_name());
+            stmt.column("id", primary_key::<S>());
+            #(
+            stmt.column(
+                stringify!(#member_name),
+                col_type_check_if_null::<#member_ty>(),
+            );
+            )*
+            stmt.execute(exec).await.unwrap();
+        }
+    }
+}
+
         impl<S> Collection<S> for #table_name_lower_case_ident
             where 
         S: QueryBuilder + DatabaseDefaultPrimaryKey,
@@ -88,15 +118,15 @@ pub fn main(input: DeriveInput) -> TokenStream {
             type PartailCollection = #partial_ident;
             type Yeild = #table_name_camel_case;
 
-            fn on_migrate(&self, stmt: &mut CreateTableSt<S>) {
-                stmt.column("id", primary_key::<S>());
-                #(
-                stmt.column(
-                    stringify!(#member_name),
-                    col_type_check_if_null::<#member_ty>(),
-                );
-                )*
-            }
+            // fn on_migrate(&self, stmt: &mut CreateTableSt<S>) {
+            //     stmt.column("id", primary_key::<S>());
+            //     #(
+            //     stmt.column(
+            //         stringify!(#member_name),
+            //         col_type_check_if_null::<#member_ty>(),
+            //     );
+            //     )*
+            // }
 
             fn on_select(&self, stmt: &mut SelectSt<S>)
             {

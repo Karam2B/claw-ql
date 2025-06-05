@@ -1,53 +1,67 @@
 use claw_ql::{
-    links::group_by::count,
+    dynamic_client::DynamicClient,
+    links::relation::Relation,
     operations::{
-        Relation, SimpleOutput,
-        select_one::{SelectOneOutput, get_one},
+        SimpleOutput,
+        select_one::{SelectOneOutput, select_one},
     },
-    schema::DynamicClient,
 };
 use claw_ql_macros::{Collection, relation};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::{Sqlite, SqlitePool};
 use tracing::Level;
 
-#[derive(Collection, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Collection, Debug, PartialEq, Serialize, Deserialize,
+)]
 pub struct Todo {
     pub title: String,
     pub done: bool,
     pub description: Option<String>,
 }
 
-#[derive(Collection, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Tag {
-    pub title: String,
-}
-
-#[derive(Collection, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Collection, Debug, PartialEq, Serialize, Deserialize,
+)]
 pub struct Category {
     pub title: String,
 }
 
+#[derive(
+    Collection, Debug, PartialEq, Serialize, Deserialize,
+)]
+pub struct Tag {
+    pub title: String,
+}
+
 relation!(optional_to_many Todo Category);
+relation!(many_to_many Todo Tag);
 
 #[tokio::test]
 async fn main() {
-    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    let pool =
+        SqlitePool::connect("sqlite::memory:").await.unwrap();
 
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
         .init();
 
-    let schema = DynamicClient::default()
-        .infer_db::<Sqlite>()
-        .catch_errors_early()
-        .add_relation(Relation {
-            from: todo,
-            to: category,
-        })
-        .add_collection(category)
-        .add_collection(tag)
-        .add_collection(todo);
+    let schema = {
+        DynamicClient::default()
+            .infer_db::<Sqlite>()
+            .add_link(Relation {
+                from: todo,
+                to: tag,
+            })
+            .add_link(Relation {
+                from: todo,
+                to: category,
+            })
+            .add_collection(category)
+            .add_collection(tag)
+            .add_collection(todo)
+    };
 
     schema.migrate(&pool).await;
 
@@ -71,7 +85,10 @@ async fn main() {
     .await
     .unwrap();
 
-    let res = get_one(todo).relation(category).exec_op(pool.clone()).await;
+    let res = select_one(todo)
+        .relation(category)
+        .exec_op(pool.clone())
+        .await;
 
     pretty_assertions::assert_eq!(
         res,
@@ -91,5 +108,30 @@ async fn main() {
         })
     );
 
-    let client = schema.create_json_client(pool.clone());
+    let jc = schema.create_json_client(pool.clone()).unwrap();
+
+    let res = jc
+        .select_one(json!({
+            "collection": "todo",
+            "links": { "relation": { "category": {} } }
+        }))
+        .await
+        .unwrap();
+
+    pretty_assertions::assert_eq!(
+        res,
+        json!({
+            "id": 1,
+            "attr": {
+                "title": "todo_1",
+                "done": true,
+                "description": null
+            },
+            "links": {
+                "relation": {
+                    "category": { "id": 3, "attr": {"title": "category_3"}}
+                }
+            }
+        }),
+    );
 }

@@ -35,72 +35,52 @@ impl Parse for TwoIdent {
 }
 
 pub fn many_to_many(rest: TwoIdent) -> TokenStream {
-    let to = rest.to;
-    let from = rest.from;
+    let to_lower_case = Ident::new(rest.to.to_string().to_lowercase().as_str(), rest.to.span());
+    // let to = rest.to;
+    let from_lower_case = Ident::new(
+        rest.from.to_string().to_lowercase().as_str(),
+        rest.from.span(),
+    );
+    // let from = rest.from;
+    // let foriegn_key = format!("{}_id", to.to_string().to_lowercase());
     quote! {
-        // const _: () = {
-        //     use ::cms_for_rust::macro_prelude::relation_macro::*;
-        //     impl Linked<#to> for #from {
-        //         type Spec = ManyToMany;
-        //         fn spec() -> Self::Spec {
-        //             ManyToMany {
-        //                 conjuction_table: format!(
-        //                     "{}{}",
-        //                     <#from as Collection<Sqlite>>::table_name(),
-        //                     <#to as Collection<Sqlite>>::table_name(),
-        //                 ),
-        //                 // this should be the inverse
-        //                 base_id: format!(
-        //                     "{}_id",
-        //                     <#from as Collection<Sqlite>>::table_name().to_lowercase()
-        //                 ),
-        //                 destination_id: format!(
-        //                     "{}_id",
-        //                     <#to as Collection<Sqlite>>::table_name().to_lowercase()
-        //                 ),
-        //             }
-        //         }
-        //     }
-        //     impl Linked<#from> for #to {
-        //         type Spec = ManyToMany;
-        //         fn spec() -> Self::Spec {
-        //             ManyToMany {
-        //                 conjuction_table: format!(
-        //                     "{}{}",
-        //                     <#from as Collection<Sqlite>>::table_name(),
-        //                     <#to as Collection<Sqlite>>::table_name(),
-        //                 ),
-        //                 // this should be the inverse
-        //                 base_id: format!(
-        //                     "{}_id",
-        //                     <#to as Collection<Sqlite>>::table_name().to_lowercase()
-        //                 ),
-        //                 destination_id: format!(
-        //                     "{}_id",
-        //                     <#from as Collection<Sqlite>>::table_name().to_lowercase()
-        //                 ),
-        //             }
-        //         }
-        //     }
-        //     submit! {
-        //         SubmitDynRelation {
-        //             obj: || {
-        //                 Arc::new(
-        //                     ManyToManyDynamic::<#to, #from>::new()
-        //                 )
-        //             }
-        //         }
-        //     }
-        //     submit! {
-        //         SubmitDynRelation {
-        //             obj: || {
-        //                 Arc::new(
-        //                     ManyToManyDynamic::<#from, #to>::new()
-        //                 )
-        //             }
-        //         }
-        //     }
-        // };
+        const _: () = {
+            use ::claw_ql::prelude::macro_relation::*;
+            impl LinkData<#from_lower_case> for Relation<#from_lower_case, #to_lower_case> {
+                type Spec = ManyToMany<#from_lower_case, #to_lower_case>;
+                fn spec(self, table_1: #from_lower_case) -> Self::Spec {
+                    let junction = format!(
+                        "{start}{end}",
+                        start = table_1.table_name(),
+                        end = self.to.table_name()
+                    );
+                    ManyToMany {
+                        junction,
+                        id_1: format!("{}_id", table_1.table_name()),
+                        table_1,
+                        id_2: format!("{}_id", self.to.table_name()),
+                        table_2: self.to,
+                    }
+                }
+            }
+            impl LinkData<#to_lower_case> for Relation<#to_lower_case, #from_lower_case> {
+                type Spec = ManyToMany<#to_lower_case, #from_lower_case>;
+                fn spec(self, table_1: #to_lower_case) -> Self::Spec {
+                    let junction = format!(
+                        "{start}{end}",
+                        end = table_1.table_name(),
+                        start = self.to.table_name()
+                    );
+                    ManyToMany {
+                        junction,
+                        id_1: format!("{}_id", table_1.table_name()),
+                        table_1,
+                        id_2: format!("{}_id", self.to.table_name()),
+                        table_2: self.to,
+                    }
+                }
+            }
+        };
     }
 }
 
@@ -136,25 +116,6 @@ pub fn optional_to_many(rest: TwoIdent) -> TokenStream {
                     }
                 }
             }
-            // submit! {
-            //     SubmitDynRelation {
-            //         obj: || {
-            //             Arc::new(
-            //                 OptionalToManyDynamic::<#from, #to>::new()
-            //             )
-            //         }
-            //     }
-            // }
-            // // todo!()
-            // submit! {
-            //     SubmitDynRelation {
-            //         obj: || {
-            //             Arc::new(
-            //                 OptionalToManyInverseDynamic::<#from, #to>::new()
-            //             )
-            //         }
-            //     }
-            // }
         };
     }
 }

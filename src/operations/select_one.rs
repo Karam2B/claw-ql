@@ -1,8 +1,12 @@
 use std::marker::PhantomData;
 
-use crate::{execute::Execute, prelude::col};
+use crate::{
+    execute::Execute,
+    links::{LinkData, relation::Relation},
+    prelude::col,
+};
 use serde::Serialize;
-use sqlx::{ColumnIndex, Decode, Encode, Executor, Pool, Row, Type};
+use sqlx::{ColumnIndex, Decode, Encode,  Pool, Row, Type};
 
 use crate::{
     QueryBuilder,
@@ -11,8 +15,6 @@ use crate::{
     prelude::stmt,
     statements::select_st::SelectSt,
 };
-
-use super::{LinkData, Relation};
 
 pub trait SelectOneFragment<S: QueryBuilder>: Sync + Send {
     type Inner: Default + Send + Sync;
@@ -27,8 +29,8 @@ pub trait SelectOneFragment<S: QueryBuilder>: Sync + Send {
     fn take(self, data: Self::Inner) -> Self::Output;
 }
 
-pub fn get_one<S, Base>(collection: Base) -> GetOne<S, Base, (), ()> {
-    GetOne {
+pub fn select_one<S, Base>(collection: Base) -> SelectOne<S, Base, (), ()> {
+    SelectOne {
         _pd: PhantomData,
         collection,
         links: (),
@@ -36,7 +38,7 @@ pub fn get_one<S, Base>(collection: Base) -> GetOne<S, Base, (), ()> {
     }
 }
 
-pub struct GetOne<S, C, L, F> {
+pub struct SelectOne<S, C, L, F> {
     collection: C,
     links: L,
     filters: F,
@@ -50,7 +52,7 @@ pub struct SelectOneOutput<C, D> {
     pub links: D,
 }
 
-impl<S, Base, L, F> GetOne<S, Base, L, F>
+impl<S, Base, L, F> SelectOne<S, Base, L, F>
 where
     Base: Clone,
     S: QueryBuilder,
@@ -60,12 +62,12 @@ where
     pub fn relation<To>(
         self,
         to: To,
-    ) -> GetOne<S, Base, L::Bigger<<Relation<Base, To> as LinkData<Base>>::Spec>, F>
+    ) -> SelectOne<S, Base, L::Bigger<<Relation<Base, To> as LinkData<Base>>::Spec>, F>
     where
         Relation<Base, To>: LinkData<Base, Spec: SelectOneFragment<S> + Send>,
     {
         // let spec = <Relation<Base, To> as LinkData<Base>>::init_spec(self.collection.clone());
-        GetOne {
+        SelectOne {
             links: self.links.into_bigger(
                 Relation {
                     from: self.collection.clone(),
@@ -78,23 +80,23 @@ where
             _pd: PhantomData,
         }
     }
-    pub fn link<D>(self, ty: D) -> GetOne<S, Base, L::Bigger<D::Spec>, F>
+    pub fn link<D>(self, ty: D) -> SelectOne<S, Base, L::Bigger<D::Spec>, F>
     where
         D: LinkData<Base, Spec: SelectOneFragment<S> + Send>,
     {
         let spec = ty.spec(self.collection.clone());
-        GetOne {
+        SelectOne {
             links: self.links.into_bigger(spec),
             filters: self.filters,
             collection: self.collection,
             _pd: PhantomData,
         }
     }
-    pub fn filter<N>(self, ty: N) -> GetOne<S, Base, L, F::Bigger<N>>
+    pub fn filter<N>(self, ty: N) -> SelectOne<S, Base, L, F::Bigger<N>>
     where
         N: Filters<S, Base>,
     {
-        GetOne {
+        SelectOne {
             links: self.links,
             filters: self.filters.into_bigger(ty),
             collection: self.collection,
@@ -103,7 +105,6 @@ where
     }
 }
 
-#[rustfmt::skip]
 mod get_one_worker_tuple_impls {
     use sqlx::Pool;
 
@@ -136,7 +137,7 @@ mod get_one_worker_tuple_impls {
                 data: &'a mut Self::Inner,
                 pool: Pool<S>,
             ) -> impl std::future::Future<Output = ()> + Send {
-                async move { 
+                async move {
                     $(
                         paste!(self.$part.sub_op(
                             &mut data.$part, pool.clone()
@@ -153,10 +154,40 @@ mod get_one_worker_tuple_impls {
 
     implt!();
     implt!([R0, 0]);
-    implt!([R0, 0], [R1, 1]);
+    #[allow(unused)]
+    impl<S, R0, R1> SelectOneFragment<S> for (R0, R1)
+    where
+        S: QueryBuilder,
+        R0: Sync + Send + SelectOneFragment<S>,
+        R1: Sync + Send + SelectOneFragment<S>,
+    {
+        type Output = (R0::Output, R1::Output);
+        type Inner = (R0::Inner, R1::Inner);
+        fn on_select(&self, data: &mut Self::Inner, st: &mut SelectSt<S>) {
+            paste!(self.0.on_select(&mut data.0, st));
+            paste!(self.1.on_select(&mut data.1, st));
+        }
+        fn from_row(&self, data: &mut Self::Inner, row: &S::Row) {
+            paste!(self.0.from_row(&mut data.0, row));
+            paste!(self.1.from_row(&mut data.1, row));
+        }
+        fn sub_op<'a>(
+            &'a self,
+            data: &'a mut Self::Inner,
+            pool: Pool<S>,
+        ) -> impl std::future::Future<Output = ()> + Send {
+            async move {
+                paste!(self.0.sub_op(&mut data.0, pool.clone()).await);
+                paste!(self.1.sub_op(&mut data.1, pool.clone()).await);
+            }
+        }
+        fn take(self, data: Self::Inner) -> Self::Output {
+            (paste!(self.0.take(data.0)), paste!(self.1.take(data.1)))
+        }
+    }
 }
 
-impl<S, C, L, F> GetOne<S, C, L, F>
+impl<S, C, L, F> SelectOne<S, C, L, F>
 where
     S: QueryBuilder,
     SelectSt<S>: Execute<S>,
