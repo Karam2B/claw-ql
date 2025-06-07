@@ -2,15 +2,11 @@ use crate::{
     QueryBuilder,
     any_set::AnySet,
     collections::{Collection, OnMigrate},
-    dynamic_client::json_client::{
-        JsonCollection, SelectOneJsonFragment,
-    },
-    operations::{
-        insert_one::InsertOneFragment,
-        select_one::SelectOneFragment,
-    },
+    dynamic_client::json_client::{JsonCollection, SelectOneJsonFragment},
+    operations::{insert_one::InsertOneFragment, select_one::SelectOneFragment},
 };
-use serde::{Deserialize, Serialize};
+use convert_case::{Case, Casing};
+use serde::Serialize;
 use serde_json::Value;
 use sqlx::Executor;
 use std::{any::Any, collections::HashMap, ops::Not};
@@ -29,10 +25,8 @@ where
     Relation<F, T>: Clone,
     F: Clone,
 {
-    async fn custom_migration<'e>(
-        &self,
-        exec: impl for<'q> Executor<'q, Database = S> + Clone,
-    ) where
+    async fn custom_migration<'e>(&self, exec: impl for<'q> Executor<'q, Database = S> + Clone)
+    where
         S: QueryBuilder,
     {
         let relation = self.clone();
@@ -41,12 +35,18 @@ where
     }
 }
 
+// todo: add meta information here!!
 #[derive(Debug)]
 pub struct RelationEntry {
     pub from: String,
     pub to: String,
     /// like 'many_to_many<..>', 'one_to_many<..>', etc. there is no way to have this unique for now.
     pub ty: String,
+}
+
+pub struct RelationEntries {
+    pub entries: Vec<RelationEntry>,
+    private_to_construct_hack: (),
 }
 
 pub trait DynamicLinkForRelation<S> {
@@ -75,23 +75,26 @@ where
     // behavior of this function should be tracked via semver
     // other links may depends on the behavior of this function
     fn on_register(&self, entries: &mut Self::Entry) {
-        let from = self.from.table_name().to_lowercase().to_string();
-        let to = self.to.table_name().to_lowercase().to_string();
+        let from = self.from.table_name().to_case(Case::Snake).to_string();
+        let to = self.to.table_name().to_case(Case::Snake).to_string();
         let spec = self.clone().spec(self.from.clone());
         let ty = spec.global_ident().to_string();
         let entry = RelationEntry { from, to, ty };
         #[cfg(feature = "trace")]
         tracing::debug!("registering entry {:?}", entry);
-        entries.push(entry)
+        entries.entries.push(entry)
     }
 
     // type Entry = <Self as LinkData<F>>::Spec::DynamicSpec
-    type Entry = Vec<RelationEntry>;
+    type Entry = RelationEntries;
+    fn init_entry() -> Self::Entry {
+        RelationEntries {
+            entries: Vec::new(),
+            private_to_construct_hack: (),
+        }
+    }
 
-    fn on_finish(
-        &self,
-        _build_ctx: &AnySet,
-    ) -> Result<(), String> {
+    fn on_finish(&self, _build_ctx: &AnySet) -> Result<(), String> {
         Ok(())
     }
 
@@ -103,37 +106,34 @@ where
         &self,
         base_col: &dyn JsonCollection<S>,
         input: Value,
-        ctx: &Self::Entry,
-    ) -> Option<
-        Result<
-            Box<(dyn SelectOneJsonFragment<S> + 'static)>,
-            String,
-        >,
-    > {
-        // make sure the two the two collections are related
-        #[derive(Deserialize)]
-        struct Input(HashMap<String, Value>);
+        ctx: &AnySet,
+    ) -> Option<Result<Box<(dyn SelectOneJsonFragment<S> + 'static)>, String>> {
+        let input = serde_json::from_value::<HashMap<String, Value>>(input).ok()?;
 
-        let base = base_col.table_name().to_lowercase();
-        let rels = ctx.iter().filter(|e| e.from == base);
-        let rels = rels.collect::<Vec<_>>();
+        let base = base_col.table_name().to_case(Case::Snake);
+        let spec = self.clone().spec(self.from.clone());
 
-        let input =
-            serde_json::from_value::<Input>(input).ok()?.0;
+        // make sure the base collection have the said relation
+        let rels = self
+            .get_entry(&ctx)
+            .entries
+            .iter()
+            .filter(|e| e.from == base);
 
         let mut not_related = Vec::default();
 
         let s = input
             .into_iter()
             .filter_map(|(to, input)| {
-                // panic!("{rels:?}");
-                if rels.iter().any(|rel| rel.to == to).not() {
+                // make sure base collection is related to `to`
+                if rels.clone().any(|rel| rel.to == to).not() {
                     not_related.push(format!("{base} is not related to {to}",))
                 }
 
-                let spec = self.clone().spec(self.from.clone());
-                let specr: &dyn DynamicLinkForRelation<S> = &spec;
-                let specr = specr.on_each_select_one_request(input);
+                let specr = spec.on_each_select_one_request(input);
+
+                // propegate all errors
+                // todo: for now I'm displaying last error only! how to make this better?
                 match specr {
                     Ok(s) => {
                         return Some((to, s));
@@ -148,7 +148,7 @@ where
             .collect::<Vec<_>>();
 
         if not_related.is_empty().not() {
-            return Some(Err(format!("{not_related:?}")));
+            return Some(Err(not_related.last().unwrap().clone()));
         }
 
         return Some(Ok(Box::new(s)));

@@ -1,3 +1,4 @@
+use convert_case::{Case, Casing};
 use proc_macro_error::abort;
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -35,14 +36,12 @@ impl Parse for TwoIdent {
 }
 
 pub fn many_to_many(rest: TwoIdent) -> TokenStream {
-    let to_lower_case = Ident::new(rest.to.to_string().to_lowercase().as_str(), rest.to.span());
+    let to_lower_case = Ident::new(rest.to.to_string().to_case(Case::Snake).as_str(), rest.to.span());
     // let to = rest.to;
     let from_lower_case = Ident::new(
-        rest.from.to_string().to_lowercase().as_str(),
+        rest.from.to_string().to_case(Case::Snake).as_str(),
         rest.from.span(),
     );
-    // let from = rest.from;
-    // let foriegn_key = format!("{}_id", to.to_string().to_lowercase());
     quote! {
         const _: () = {
             use ::claw_ql::prelude::macro_relation::*;
@@ -85,14 +84,14 @@ pub fn many_to_many(rest: TwoIdent) -> TokenStream {
 }
 
 pub fn optional_to_many(rest: TwoIdent) -> TokenStream {
-    let to_lower_case = Ident::new(rest.to.to_string().to_lowercase().as_str(), rest.to.span());
+    let to_lower_case = Ident::new(rest.to.to_string().to_case(Case::Snake).as_str(), rest.to.span());
     let to = rest.to;
     let from_lower_case = Ident::new(
-        rest.from.to_string().to_lowercase().as_str(),
+        rest.from.to_string().to_case(Case::Snake).as_str(),
         rest.from.span(),
     );
     let from = rest.from;
-    let foriegn_key = format!("{}_id", to.to_string().to_lowercase());
+    let foriegn_key = format!("{}_id", to.to_string().to_case(Case::Snake));
     quote! {
         const _: () = {
             use ::claw_ql::prelude::macro_relation::*;

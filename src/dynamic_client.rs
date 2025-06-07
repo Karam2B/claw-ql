@@ -7,7 +7,7 @@ use crate::{
 use build_mode::{maxmimal, minimal};
 use collections::Collections;
 use json_client::JsonCollection;
-use std::marker::PhantomData;
+use std::{collections::HashSet, marker::PhantomData, ops::Not};
 
 use crate::{
     QueryBuilder,
@@ -16,19 +16,12 @@ use crate::{
     operations::select_one::SelectOneFragment,
 };
 
-pub struct DynamicClient<
-    BuildMode: BuildModeBehaviour,
-    Collections,
-    Links,
-    Filters,
-    DB,
-> {
+pub struct DynamicClient<BuildMode: BuildModeBehaviour, Collections, Links, Filters, DB> {
     pub collections: Collections,
     pub links: Links,
     pub filters: Filters,
+    pub globals: HashSet<&'static str>,
     pub build_context: AnySet,
-    #[deprecated]
-    pub context: BuildMode::Context,
     pub build_mode: BuildMode,
     pub _pd: PhantomData<DB>,
 }
@@ -37,9 +30,9 @@ impl Default for DynamicClient<minimal, (), (), (), ()> {
     fn default() -> Self {
         DynamicClient {
             _pd: PhantomData,
-            context: Default::default(),
             links: (),
             collections: (),
+            globals: HashSet::new(),
             filters: (),
             build_mode: minimal,
             build_context: AnySet::default(),
@@ -51,15 +44,11 @@ impl<B: BuildModeBehaviour> DynamicClient<B, (), (), (), ()> {
     pub fn build_mode<BM: BuildModeBehaviour>(
         self,
         build_mode: BM,
-    ) -> DynamicClient<BM, (), (), (), ()>
-    where
-        BM::Context: Default,
-    {
-        let context = BM::Context::default();
+    ) -> DynamicClient<BM, (), (), (), ()> {
         DynamicClient {
+            globals: self.globals,
             collections: self.collections,
             links: self.links,
-            context,
             _pd: PhantomData,
             build_context: self.build_context,
             build_mode,
@@ -71,10 +60,10 @@ impl<B: BuildModeBehaviour> DynamicClient<B, (), (), (), ()> {
         S: QueryBuilder,
     {
         DynamicClient {
+            globals: self.globals,
             _pd: PhantomData,
             links: self.links,
             collections: self.collections,
-            context: self.context,
             build_context: self.build_context,
             build_mode: self.build_mode,
             filters: self.filters,
@@ -83,7 +72,7 @@ impl<B: BuildModeBehaviour> DynamicClient<B, (), (), (), ()> {
 }
 
 pub trait BuildModeBehaviour {
-    type Context;
+    // type Context;
 }
 
 #[allow(non_camel_case_types)]
@@ -94,39 +83,34 @@ pub mod build_mode {
 }
 
 impl BuildModeBehaviour for build_mode::minimal {
-    type Context = ();
+    // type Context = ();
 }
 
 impl BuildModeBehaviour for build_mode::maxmimal {
-    type Context = ();
+    // type Context = ();
 }
 
 impl BuildModeBehaviour for build_mode::json_client_bm {
-    type Context = ();
+    // type Context = ();
 }
 
 #[cfg(feature = "beta")]
 impl<B: BuildModeBehaviour> DynamicClient<B, (), (), (), ()> {
-    pub fn catch_errors_early(
-        self,
-    ) -> DynamicClient<maxmimal, (), (), (), ()> {
+    pub fn catch_errors_early(self) -> DynamicClient<maxmimal, (), (), (), ()> {
         DynamicClient {
             collections: self.collections,
             links: self.links,
-            context: (),
             _pd: PhantomData,
             build_context: self.build_context,
             build_mode: maxmimal,
             filters: self.filters,
+            globals: self.globals,
         }
     }
 }
 
 pub mod migrate {
-    use super::{
-        BuildModeBehaviour, DynamicClient,
-        json_client::JsonCollection, links::Links,
-    };
+    use super::{BuildModeBehaviour, DynamicClient, json_client::JsonCollection, links::Links};
     use crate::{
         QueryBuilder,
         any_set::AnySet,
@@ -144,13 +128,8 @@ pub mod migrate {
         L: OnMigrate<D>,
         B: BuildModeBehaviour,
     {
-        pub async fn migrate(
-            &self,
-            exec: impl for<'e> Executor<'e, Database = D> + Clone,
-        ) {
-            self.collections
-                .custom_migration(exec.clone())
-                .await;
+        pub async fn migrate(&self, exec: impl for<'e> Executor<'e, Database = D> + Clone) {
+            self.collections.custom_migration(exec.clone()).await;
             self.links.custom_migration(exec).await;
         }
     }
@@ -166,16 +145,10 @@ pub mod links {
     };
 
     pub trait Links<S> {
-        fn on_finish(
-            &self,
-            build_ctx: &AnySet,
-        ) -> Result<(), String>;
+        fn on_finish(&self, build_ctx: &AnySet) -> Result<(), String>;
         fn into_dynamic_link_trait_objects(
             self,
-        ) -> HashMap<
-            &'static str,
-            Arc<dyn DynamicLinkTraitObject<S>>,
-        >;
+        ) -> HashMap<&'static str, Arc<dyn DynamicLinkTraitObject<S>>>;
     }
 
     macro_rules! implt {
@@ -213,10 +186,7 @@ pub mod links {
         R0: DynamicLink<S> + Send + Sync + 'static,
         R1: DynamicLink<S> + Send + Sync + 'static,
     {
-        fn on_finish(
-            &self,
-            build_ctx: &AnySet,
-        ) -> Result<(), String> {
+        fn on_finish(&self, build_ctx: &AnySet) -> Result<(), String> {
             self.0.on_finish(build_ctx);
             self.1.on_finish(build_ctx);
 
@@ -224,14 +194,8 @@ pub mod links {
         }
         fn into_dynamic_link_trait_objects(
             self,
-        ) -> HashMap<
-            &'static str,
-            Arc<dyn DynamicLinkTraitObject<S>>,
-        > {
-            let mut map: HashMap<
-                _,
-                Arc<dyn DynamicLinkTraitObject<S>>,
-            > = HashMap::new();
+        ) -> HashMap<&'static str, Arc<dyn DynamicLinkTraitObject<S>>> {
+            let mut map: HashMap<_, Arc<dyn DynamicLinkTraitObject<S>>> = HashMap::new();
             map.insert(self.0.json_entry(), Arc::new(self.0));
             map.insert(self.1.json_entry(), Arc::new(self.1));
             map
@@ -249,15 +213,11 @@ pub mod collections {
     use std::sync::Arc;
 
     pub trait Collections<DB> {
-        fn into_dynamic_collections(
-            self,
-        ) -> Vec<Arc<dyn JsonCollection<DB>>>;
+        fn into_dynamic_collections(self) -> Vec<Arc<dyn JsonCollection<DB>>>;
     }
 
     impl<S> Collections<S> for JC<S> {
-        fn into_dynamic_collections(
-            self,
-        ) -> Vec<Arc<dyn JsonCollection<S>>> {
+        fn into_dynamic_collections(self) -> Vec<Arc<dyn JsonCollection<S>>> {
             self.0.into_values().collect()
         }
     }
@@ -303,46 +263,23 @@ pub mod json_client {
         any_set::AnySet,
         collections::{Collection, OnMigrate},
         execute::Execute,
-        links::{
-            DynamicLink, DynamicLinkTraitObject, LinkData,
-            relation::Relation,
-        },
-        operations::select_one::{
-            SelectOneFragment, SelectOneOutput,
-        },
+        links::{DynamicLink, DynamicLinkTraitObject, LinkData, relation::Relation},
+        operations::select_one::{SelectOneFragment, SelectOneOutput},
         prelude::{col, stmt::SelectSt},
     };
+    use convert_case::{Case, Casing};
     use serde::{Deserialize, Serialize};
     use serde_json::{Map, Value, json};
-    use sqlx::{
-        ColumnIndex, Database, Decode, Encode, Executor, Pool,
-        Row, prelude::Type,
-    };
-    use std::{
-        collections::HashMap, marker::PhantomData, ops::Not,
-        pin::Pin, sync::Arc,
-    };
+    use sqlx::{ColumnIndex, Database, Decode, Encode, Executor, Pool, Row, prelude::Type};
+    use std::{collections::HashMap, marker::PhantomData, ops::Not, pin::Pin, sync::Arc};
 
-    pub struct JC<S>(
-        pub(crate) HashMap<String, Arc<dyn JsonCollection<S>>>,
-    );
-    pub struct JL<S>(
-        pub(crate)  HashMap<
-            &'static str,
-            Arc<dyn DynamicLinkTraitObject<S>>,
-        >,
-    );
-    pub struct JF<S>(
-        pub(crate) HashMap<&'static str, PhantomData<S>>,
-    );
+    pub struct JC<S>(pub(crate) HashMap<String, Arc<dyn JsonCollection<S>>>);
+    pub struct JL<S>(pub(crate) HashMap<&'static str, Arc<dyn DynamicLinkTraitObject<S>>>);
+    pub struct JF<S>(pub(crate) HashMap<&'static str, PhantomData<S>>);
 
     pub struct JsonClient<S: Database> {
-        pub(crate) collections:
-            HashMap<String, Arc<dyn JsonCollection<S>>>,
-        pub(crate) links: HashMap<
-            &'static str,
-            Arc<dyn DynamicLinkTraitObject<S>>,
-        >,
+        pub(crate) collections: HashMap<String, Arc<dyn JsonCollection<S>>>,
+        pub(crate) links: HashMap<&'static str, Arc<dyn DynamicLinkTraitObject<S>>>,
         pub(crate) link_context: AnySet,
         pub(crate) db: Pool<S>,
     }
@@ -351,10 +288,7 @@ pub mod json_client {
         fn on_select(&self, stmt: &mut SelectSt<S>)
         where
             S: QueryBuilder;
-        fn from_row_scoped(
-            &self,
-            row: &S::Row,
-        ) -> serde_json::Value
+        fn from_row_scoped(&self, row: &S::Row) -> serde_json::Value
         where
             S: Database;
         fn table_name(&self) -> &'static str;
@@ -378,23 +312,16 @@ pub mod json_client {
             self.table_name()
         }
         #[inline]
-        fn from_row_scoped(
-            &self,
-            row: &S::Row,
-        ) -> serde_json::Value
+        fn from_row_scoped(&self, row: &S::Row) -> serde_json::Value
         where
             S: Database,
         {
-            let row = <Self as Collection<S>>::from_row_scoped(
-                self, row,
-            );
+            let row = <Self as Collection<S>>::from_row_scoped(self, row);
             serde_json::to_value(row).unwrap()
         }
     }
 
-    pub trait SelectOneJsonFragment<S: QueryBuilder>:
-        Send + Sync
-    {
+    pub trait SelectOneJsonFragment<S: QueryBuilder>: Send + Sync {
         fn on_select(&mut self, st: &mut SelectSt<S>);
         fn from_row(&mut self, row: &S::Row);
         fn sub_op<'this>(
@@ -418,8 +345,7 @@ pub mod json_client {
         fn sub_op<'this>(
             &'this mut self,
             pool: Pool<S>,
-        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>>
-        {
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
             Box::pin(async move {
                 for item in self.iter_mut() {
                     item.1.sub_op(pool.clone()).await
@@ -428,12 +354,15 @@ pub mod json_client {
         }
 
         fn take(self: Box<Self>) -> serde_json::Value {
-            self.into_iter().map(|e| (e.0, e.1.take())).collect()
+            let mut map = serde_json::Map::new();
+            self.into_iter().for_each(|e| {
+                map.insert(e.0, e.1.take());
+            });
+            map.into()
         }
     }
 
-    impl<S: QueryBuilder, T> SelectOneJsonFragment<S>
-        for (T, T::Inner)
+    impl<S: QueryBuilder, T> SelectOneJsonFragment<S> for (T, T::Inner)
     where
         T::Output: Serialize,
         T: SelectOneFragment<S>,
@@ -452,11 +381,8 @@ pub mod json_client {
         fn sub_op<'this>(
             &'this mut self,
             pool: Pool<S>,
-        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>>
-        {
-            Box::pin(async {
-                self.0.sub_op(&mut self.1, pool).await
-            })
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
+            Box::pin(async { self.0.sub_op(&mut self.1, pool).await })
         }
 
         #[inline]
@@ -467,14 +393,11 @@ pub mod json_client {
     }
 
     impl<S> DynamicClient<minimal, (), (), (), S> {
-        pub fn to_build_json_client(
-            self,
-        ) -> DynamicClient<json_client_bm, JC<S>, JL<S>, JF<S>, S>
-        {
+        pub fn to_build_json_client(self) -> DynamicClient<json_client_bm, JC<S>, JL<S>, JF<S>, S> {
             DynamicClient {
+                globals: self.globals,
                 collections: JC(Default::default()),
                 links: JL(Default::default()),
-                context: self.context,
                 _pd: PhantomData,
                 build_context: self.build_context,
                 build_mode: json_client_bm,
@@ -487,10 +410,7 @@ pub mod json_client {
     where
         S: QueryBuilder,
     {
-        pub fn add_relation<F, T>(
-            mut self,
-            link: Relation<F, T>,
-        ) -> Self
+        pub fn add_relation<F, T>(mut self, link: Relation<F, T>) -> Self
         where
             F: 'static + Send + Sync,
             T: 'static + Send + Sync,
@@ -504,7 +424,7 @@ pub mod json_client {
             {
                 let new = self
                     .build_context
-                    .set(<Relation<F, T> as DynamicLink<S>>::Entry::default());
+                    .set(<Relation<F, T> as DynamicLink<S>>::init_entry());
             }
 
             let entry = self
@@ -512,26 +432,26 @@ pub mod json_client {
                 .get_mut::<<Relation<F, T> as DynamicLink<S>>::Entry>()
                 .unwrap();
             link.on_register(entry);
-            let name =
-                <Relation<F, T> as DynamicLink<S>>::json_entry();
+            let name = <Relation<F, T> as DynamicLink<S>>::json_entry();
             self.links.0.insert(name, Arc::new(link));
             self
         }
 
+        #[track_caller]
         pub fn add_link<L>(mut self, link: L) -> Self
         where
             L: DynamicLink<S> + 'static + Send + Sync,
         {
-            if self.build_context.get::<L::Entry>().is_none() {
-                self.build_context.set(L::Entry::default());
+            let false_if_existed = self.globals.insert(link.json_entry());
+            if false_if_existed.not() {
+                panic!("{} already exist as global!", link.json_entry())
             }
-            let entry = self
-                .build_context
-                .get_mut::<L::Entry>()
-                .unwrap();
+            if self.build_context.get::<L::Entry>().is_none() {
+                self.build_context.set(L::init_entry());
+            }
+            let entry = self.build_context.get_mut::<L::Entry>().unwrap();
             link.on_register(entry);
             let name = <L as DynamicLink<S>>::json_entry();
-            self.links.0.insert(name, Arc::new(link));
             Self { ..self }
         }
         pub fn add_collection<C>(mut self, collection: C) -> Self
@@ -539,19 +459,16 @@ pub mod json_client {
             C: JsonCollection<S>,
         {
             let table_name = collection.table_name();
-            self.collections.0.insert(
-                table_name.to_string(),
-                Arc::new(collection),
-            );
+            self.collections
+                .0
+                .insert(table_name.to_string(), Arc::new(collection));
             Self { ..self }
         }
-        pub fn finish(
-            self,
-            pool: Pool<S>,
-        ) -> Result<JsonClient<S>, String> {
-            self.links.0.iter().try_for_each(|e| {
-                e.1.on_finish(&self.build_context)
-            })?;
+        pub fn finish(self, pool: Pool<S>) -> Result<JsonClient<S>, String> {
+            self.links
+                .0
+                .iter()
+                .try_for_each(|e| e.1.on_finish(&self.build_context))?;
 
             Ok(JsonClient {
                 collections: self.collections.0,
@@ -569,21 +486,17 @@ pub mod json_client {
         L: Links<S>,
         S: QueryBuilder,
     {
-        pub fn create_json_client(
-            self,
-            pool: Pool<S>,
-        ) -> Result<JsonClient<S>, String> {
+        pub fn create_json_client(self, pool: Pool<S>) -> Result<JsonClient<S>, String> {
             let collections = self
                 .collections
                 .into_dynamic_collections()
                 .into_iter()
-                .map(|e| (e.table_name().to_lowercase(), e))
+                .map(|e| (e.table_name().to_case(Case::Snake), e))
                 .collect();
 
             self.links.on_finish(&self.build_context)?;
 
-            let links =
-                self.links.into_dynamic_link_trait_objects();
+            let links = self.links.into_dynamic_link_trait_objects();
 
             Ok(JsonClient {
                 collections,
@@ -596,18 +509,12 @@ pub mod json_client {
 
     impl<S> JsonClient<S>
     where
-        S: QueryBuilder<
-            Output = <S as Database>::Arguments<'static>,
-        >,
-        for<'c> &'c mut S::Connection:
-            Executor<'c, Database = S>,
+        S: QueryBuilder<Output = <S as Database>::Arguments<'static>>,
+        for<'c> &'c mut S::Connection: Executor<'c, Database = S>,
         for<'e> i64: Encode<'e, S> + Type<S> + Decode<'e, S>,
         for<'e> &'e str: ColumnIndex<S::Row>,
     {
-        pub async fn select_one(
-            &self,
-            input: Value,
-        ) -> Result<Value, String> {
+        pub async fn select_one(&self, input: Value) -> Result<Value, String> {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
             struct Input {
@@ -617,8 +524,8 @@ pub mod json_client {
                 #[serde(default)]
                 pub links: Map<String, Value>,
             };
-            let input: Input = serde_json::from_value(input)
-                .map_err(|e| format!("invalid input: {e:?}"))?;
+            let input: Input =
+                serde_json::from_value(input).map_err(|e| format!("invalid input: {e:?}"))?;
 
             let c = self
                 .collections
@@ -635,11 +542,8 @@ pub mod json_client {
                 .filter_map(|e| {
                     let name = e.1.json_entry();
                     let input = input.links.get(*e.0)?.clone();
-                    let s = e.1.on_each_json_request(
-                        c.as_ref(),
-                        input,
-                        &self.link_context,
-                    );
+                    let s =
+                        e.1.on_each_json_request(c.as_ref(), input, &self.link_context);
 
                     match s {
                         Some(Ok(s)) => Some((name, s)),
@@ -690,10 +594,7 @@ pub mod json_client {
                 let op = link.1.sub_op(self.db.clone()).await;
             }
 
-            res.links = links
-                .into_iter()
-                .map(|e| (e.0, e.1.take()))
-                .collect();
+            res.links = links.into_iter().map(|e| (e.0, e.1.take())).collect();
 
             Ok(serde_json::to_value(res).unwrap())
         }
@@ -708,23 +609,23 @@ where
     F: BuildTuple,
     S: QueryBuilder,
 {
-    pub fn add_link<Link>(
-        mut self,
-        link: Link,
-    ) -> DynamicClient<maxmimal, C, L::Bigger<Link>, F, S>
+    pub fn add_link<Link>(mut self, link: Link) -> DynamicClient<maxmimal, C, L::Bigger<Link>, F, S>
     where
         Link: DynamicLink<S>,
     {
-        if self.build_context.get::<Link::Entry>().is_none() {
-            self.build_context.set(Link::Entry::default());
+        let false_if_existed = self.globals.insert(Link::json_entry());
+        if false_if_existed.not() {
+            panic!("{} already exist as global!", Link::json_entry())
         }
-        let entry =
-            self.build_context.get_mut::<Link::Entry>().unwrap();
+        if self.build_context.get::<Link::Entry>().is_none() {
+            self.build_context.set(Link::init_entry());
+        }
+        let entry = self.build_context.get_mut::<Link::Entry>().unwrap();
         link.on_register(entry);
         DynamicClient {
             collections: self.collections,
             links: self.links.into_bigger(link),
-            context: self.context,
+            globals: self.globals,
             _pd: PhantomData,
             build_context: self.build_context,
             build_mode: self.build_mode,
@@ -734,47 +635,32 @@ where
     pub fn add_relation<From, To>(
         self,
         relation: Relation<From, To>,
-    ) -> DynamicClient<
-        maxmimal,
-        C,
-        L::Bigger<<Relation<From, To> as LinkData<From>>::Spec>,
-        F,
-        S,
-    >
+    ) -> DynamicClient<maxmimal, C, L::Bigger<<Relation<From, To> as LinkData<From>>::Spec>, F, S>
     where
         From: Clone,
         Relation<From, To>: LinkData<From, Spec: OnMigrate<S>>,
     {
         let imove = relation.from.clone();
         DynamicClient {
+            globals: self.globals,
             _pd: PhantomData,
             links: self.links.into_bigger(relation.spec(imove)),
-            context: self.context,
             collections: self.collections,
             build_context: self.build_context,
             build_mode: self.build_mode,
             filters: self.filters,
         }
     }
-    pub fn add_collection<N>(
-        self,
-        collection: N,
-    ) -> DynamicClient<maxmimal, C::Bigger<N>, L, F, S>
+    pub fn add_collection<N>(self, collection: N) -> DynamicClient<maxmimal, C::Bigger<N>, L, F, S>
     where
         C::Bigger<N>: Collections<S>,
-        N: Collection<S>
-            + JsonCollection<S>
-            + Send
-            + Sync
-            + 'static,
+        N: Collection<S> + JsonCollection<S> + Send + Sync + 'static,
     {
         DynamicClient {
+            globals: self.globals,
             _pd: PhantomData,
             links: self.links,
-            context: self.context,
-            collections: self
-                .collections
-                .into_bigger(collection),
+            collections: self.collections.into_bigger(collection),
             build_context: self.build_context,
             build_mode: self.build_mode,
             filters: self.filters,
@@ -789,17 +675,12 @@ where
     F: BuildTuple,
     S: QueryBuilder,
 {
-    pub fn add_collection<N>(
-        self,
-        collection: N,
-    ) -> DynamicClient<minimal, C::Bigger<N>, L, F, S> {
+    pub fn add_collection<N>(self, collection: N) -> DynamicClient<minimal, C::Bigger<N>, L, F, S> {
         DynamicClient {
+            globals: self.globals,
             _pd: PhantomData,
             links: self.links,
-            context: self.context,
-            collections: self
-                .collections
-                .into_bigger(collection),
+            collections: self.collections.into_bigger(collection),
             build_context: self.build_context,
             build_mode: self.build_mode,
             filters: self.filters,
@@ -808,83 +689,47 @@ where
     pub fn add_relation<From, To>(
         self,
         rel: Relation<From, To>,
-    ) -> DynamicClient<
-        minimal,
-        C,
-        L::Bigger<Relation<From, To>>,
-        F,
-        S,
-    > {
-        //     minimal,
-        //     C,
-        //     <L::Bigger<(From, Relation<From, To>)> as BuildTuple>::Bigger<(To, Relation<To, From>)>,
-        //     F,
-        //     DB,
-        // >
-        // where
-        //     Relation<From, To>: LinkData<From>,
-        //     Relation<To, From>: LinkData<To>,
-        //     L::Bigger<(From, Relation<From, To>)>: BuildTuple,
-        // {
+    ) -> DynamicClient<minimal, C, L::Bigger<Relation<From, To>>, F, S> {
+        // let false_if_existed = self.globals.insert(Link::json_entry());
+        // if false_if_existed.not() {
+        //     panic!("{} already exist as global!", Link::json_entry())
+        // }
+        // if self.build_context.get::<Link::Entry>().is_none() {
+        //     self.build_context.set(Link::init_entry());
+        // }
+        // let entry = self.build_context.get_mut::<Link::Entry>().unwrap();
+        // link.on_register(entry);
         DynamicClient {
+            globals: self.globals,
             _pd: PhantomData,
             links: self.links.into_bigger(rel),
-            context: self.context,
             collections: self.collections,
             build_context: self.build_context,
             build_mode: self.build_mode,
             filters: self.filters,
         }
     }
-    pub fn add_link<Link>(
-        mut self,
-        link: Link,
-    ) -> DynamicClient<minimal, C, L::Bigger<Link>, F, S>
+    pub fn add_link<Link>(mut self, link: Link) -> DynamicClient<minimal, C, L::Bigger<Link>, F, S>
     where
         Link: DynamicLink<S>,
     {
-        if self.build_context.get::<Link::Entry>().is_none() {
-            self.build_context.set(Link::Entry::default());
+        let false_if_existed = self.globals.insert(Link::json_entry());
+        if false_if_existed.not() {
+            panic!("{} already exist as global!", Link::json_entry())
         }
-        let entry =
-            self.build_context.get_mut::<Link::Entry>().unwrap();
+        if self.build_context.get::<Link::Entry>().is_none() {
+            self.build_context.set(Link::init_entry());
+        }
+        let entry = self.build_context.get_mut::<Link::Entry>().unwrap();
         link.on_register(entry);
         DynamicClient {
+            globals: self.globals,
             _pd: PhantomData,
             links: self.links.into_bigger(link),
-            context: self.context,
             collections: self.collections,
             build_context: self.build_context,
             build_mode: self.build_mode,
             filters: self.filters,
-        }
-    }
-    pub fn last_rel_is_crud<B1, L1, B2, L2>(self) -> Self
-    where
-        L: TupleLastItem<2, Last = ((B1, L1), (B2, L2))>,
-        L1: LinkData<B1, Spec: SelectOneFragment<S>>,
-    {
-        self
-    }
-    pub fn last_link_is_crud<Base, Link>(self) -> Self
-    where
-        L: TupleLastItem<1, Last = (Base, Link)>,
-        Link: LinkData<Base, Spec: SelectOneFragment<S>>,
-    {
-        self
-    }
-    pub fn add_filter<N>(
-        self,
-        filter: N,
-    ) -> DynamicClient<minimal, C, L, F::Bigger<N>, S> {
-        DynamicClient {
-            _pd: PhantomData,
-            links: self.links,
-            context: self.context,
-            collections: self.collections,
-            build_context: self.build_context,
-            filters: self.filters.into_bigger(filter),
-            build_mode: self.build_mode,
         }
     }
 }

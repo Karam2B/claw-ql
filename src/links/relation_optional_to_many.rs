@@ -1,6 +1,7 @@
 use std::ops::Not;
 use std::process::Output;
 
+use convert_case::{Case, Casing};
 use serde::Serialize;
 use sqlx::{ColumnIndex, Decode, Executor, Row, Sqlite, prelude::Type};
 
@@ -53,7 +54,7 @@ ON DELETE SET NULL;
 ",
             from_table_name = self.from.table_name(),
             to_table_name = self.to.table_name(),
-            col_name = format!("{}_id", self.to.table_name().to_lowercase()),
+            col_name = format!("{}_id", self.to.table_name().to_case(Case::Snake)),
             dio = ""
         ))
         .execute(exec.clone())

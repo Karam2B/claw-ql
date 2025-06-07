@@ -1,3 +1,4 @@
+use convert_case::{Case, Casing};
 use proc_macro2::Ident;
 use proc_macro_error::abort;
 use proc_macro2::TokenStream;
@@ -40,14 +41,14 @@ pub fn main(input: DeriveInput) -> TokenStream {
 
     let table_name_camel_case = &input.ident;
     let table_name_lower_case_ident = Ident::new(
-        input.ident.to_string().to_lowercase().as_str(),
+        input.ident.to_string().to_case(Case::Snake).as_str(),
         input.ident.span()
     );
     let partial_ident = Ident::new(&format!("{}Partial", table_name_camel_case), proc_macro2::Span::call_site());
 
     let mut main_derive = MainDerive { 
         fields: vec![],
-        table_lower_case: table_name_camel_case.to_string().to_lowercase(),
+        table_lower_case: table_name_camel_case.to_string().to_case(Case::Snake),
     };
     main_derive.visit_derive_input(&input);
 

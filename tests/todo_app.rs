@@ -85,6 +85,7 @@ async fn main() {
     .await
     .unwrap();
 
+    // using generic operatioin
     let res = select_one(todo)
         .relation(category)
         .exec_op(pool.clone())
@@ -110,6 +111,7 @@ async fn main() {
 
     let jc = schema.create_json_client(pool.clone()).unwrap();
 
+    // using dynamic operation
     let res = jc
         .select_one(json!({
             "collection": "todo",

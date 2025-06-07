@@ -12,6 +12,7 @@ tracing = { version = "0.1.40", optional = true }
 # feature serde
 serde_json = { version = "1.0.117", optional = true }
 serde = { version = "1.0.203", optional = true }
+convert_case = "0.8.0"
 
 [dev-dependencies]
 tracing-subscriber = "0.3.18"
