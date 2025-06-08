@@ -1,5 +1,3 @@
-#![allow(unused)]
-#![allow(deprecated)]
 use crate::{
     any_set::AnySet,
     links::{DynamicLink, LinkData, relation::Relation},
@@ -7,20 +5,19 @@ use crate::{
 use build_mode::{maxmimal, minimal};
 use collections::Collections;
 use json_client::JsonCollection;
-use std::{collections::HashSet, marker::PhantomData, ops::Not};
+use sqlx::Executor;
+use std::marker::PhantomData;
 
 use crate::{
     QueryBuilder,
-    build_tuple::{BuildTuple, TupleLastItem},
+    build_tuple::BuildTuple,
     collections::{Collection, OnMigrate},
-    operations::select_one::SelectOneFragment,
 };
 
 pub struct DynamicClient<BuildMode: BuildModeBehaviour, Collections, Links, Filters, DB> {
     pub collections: Collections,
     pub links: Links,
     pub filters: Filters,
-    pub globals: HashSet<&'static str>,
     pub build_context: AnySet,
     pub build_mode: BuildMode,
     pub _pd: PhantomData<DB>,
@@ -32,7 +29,6 @@ impl Default for DynamicClient<minimal, (), (), (), ()> {
             _pd: PhantomData,
             links: (),
             collections: (),
-            globals: HashSet::new(),
             filters: (),
             build_mode: minimal,
             build_context: AnySet::default(),
@@ -46,7 +42,6 @@ impl<B: BuildModeBehaviour> DynamicClient<B, (), (), (), ()> {
         build_mode: BM,
     ) -> DynamicClient<BM, (), (), (), ()> {
         DynamicClient {
-            globals: self.globals,
             collections: self.collections,
             links: self.links,
             _pd: PhantomData,
@@ -60,7 +55,6 @@ impl<B: BuildModeBehaviour> DynamicClient<B, (), (), (), ()> {
         S: QueryBuilder,
     {
         DynamicClient {
-            globals: self.globals,
             _pd: PhantomData,
             links: self.links,
             collections: self.collections,
@@ -68,6 +62,19 @@ impl<B: BuildModeBehaviour> DynamicClient<B, (), (), (), ()> {
             build_mode: self.build_mode,
             filters: self.filters,
         }
+    }
+}
+
+impl<B, C, L, F, D> DynamicClient<B, C, L, F, D>
+where
+    D: QueryBuilder,
+    C: OnMigrate<D>,
+    L: OnMigrate<D>,
+    B: BuildModeBehaviour,
+{
+    pub async fn migrate(&self, exec: impl for<'e> Executor<'e, Database = D> + Clone) {
+        self.collections.custom_migration(exec.clone()).await;
+        self.links.custom_migration(exec).await;
     }
 }
 
@@ -104,33 +111,6 @@ impl<B: BuildModeBehaviour> DynamicClient<B, (), (), (), ()> {
             build_context: self.build_context,
             build_mode: maxmimal,
             filters: self.filters,
-            globals: self.globals,
-        }
-    }
-}
-
-pub mod migrate {
-    use super::{BuildModeBehaviour, DynamicClient, json_client::JsonCollection, links::Links};
-    use crate::{
-        QueryBuilder,
-        any_set::AnySet,
-        collections::OnMigrate,
-        links::{DynamicLink, DynamicLinkTraitObject},
-    };
-    use paste::paste;
-    use sqlx::{Database, Executor};
-    use std::{collections::HashMap, sync::Arc};
-
-    impl<B, C, L, F, D> DynamicClient<B, C, L, F, D>
-    where
-        D: QueryBuilder,
-        C: OnMigrate<D>,
-        L: OnMigrate<D>,
-        B: BuildModeBehaviour,
-    {
-        pub async fn migrate(&self, exec: impl for<'e> Executor<'e, Database = D> + Clone) {
-            self.collections.custom_migration(exec.clone()).await;
-            self.links.custom_migration(exec).await;
         }
     }
 }
@@ -269,12 +249,13 @@ pub mod json_client {
     };
     use convert_case::{Case, Casing};
     use serde::{Deserialize, Serialize};
-    use serde_json::{Map, Value, json};
+    use serde_json::{Map, Value};
     use sqlx::{ColumnIndex, Database, Decode, Encode, Executor, Pool, Row, prelude::Type};
     use std::{collections::HashMap, marker::PhantomData, ops::Not, pin::Pin, sync::Arc};
 
     pub struct JC<S>(pub(crate) HashMap<String, Arc<dyn JsonCollection<S>>>);
     pub struct JL<S>(pub(crate) HashMap<&'static str, Arc<dyn DynamicLinkTraitObject<S>>>);
+    #[allow(unused)]
     pub struct JF<S>(pub(crate) HashMap<&'static str, PhantomData<S>>);
 
     pub struct JsonClient<S: Database> {
@@ -395,7 +376,6 @@ pub mod json_client {
     impl<S> DynamicClient<minimal, (), (), (), S> {
         pub fn to_build_json_client(self) -> DynamicClient<json_client_bm, JC<S>, JL<S>, JF<S>, S> {
             DynamicClient {
-                globals: self.globals,
                 collections: JC(Default::default()),
                 links: JL(Default::default()),
                 _pd: PhantomData,
@@ -422,8 +402,7 @@ pub mod json_client {
                 .get::<<Relation<F, T> as DynamicLink<S>>::Entry>()
                 .is_none()
             {
-                let new = self
-                    .build_context
+                self.build_context
                     .set(<Relation<F, T> as DynamicLink<S>>::init_entry());
             }
 
@@ -442,16 +421,11 @@ pub mod json_client {
         where
             L: DynamicLink<S> + 'static + Send + Sync,
         {
-            let false_if_existed = self.globals.insert(link.json_entry());
-            if false_if_existed.not() {
-                panic!("{} already exist as global!", link.json_entry())
-            }
             if self.build_context.get::<L::Entry>().is_none() {
                 self.build_context.set(L::init_entry());
             }
             let entry = self.build_context.get_mut::<L::Entry>().unwrap();
             link.on_register(entry);
-            let name = <L as DynamicLink<S>>::json_entry();
             Self { ..self }
         }
         pub fn add_collection<C>(mut self, collection: C) -> Self
@@ -519,11 +493,13 @@ pub mod json_client {
             #[serde(deny_unknown_fields)]
             struct Input {
                 pub collection: String,
+                #[allow(unused)]
                 #[serde(default)]
                 pub filters: Map<String, Value>,
                 #[serde(default)]
                 pub links: Map<String, Value>,
-            };
+            }
+
             let input: Input =
                 serde_json::from_value(input).map_err(|e| format!("invalid input: {e:?}"))?;
 
@@ -591,7 +567,7 @@ pub mod json_client {
                 .unwrap();
 
             for link in links.iter_mut() {
-                let op = link.1.sub_op(self.db.clone()).await;
+                link.1.sub_op(self.db.clone()).await;
             }
 
             res.links = links.into_iter().map(|e| (e.0, e.1.take())).collect();
@@ -613,10 +589,6 @@ where
     where
         Link: DynamicLink<S>,
     {
-        let false_if_existed = self.globals.insert(Link::json_entry());
-        if false_if_existed.not() {
-            panic!("{} already exist as global!", Link::json_entry())
-        }
         if self.build_context.get::<Link::Entry>().is_none() {
             self.build_context.set(Link::init_entry());
         }
@@ -625,7 +597,6 @@ where
         DynamicClient {
             collections: self.collections,
             links: self.links.into_bigger(link),
-            globals: self.globals,
             _pd: PhantomData,
             build_context: self.build_context,
             build_mode: self.build_mode,
@@ -642,7 +613,6 @@ where
     {
         let imove = relation.from.clone();
         DynamicClient {
-            globals: self.globals,
             _pd: PhantomData,
             links: self.links.into_bigger(relation.spec(imove)),
             collections: self.collections,
@@ -657,7 +627,6 @@ where
         N: Collection<S> + JsonCollection<S> + Send + Sync + 'static,
     {
         DynamicClient {
-            globals: self.globals,
             _pd: PhantomData,
             links: self.links,
             collections: self.collections.into_bigger(collection),
@@ -677,7 +646,6 @@ where
 {
     pub fn add_collection<N>(self, collection: N) -> DynamicClient<minimal, C::Bigger<N>, L, F, S> {
         DynamicClient {
-            globals: self.globals,
             _pd: PhantomData,
             links: self.links,
             collections: self.collections.into_bigger(collection),
@@ -700,7 +668,6 @@ where
         // let entry = self.build_context.get_mut::<Link::Entry>().unwrap();
         // link.on_register(entry);
         DynamicClient {
-            globals: self.globals,
             _pd: PhantomData,
             links: self.links.into_bigger(rel),
             collections: self.collections,
@@ -713,17 +680,12 @@ where
     where
         Link: DynamicLink<S>,
     {
-        let false_if_existed = self.globals.insert(Link::json_entry());
-        if false_if_existed.not() {
-            panic!("{} already exist as global!", Link::json_entry())
-        }
         if self.build_context.get::<Link::Entry>().is_none() {
             self.build_context.set(Link::init_entry());
         }
         let entry = self.build_context.get_mut::<Link::Entry>().unwrap();
         link.on_register(entry);
         DynamicClient {
-            globals: self.globals,
             _pd: PhantomData,
             links: self.links.into_bigger(link),
             collections: self.collections,

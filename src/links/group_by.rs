@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use std::ops::Not;
-
 use crate::QueryBuilder;
 use crate::any_set::AnySet;
 use crate::collections::{Collection, OnMigrate};
@@ -18,6 +15,7 @@ use convert_case::{Case, Casing};
 use serde::Serialize;
 use sqlx::{ColumnIndex, Executor};
 use sqlx::{Sqlite, sqlite::SqliteRow};
+use std::ops::Not;
 
 use super::relation::Relation;
 use super::relation_many_to_many::ManyToMany;
@@ -72,9 +70,8 @@ where
 
     type Output = CountResult;
 
-    fn on_select(&self, data: &mut Self::Inner, st: &mut SelectSt<Sqlite>) {
+    fn on_select(&self, _data: &mut Self::Inner, st: &mut SelectSt<Sqlite>) {
         let column_name_in_junction = format!("{}_id", self.from.table_name().to_case(Case::Snake));
-        let foriegn_table = self.to.table_name().to_string();
         let junction = format!("{}{}", self.to.table_name(), self.from.table_name());
         st.select(verbatim(format!(
             "COUNT({junction}.{column_name_in_junction}) AS {alias}",
@@ -98,7 +95,7 @@ where
         _data: &'this mut Self::Inner,
         _pool: sqlx::Pool<Sqlite>,
     ) -> impl Future<Output = ()> + Send + use<'this, From, To> {
-        async { /* no op */ }
+        async { /* no_op: count has no sub_op */ }
     }
 
     fn take(self, data: Self::Inner) -> Self::Output {
@@ -113,21 +110,27 @@ struct CountDynamic {
     junction: String,
 }
 
+// I can't access Count<F, T> in dynamic code because
+// I don't have access to downcase::<T> here
+//
+// unlike Relation<F,T>
+//
+// Count is too "dynamic" so CountDynamic is there to solve this issue
 impl SelectOneFragment<Sqlite> for CountDynamic {
     type Inner = Option<i64>;
 
     type Output = CountResult;
 
-    fn on_select(&self, data: &mut Self::Inner, st: &mut SelectSt<Sqlite>) {
+    fn on_select(&self, _data: &mut Self::Inner, st: &mut SelectSt<Sqlite>) {
         let column_name_in_junction = format!("{}_id", self.from_table_name.to_case(Case::Snake));
-        let foriegn_table = self.to.table_name().to_string();
+        // let foriegn_table = self.to.table_name().to_string();
         let junction = format!("{}{}", self.to_table_name, self.from_table_name);
         st.select(verbatim(format!(
             "COUNT({junction}.{column_name_in_junction}) AS {alias}",
             alias = self.alias
         )));
         st.join(join {
-            foriegn_table: self.junction,
+            foriegn_table: self.junction.clone(),
             foriegn_column: column_name_in_junction,
             local_column: "id".to_string(),
         });
@@ -135,15 +138,16 @@ impl SelectOneFragment<Sqlite> for CountDynamic {
     }
 
     fn from_row(&self, data: &mut Self::Inner, row: &SqliteRow) {
-        todo!()
+        use sqlx::Row;
+        *data = Some(row.get(self.alias.as_str()));
     }
 
     fn sub_op<'this>(
         &'this self,
-        data: &'this mut Self::Inner,
-        pool: sqlx::Pool<Sqlite>,
+        _data: &'this mut Self::Inner,
+        _pool: sqlx::Pool<Sqlite>,
     ) -> impl Future<Output = ()> + Send + use<'this> {
-        async { /* no op */ }
+        async { /* no_op: count has no sub_op */ }
     }
 
     fn take(self, data: Self::Inner) -> Self::Output {

@@ -12,25 +12,19 @@ use serde_json::json;
 use sqlx::{Sqlite, SqlitePool};
 use tracing::Level;
 
-#[derive(
-    Collection, Debug, PartialEq, Serialize, Deserialize,
-)]
+#[derive(Collection, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Todo {
     pub title: String,
     pub done: bool,
     pub description: Option<String>,
 }
 
-#[derive(
-    Collection, Debug, PartialEq, Serialize, Deserialize,
-)]
+#[derive(Collection, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Category {
     pub title: String,
 }
 
-#[derive(
-    Collection, Debug, PartialEq, Serialize, Deserialize,
-)]
+#[derive(Collection, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Tag {
     pub title: String,
 }
@@ -40,8 +34,7 @@ relation!(many_to_many Todo Tag);
 
 #[tokio::test]
 async fn main() {
-    let pool =
-        SqlitePool::connect("sqlite::memory:").await.unwrap();
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
