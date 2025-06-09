@@ -1,13 +1,6 @@
-use sqlx::{Database, Executor, IntoArguments};
+use sqlx::{Database, Executor};
 
-use crate::{
-    QueryBuilder,
-    execute::Execute,
-    statements::{
-        create_table_st::{CreateTableSt, header},
-        select_st::SelectSt,
-    },
-};
+use crate::{QueryBuilder, statements::select_st::SelectSt};
 
 pub trait CollectionBasic {
     fn table_name(&self) -> &'static str;
@@ -15,7 +8,7 @@ pub trait CollectionBasic {
 
 pub trait Collection<S>: Sized + Send + Sync + CollectionBasic {
     type PartailCollection;
-    type Yeild;
+    type Output;
     // fn on_migrate(&self, stmt: &mut CreateTableSt<Q>)
     // where
     //     Q: QueryBuilder;
@@ -32,10 +25,10 @@ pub trait Collection<S>: Sized + Send + Sync + CollectionBasic {
     // fn members(&self) -> &'static [&'static str];
     // fn members_scoped(&self) -> &'static [&'static str];
     // fn table_name(&self) -> &'static str;
-    fn from_row_noscope(&self, row: &S::Row) -> Self::Yeild
+    fn from_row_noscope(&self, row: &S::Row) -> Self::Output
     where
         S: Database;
-    fn from_row_scoped(&self, row: &S::Row) -> Self::Yeild
+    fn from_row_scoped(&self, row: &S::Row) -> Self::Output
     where
         S: Database;
 }
@@ -49,7 +42,6 @@ pub trait OnMigrate<S> {
         S: QueryBuilder;
 }
 
-// #[rustfmt::skip]
 mod on_migrate_tuple_impls {
     use super::OnMigrate;
     use crate::QueryBuilder;

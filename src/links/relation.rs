@@ -3,7 +3,7 @@ use crate::{
     any_set::AnySet,
     collections::{Collection, OnMigrate},
     dynamic_client::json_client::{JsonCollection, SelectOneJsonFragment},
-    operations::{insert_one::InsertOneFragment, select_one::SelectOneFragment},
+    operations::{insert_one_op::InsertOneFragment, select_one_op::SelectOneFragment},
 };
 use convert_case::{Case, Casing};
 use serde::Serialize;
@@ -64,7 +64,7 @@ where
             F,
             Spec: Any
                       + SelectOneFragment<S, Output: Serialize>
-                      + InsertOneFragment<S, Output: Serialize>
+                      // + InsertOneFragment<S, Output: Serialize>
                       + DynamicLinkForRelation<S>,
         >,
     Relation<F, T>: Clone,

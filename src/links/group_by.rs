@@ -8,7 +8,7 @@ use crate::prelude::macro_relation::OptionalToMany;
 use crate::verbatim::verbatim;
 use crate::{
     collections::CollectionBasic,
-    operations::select_one::SelectOneFragment,
+    operations::select_one_op::SelectOneFragment,
     prelude::{join::join, stmt::SelectSt},
 };
 use convert_case::{Case, Casing};

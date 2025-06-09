@@ -244,7 +244,7 @@ pub mod json_client {
         collections::{Collection, OnMigrate},
         execute::Execute,
         links::{DynamicLink, DynamicLinkTraitObject, LinkData, relation::Relation},
-        operations::select_one::{SelectOneFragment, SelectOneOutput},
+        operations::{LinkedOutput, select_one_op::SelectOneFragment},
         prelude::{col, stmt::SelectSt},
     };
     use convert_case::{Case, Casing};
@@ -279,7 +279,7 @@ pub mod json_client {
     where
         S: QueryBuilder,
         T: Collection<S> + 'static,
-        T::Yeild: Serialize,
+        T::Output: Serialize,
     {
         #[inline]
         fn on_select(&self, stmt: &mut SelectSt<S>)
@@ -312,6 +312,38 @@ pub mod json_client {
         fn take(self: Box<Self>) -> serde_json::Value;
     }
 
+    impl<S: QueryBuilder, T> SelectOneJsonFragment<S> for (T, T::Inner)
+    where
+        T::Output: Serialize,
+        T: SelectOneFragment<S>,
+    {
+        #[inline]
+        fn on_select(&mut self, st: &mut SelectSt<S>) {
+            self.0.on_select(&mut self.1, st)
+        }
+
+        #[inline]
+        fn from_row(&mut self, row: &<S>::Row) {
+            self.0.from_row(&mut self.1, row)
+        }
+
+        #[inline]
+        fn sub_op<'this>(
+            &'this mut self,
+            pool: Pool<S>,
+        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
+            Box::pin(async { self.0.sub_op(&mut self.1, pool).await })
+        }
+
+        #[inline]
+        fn take(self: Box<Self>) -> serde_json::Value {
+            let taken = self.0.take(self.1);
+            serde_json::to_value(taken).unwrap()
+        }
+    }
+
+    // a common pattern is you have array of fragments and you
+    // want to build them as a map
     impl<S: QueryBuilder> SelectOneJsonFragment<S>
         for Vec<(String, Box<dyn SelectOneJsonFragment<S>>)>
     {
@@ -340,36 +372,6 @@ pub mod json_client {
                 map.insert(e.0, e.1.take());
             });
             map.into()
-        }
-    }
-
-    impl<S: QueryBuilder, T> SelectOneJsonFragment<S> for (T, T::Inner)
-    where
-        T::Output: Serialize,
-        T: SelectOneFragment<S>,
-    {
-        #[inline]
-        fn on_select(&mut self, st: &mut SelectSt<S>) {
-            self.0.on_select(&mut self.1, st)
-        }
-
-        #[inline]
-        fn from_row(&mut self, row: &<S>::Row) {
-            self.0.from_row(&mut self.1, row)
-        }
-
-        #[inline]
-        fn sub_op<'this>(
-            &'this mut self,
-            pool: Pool<S>,
-        ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
-            Box::pin(async { self.0.sub_op(&mut self.1, pool).await })
-        }
-
-        #[inline]
-        fn take(self: Box<Self>) -> serde_json::Value {
-            let taken = self.0.take(self.1);
-            serde_json::to_value(taken).unwrap()
         }
     }
 
@@ -557,7 +559,7 @@ pub mod json_client {
                         link.1.from_row(&r);
                     }
 
-                    Ok(SelectOneOutput {
+                    Ok(LinkedOutput {
                         id,
                         attr,
                         links: HashMap::new(),

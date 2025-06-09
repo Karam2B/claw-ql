@@ -1,29 +1,21 @@
+use claw_ql::collections::CollectionBasic;
 use claw_ql::dynamic_client::DynamicClient;
 use claw_ql::links::LinkData;
 use claw_ql::links::group_by::{CountResult, count};
 use claw_ql::links::relation::Relation;
 use claw_ql::links::relation_many_to_many::ManyToMany;
-use claw_ql::{
-    collections::CollectionBasic,
-    operations::{
-        SimpleOutput,
-        select_one::{SelectOneOutput, select_one},
-    },
-};
+use claw_ql::operations::select_one_op::select_one;
+use claw_ql::operations::{CollectionOutput, LinkedOutput};
 use claw_ql_macros::Collection;
 use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, SqlitePool};
 
-#[derive(
-    Collection, Debug, PartialEq, Serialize, Deserialize,
-)]
+#[derive(Collection, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Student {
     pub name: String,
 }
 
-#[derive(
-    Collection, Debug, PartialEq, Serialize, Deserialize,
-)]
+#[derive(Collection, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Course {
     pub code: String,
 }
@@ -73,8 +65,7 @@ impl LinkData<student> for Relation<student, course> {
 
 #[tokio::test]
 async fn group_by() {
-    let pool =
-        SqlitePool::connect("sqlite::memory:").await.unwrap();
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
@@ -125,19 +116,19 @@ INSERT INTO StudentCourse (student_id, course_id) VALUES
 
     pretty_assertions::assert_eq!(
         res,
-        Some(SelectOneOutput {
+        Some(LinkedOutput {
             id: 1,
             attr: Student {
                 name: "Alice Smith".to_string()
             },
             links: (vec![
-                SimpleOutput {
+                CollectionOutput {
                     id: 1,
                     attr: Course {
                         code: "CS101".to_string(),
                     },
                 },
-                SimpleOutput {
+                CollectionOutput {
                     id: 2,
                     attr: Course {
                         code: "DB200".to_string(),
@@ -154,7 +145,7 @@ INSERT INTO StudentCourse (student_id, course_id) VALUES
 
     pretty_assertions::assert_eq!(
         res,
-        Some(SelectOneOutput {
+        Some(LinkedOutput {
             id: 1,
             attr: Course {
                 code: "CS101".to_string()

@@ -1,10 +1,7 @@
 use claw_ql::{
     dynamic_client::DynamicClient,
     links::relation::Relation,
-    operations::{
-        SimpleOutput,
-        select_one::{SelectOneOutput, select_one},
-    },
+    operations::{CollectionOutput, LinkedOutput, select_one_op::select_one},
 };
 use claw_ql_macros::{Collection, relation};
 use serde::{Deserialize, Serialize};
@@ -86,14 +83,14 @@ async fn main() {
 
     pretty_assertions::assert_eq!(
         res,
-        Some(SelectOneOutput {
+        Some(LinkedOutput {
             id: 1,
             attr: Todo {
                 title: "todo_1".to_string(),
                 done: true,
                 description: None
             },
-            links: (Some(SimpleOutput {
+            links: (Some(CollectionOutput {
                 id: 3,
                 attr: Category {
                     title: "category_3".to_string()

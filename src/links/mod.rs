@@ -25,7 +25,7 @@ pub trait LinkData<From> {
 #[allow(unused)]
 pub trait DynamicLink<S> {
     fn init_entry() -> Self::Entry;
-    type Entry: Any ;
+    type Entry: Any;
     fn on_register(&self, entry: &mut Self::Entry);
     fn on_finish(
         &self,

@@ -1,17 +1,14 @@
-use std::ops::Not;
-
+use super::relation::DynamicLinkForRelation;
 use crate::QueryBuilder;
 use crate::collections::Collection;
 use crate::dynamic_client::json_client::SelectOneJsonFragment;
+use crate::operations::CollectionOutput;
 use crate::{
-    collections::OnMigrate,
-    operations::{SimpleOutput, select_one::SelectOneFragment},
-    prelude::stmt::SelectSt,
+    collections::OnMigrate, operations::select_one_op::SelectOneFragment, prelude::stmt::SelectSt,
 };
 use serde::Serialize;
 use sqlx::{Sqlite, sqlite::SqliteRow};
-
-use super::relation::DynamicLinkForRelation;
+use std::ops::Not;
 
 #[derive(Clone)]
 pub struct ManyToMany<T1, T2> {
@@ -65,12 +62,12 @@ where
 impl<T1, T2> SelectOneFragment<Sqlite> for ManyToMany<T1, T2>
 where
     T2: Send + Sync + Collection<Sqlite>,
-    T2::Yeild: Send + Sync,
+    T2::Output: Send + Sync,
     T1: Send + Sync,
 {
-    type Inner = (Option<i32>, Vec<SimpleOutput<T2::Yeild>>);
+    type Inner = (Option<i32>, Vec<CollectionOutput<T2::Output>>);
 
-    type Output = Vec<SimpleOutput<T2::Yeild>>;
+    type Output = Vec<CollectionOutput<T2::Output>>;
 
     fn on_select(&self, _data: &mut Self::Inner, _st: &mut SelectSt<Sqlite>) {
         // no op
@@ -102,7 +99,7 @@ where
             .await
             .unwrap()
             .into_iter()
-            .map(|r| SimpleOutput {
+            .map(|r| CollectionOutput {
                 attr: self.table_2.from_row_noscope(&r),
                 id: r.get("id"),
             })

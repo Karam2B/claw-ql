@@ -5,8 +5,7 @@ use crate::{
     links::{LinkData, relation::Relation},
     prelude::col,
 };
-use serde::Serialize;
-use sqlx::{ColumnIndex, Decode, Encode,  Pool, Row, Type};
+use sqlx::{ColumnIndex, Decode, Encode, Pool, Row, Type};
 
 use crate::{
     QueryBuilder,
@@ -15,6 +14,8 @@ use crate::{
     prelude::stmt,
     statements::select_st::SelectSt,
 };
+
+use super::LinkedOutput;
 
 pub trait SelectOneFragment<S: QueryBuilder>: Sync + Send {
     type Inner: Default + Send + Sync;
@@ -43,13 +44,6 @@ pub struct SelectOne<S, C, L, F> {
     links: L,
     filters: F,
     _pd: PhantomData<(S,)>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct SelectOneOutput<C, D> {
-    pub id: i64,
-    pub attr: C,
-    pub links: D,
 }
 
 impl<S, Base, L, F> SelectOne<S, Base, L, F>
@@ -199,7 +193,7 @@ where
     for<'e> i64: Encode<'e, S> + Type<S> + Decode<'e, S>,
     for<'e> &'e str: ColumnIndex<S::Row>,
 {
-    pub async fn exec_op(self, db: Pool<S>) -> Option<SelectOneOutput<C::Yeild, L::Output>> {
+    pub async fn exec_op(self, db: Pool<S>) -> Option<LinkedOutput<C::Output, L::Output>> {
         let mut st = stmt::SelectSt::init(self.collection.table_name().to_string());
 
         #[rustfmt::skip]
@@ -221,7 +215,7 @@ where
                 let id: i64 = r.get("local_id");
                 let attr = self.collection.from_row_scoped(&r);
                 self.links.from_row(&mut worker_data, &r);
-                Ok(SelectOneOutput {
+                Ok(LinkedOutput {
                     id,
                     attr,
                     links: (),
@@ -233,7 +227,7 @@ where
         self.links.sub_op(&mut worker_data, db).await;
         let data = self.links.take(worker_data);
 
-        return Some(SelectOneOutput {
+        return Some(LinkedOutput {
             id: res.id,
             attr: res.attr,
             links: data,

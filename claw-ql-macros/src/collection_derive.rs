@@ -117,7 +117,7 @@ where
         )*
         {
             type PartailCollection = #partial_ident;
-            type Yeild = #table_name_camel_case;
+            type Output = #table_name_camel_case;
 
             // fn on_migrate(&self, stmt: &mut CreateTableSt<S>) {
             //     stmt.column("id", primary_key::<S>());
@@ -159,16 +159,16 @@ where
         
 
         
-            fn from_row_noscope(&self, row: &<S as Database>::Row) -> Self::Yeild
+            fn from_row_noscope(&self, row: &<S as Database>::Row) -> Self::Output
             {
-                Self::Yeild { #(
+                Self::Output { #(
                     #member_name: row.get(stringify!(#member_name)),
                 )*}
             }
         
-            fn from_row_scoped(&self, row: &<S as Database>::Row) -> Self::Yeild
+            fn from_row_scoped(&self, row: &<S as Database>::Row) -> Self::Output
             {
-                Self::Yeild { #(
+                Self::Output { #(
                         #member_name: row.get(#member_name_scoped),
                 )*}
             }

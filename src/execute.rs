@@ -9,8 +9,7 @@ pub trait Execute<S: Database>: Sized {
     fn execute<E>(
         self,
         executor: E,
-    ) -> impl Future<Output = Result<S::QueryResult, sqlx::Error>>
-    + Send
+    ) -> impl Future<Output = Result<S::QueryResult, sqlx::Error>> + Send
     where
         E: for<'e> sqlx::Executor<'e, Database = S>,
     {
@@ -91,13 +90,9 @@ pub trait Execute<S: Database>: Sized {
 impl<T, S> Execute<S> for T
 where
     T: Buildable<Database = S> + Sized,
-    S: QueryBuilder<
-        Output = <S as Database>::Arguments<'static>,
-    >,
+    S: QueryBuilder<Output = <S as Database>::Arguments<'static>>,
 {
-    fn build(
-        self,
-    ) -> (String, <S as Database>::Arguments<'static>) {
+    fn build(self) -> (String, <S as Database>::Arguments<'static>) {
         self.build()
     }
 }
@@ -113,10 +108,7 @@ mod _private {
 }
 
 impl<'s, 'q, S: Database> InnerExecutable<'s, 'q, S> {
-    pub async fn execute<E>(
-        self,
-        executor: E,
-    ) -> Result<S::QueryResult, sqlx::Error>
+    pub async fn execute<E>(self, executor: E) -> Result<S::QueryResult, sqlx::Error>
     where
         for<'c> E: Executor<'q, Database = S>,
     {
@@ -141,11 +133,7 @@ impl<'s, 'q, S: Database> InnerExecutable<'s, 'q, S> {
             })
             .await
     }
-    pub async fn fetch_one_with<E, O, F>(
-        self,
-        executor: E,
-        with: F,
-    ) -> Result<O, sqlx::Error>
+    pub async fn fetch_one_with<E, O, F>(self, executor: E, with: F) -> Result<O, sqlx::Error>
     where
         F: FnOnce(S::Row) -> Result<O, sqlx::Error>,
         for<'c> E: Executor<'c, Database = S>,
@@ -249,9 +237,7 @@ impl<'s, 'q, S: Database> InnerExecutable<'s, 'q, S> {
     }
 }
 
-impl<'q, DB: Database> sqlx::Execute<'q, DB>
-    for InnerExecutable<'q, 'q, DB>
-{
+impl<'q, DB: Database> sqlx::Execute<'q, DB> for InnerExecutable<'q, 'q, DB> {
     fn sql(&self) -> &'q str {
         self.stmt
     }
@@ -266,10 +252,7 @@ impl<'q, DB: Database> sqlx::Execute<'q, DB>
 
     fn take_arguments(
         &mut self,
-    ) -> Result<
-        Option<<DB as Database>::Arguments<'q>>,
-        sqlx::error::BoxDynError,
-    > {
+    ) -> Result<Option<<DB as Database>::Arguments<'q>>, sqlx::error::BoxDynError> {
         Ok(Some(take(&mut self.buffer)))
     }
 }

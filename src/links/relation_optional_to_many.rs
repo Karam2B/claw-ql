@@ -1,24 +1,19 @@
-use std::ops::Not;
-use std::process::Output;
-
-use convert_case::{Case, Casing};
-use serde::Serialize;
-use sqlx::{ColumnIndex, Decode, Executor, Row, Sqlite, prelude::Type};
-
-use sqlx::Pool;
-
+use super::relation::DynamicLinkForRelation;
 use crate::dynamic_client::json_client::SelectOneJsonFragment;
+use crate::operations::CollectionOutput;
 use crate::{
     QueryBuilder,
     operations::{
-        SimpleOutput,
         collections::{Collection, OnMigrate},
-        select_one::SelectOneFragment,
+        select_one_op::SelectOneFragment,
     },
     prelude::{col, join, stmt::SelectSt},
 };
-
-use super::relation::DynamicLinkForRelation;
+use convert_case::{Case, Casing};
+use serde::Serialize;
+use sqlx::Pool;
+use sqlx::{ColumnIndex, Decode, Executor, Row, Sqlite, prelude::Type};
+use std::ops::Not;
 
 #[derive(Clone)]
 pub struct OptionalToMany<F, T> {
@@ -67,15 +62,15 @@ impl<S, From, To> SelectOneFragment<S> for OptionalToMany<From, To>
 where
     S: QueryBuilder,
     To: Send + Sync + Collection<S>,
-    To::Yeild: Send + Sync,
+    To::Output: Send + Sync,
     From: Send + Sync + Collection<S>,
-    From::Yeild: Send + Sync,
+    From::Output: Send + Sync,
     for<'c> &'c str: ColumnIndex<S::Row>,
     for<'q> i64: Decode<'q, S>,
     i64: Type<S>,
 {
-    type Output = Option<SimpleOutput<To::Yeild>>;
-    type Inner = Option<(i64, To::Yeild)>;
+    type Output = Option<CollectionOutput<To::Output>>;
+    type Inner = Option<(i64, To::Output)>;
 
     fn on_select(&self, _: &mut Self::Inner, st: &mut SelectSt<S>) {
         st.join(join::left_join {
@@ -100,7 +95,7 @@ where
     }
 
     fn take(self, data: Self::Inner) -> Self::Output {
-        data.map(|(id, attr)| SimpleOutput { id, attr })
+        data.map(|(id, attr)| CollectionOutput { id, attr })
     }
 }
 
