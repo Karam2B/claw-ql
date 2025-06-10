@@ -1,14 +1,19 @@
 use sqlx::{Database, Executor};
 
-use crate::{QueryBuilder, statements::select_st::SelectSt};
+use crate::{QueryBuilder, prelude::stmt::InsertOneSt, statements::select_st::SelectSt};
 
 pub trait CollectionBasic {
     fn table_name(&self) -> &'static str;
 }
 
+pub trait HasHandler {
+    type Handler: Default;
+}
+
+// 
 pub trait Collection<S>: Sized + Send + Sync + CollectionBasic {
     type PartailCollection;
-    type Output;
+    type Data;
     // fn on_migrate(&self, stmt: &mut CreateTableSt<Q>)
     // where
     //     Q: QueryBuilder;
@@ -22,13 +27,17 @@ pub trait Collection<S>: Sized + Send + Sync + CollectionBasic {
     where
         S: QueryBuilder;
 
-    // fn members(&self) -> &'static [&'static str];
+    fn on_insert(&self, this: Self::Data, stmt: &mut InsertOneSt<S>)
+    where
+        S: sqlx::Database;
+
+    fn members(&self) -> Vec<String>;
     // fn members_scoped(&self) -> &'static [&'static str];
     // fn table_name(&self) -> &'static str;
-    fn from_row_noscope(&self, row: &S::Row) -> Self::Output
+    fn from_row_noscope(&self, row: &S::Row) -> Self::Data
     where
         S: Database;
-    fn from_row_scoped(&self, row: &S::Row) -> Self::Output
+    fn from_row_scoped(&self, row: &S::Row) -> Self::Data
     where
         S: Database;
 }

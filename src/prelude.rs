@@ -4,12 +4,18 @@ pub use crate::statements::select_st::join;
 pub use crate::statements::select_st::order_by;
 
 pub mod stmt {
+    pub use crate::statements::create_table_st::CreateTableSt;
+    pub use crate::statements::insert_one_st::InsertOneSt;
     pub use crate::statements::select_st::SelectSt;
 }
 
 pub mod macro_derive_collection {
+    pub mod sqlx_ {
+        pub use sqlx::ColumnIndex;
+    }
     pub use crate::QueryBuilder;
     pub use crate::collections::CollectionBasic;
+    pub use crate::collections::HasHandler;
     pub use crate::collections::OnMigrate;
     pub use crate::execute::Execute;
     pub use crate::expressions::exports::col_type_check_if_null;
@@ -19,19 +25,18 @@ pub mod macro_derive_collection {
     pub use crate::prelude::col;
     pub use crate::statements::create_table_st::CreateTableSt;
     pub use crate::statements::create_table_st::header;
+    pub use crate::statements::insert_one_st::InsertOneSt;
     pub use core::marker::PhantomData;
     pub use sqlx::Executor;
-    // pub use crate::statements::create_table_st::CreateTableSt;
+    pub use sqlx::Row;
     pub use crate::statements::select_st::SelectSt;
     pub use crate::update::update;
     #[cfg(feature = "serde")]
     pub use serde::Deserialize;
-    pub use sqlx::ColumnIndex;
     pub use sqlx::Database;
     pub use sqlx::Decode;
     pub use sqlx::Encode;
     pub use sqlx::IntoArguments;
-    pub use sqlx::Row;
     pub use sqlx::Type;
 }
 

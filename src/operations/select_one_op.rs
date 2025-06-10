@@ -1,12 +1,4 @@
-use std::marker::PhantomData;
-
-use crate::{
-    execute::Execute,
-    links::{LinkData, relation::Relation},
-    prelude::col,
-};
-use sqlx::{ColumnIndex, Decode, Encode, Pool, Row, Type};
-
+use super::LinkedOutput;
 use crate::{
     QueryBuilder,
     build_tuple::BuildTuple,
@@ -14,8 +6,13 @@ use crate::{
     prelude::stmt,
     statements::select_st::SelectSt,
 };
-
-use super::LinkedOutput;
+use crate::{
+    execute::Execute,
+    links::{LinkData, relation::Relation},
+    prelude::col,
+};
+use sqlx::{ColumnIndex, Decode, Encode, Pool, Row, Type};
+use std::marker::PhantomData;
 
 pub trait SelectOneFragment<S: QueryBuilder>: Sync + Send {
     type Inner: Default + Send + Sync;
@@ -193,7 +190,7 @@ where
     for<'e> i64: Encode<'e, S> + Type<S> + Decode<'e, S>,
     for<'e> &'e str: ColumnIndex<S::Row>,
 {
-    pub async fn exec_op(self, db: Pool<S>) -> Option<LinkedOutput<C::Output, L::Output>> {
+    pub async fn exec_op(self, db: Pool<S>) -> Option<LinkedOutput<C::Data, L::Output>> {
         let mut st = stmt::SelectSt::init(self.collection.table_name().to_string());
 
         #[rustfmt::skip]

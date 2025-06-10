@@ -62,15 +62,15 @@ impl<S, From, To> SelectOneFragment<S> for OptionalToMany<From, To>
 where
     S: QueryBuilder,
     To: Send + Sync + Collection<S>,
-    To::Output: Send + Sync,
+    To::Data: Send + Sync,
     From: Send + Sync + Collection<S>,
-    From::Output: Send + Sync,
+    From::Data: Send + Sync,
     for<'c> &'c str: ColumnIndex<S::Row>,
     for<'q> i64: Decode<'q, S>,
     i64: Type<S>,
 {
-    type Output = Option<CollectionOutput<To::Output>>;
-    type Inner = Option<(i64, To::Output)>;
+    type Output = Option<CollectionOutput<To::Data>>;
+    type Inner = Option<(i64, To::Data)>;
 
     fn on_select(&self, _: &mut Self::Inner, st: &mut SelectSt<S>) {
         st.join(join::left_join {

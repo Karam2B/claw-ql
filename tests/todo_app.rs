@@ -1,7 +1,15 @@
+use std::marker::PhantomData;
+
 use claw_ql::{
+    QueryBuilder,
     dynamic_client::DynamicClient,
-    links::relation::Relation,
-    operations::{CollectionOutput, LinkedOutput, select_one_op::select_one},
+    links::{LinkData, id::SetId, relation::Relation},
+    operations::{
+        CollectionOutput, LinkedOutput,
+        insert_one_op::{InsertOneFragment, insert_one},
+        select_one_op::select_one,
+    },
+    prelude::{macro_relation::OptionalToMany, stmt::InsertOneSt},
 };
 use claw_ql_macros::{Collection, relation};
 use serde::{Deserialize, Serialize};
@@ -74,6 +82,32 @@ async fn main() {
     .execute(&pool)
     .await
     .unwrap();
+
+    let res = insert_one(Todo {
+        title: "new todo".to_string(),
+        done: false,
+        description: None,
+    })
+    .link(SetId {
+        id: 3,
+        to: category,
+    })
+    // .link(tag::id(vec![3]))
+    .exec_op(&pool)
+    .await;
+
+    pretty_assertions::assert_eq!(
+        res,
+        LinkedOutput {
+            id: 6,
+            attr: Todo {
+                title: "new todo".to_string(),
+                done: false,
+                description: None
+            },
+            links: ((3),),
+        }
+    );
 
     // using generic operatioin
     let res = select_one(todo)

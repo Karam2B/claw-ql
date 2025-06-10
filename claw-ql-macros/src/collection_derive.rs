@@ -1,6 +1,6 @@
 use convert_case::{Case, Casing};
-use proc_macro2::Ident;
 use proc_macro_error::abort;
+use proc_macro2::Ident;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{DeriveInput, spanned::Spanned, visit::Visit};
@@ -42,20 +42,34 @@ pub fn main(input: DeriveInput) -> TokenStream {
     let table_name_camel_case = &input.ident;
     let table_name_lower_case_ident = Ident::new(
         input.ident.to_string().to_case(Case::Snake).as_str(),
-        input.ident.span()
+        input.ident.span(),
     );
-    let partial_ident = Ident::new(&format!("{}Partial", table_name_camel_case), proc_macro2::Span::call_site());
+    let partial_ident = Ident::new(
+        &format!("{}Partial", table_name_camel_case),
+        proc_macro2::Span::call_site(),
+    );
 
-    let mut main_derive = MainDerive { 
+    let mut main_derive = MainDerive {
         fields: vec![],
         table_lower_case: table_name_camel_case.to_string().to_case(Case::Snake),
     };
     main_derive.visit_derive_input(&input);
 
-    let member_ty = main_derive.fields.iter().map(|m| m.ty.clone()).collect::<Vec<_>>();
-    let member_name = main_derive.fields.iter().map(|m| m.name.clone()).collect::<Vec<_>>();
-    let member_name_scoped =
-        main_derive.fields.iter().map(|m| m.name_scoped.clone()).collect::<Vec<_>>();
+    let member_ty = main_derive
+        .fields
+        .iter()
+        .map(|m| m.ty.clone())
+        .collect::<Vec<_>>();
+    let member_name = main_derive
+        .fields
+        .iter()
+        .map(|m| m.name.clone())
+        .collect::<Vec<_>>();
+    let member_name_scoped = main_derive
+        .fields
+        .iter()
+        .map(|m| m.name_scoped.clone())
+        .collect::<Vec<_>>();
 
     ts.extend(quote!(
         #[cfg_attr(feature = "serde", derive(::claw_ql::prelude::macro_derive_collection::Deserialize))]
@@ -63,7 +77,7 @@ pub fn main(input: DeriveInput) -> TokenStream {
         pub struct #partial_ident {
             #(pub #member_name: ::claw_ql::prelude::macro_derive_collection::update<#member_ty>,)*
         }
-        #[derive(Clone)]
+        #[derive(Clone, Default)]
         #[allow(non_camel_case_types)]
         pub struct #table_name_lower_case_ident;
     ));
@@ -107,78 +121,68 @@ where
     }
 }
 
-        impl<S> Collection<S> for #table_name_lower_case_ident
-            where 
-        S: QueryBuilder + DatabaseDefaultPrimaryKey,
-        for<'s> &'s str: ColumnIndex<<S as Database>::Row>,
-        <S as DatabaseDefaultPrimaryKey>::KeyType: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
+impl HasHandler for #table_name_camel_case {
+    type Handler = #table_name_lower_case_ident;
+}
+
+impl<S> Collection<S> for #table_name_lower_case_ident
+    where 
+S: QueryBuilder + DatabaseDefaultPrimaryKey,
+for<'s> &'s str: sqlx_::ColumnIndex<<S as Database>::Row>,
+<S as DatabaseDefaultPrimaryKey>::KeyType: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
+#(
+    #member_ty: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
+)*
+{
+    type PartailCollection = #partial_ident;
+    type Data = #table_name_camel_case;
+
+    fn on_insert(&self, this: Self::Data, stmt: &mut InsertOneSt<S>)
+    where
+        S: sqlx::Database,
+    {
+        #(stmt.col(
+            stringify!(#member_name).to_string(), 
+            this.#member_name
+        );)*
+    }
+
+    fn on_select(&self, stmt: &mut SelectSt<S>)
+    {
         #(
-            #member_ty: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
+           stmt.select(col(stringify!(#member_name)).
+            table(stringify!(#table_name_camel_case)).
+            alias(#member_name_scoped)
+           );
         )*
-        {
-            type PartailCollection = #partial_ident;
-            type Output = #table_name_camel_case;
+    }
 
-            // fn on_migrate(&self, stmt: &mut CreateTableSt<S>) {
-            //     stmt.column("id", primary_key::<S>());
-            //     #(
-            //     stmt.column(
-            //         stringify!(#member_name),
-            //         col_type_check_if_null::<#member_ty>(),
-            //     );
-            //     )*
-            // }
+    fn members(&self) -> Vec<String> 
+    {
+        vec![
+            #(String::from(stringify!(#member_name)),)*
+        ]
+    }
 
-            fn on_select(&self, stmt: &mut SelectSt<S>)
-            {
-                #(
-                   stmt.select(col(stringify!(#member_name)).
-                    table(stringify!(#table_name_camel_case)).
-                    alias(#member_name_scoped)
-                   );
-                )*
-            }
+    fn from_row_noscope(&self, row: &<S as Database>::Row) -> Self::Data
+    {
+        Self::Data { #(
+            #member_name: row.get(stringify!(#member_name)),
+        )*}
+    }
 
-        //     fn members(&self) -> &'static [&'static str] {
-        //          &[
-        //              #(
-        //                  stringify!(#member_name),
-        //              )*
-        //          ]
-        //     }
-        // 
-        //     fn members_scoped(&self) -> &'static [&'static str] {
-        //          &[
-        //              #(
-        //                  #member_name_scoped,
-        //              )*
-        //          ]
-        //     }
-        
+    fn from_row_scoped(&self, row: &<S as Database>::Row) -> Self::Data
+    {
+        Self::Data { #(
+                #member_name: row.get(#member_name_scoped),
+        )*}
+    }
 
-        
-
-        
-            fn from_row_noscope(&self, row: &<S as Database>::Row) -> Self::Output
-            {
-                Self::Output { #(
-                    #member_name: row.get(stringify!(#member_name)),
-                )*}
-            }
-        
-            fn from_row_scoped(&self, row: &<S as Database>::Row) -> Self::Output
-            {
-                Self::Output { #(
-                        #member_name: row.get(#member_name_scoped),
-                )*}
-            }
-        
-        }
+}
     };));
 
-    return ts
+    return ts;
 }
 
 #[test]
-fn test_collection_derive() {
-}
+fn test_collection_derive() {}

@@ -279,7 +279,7 @@ pub mod json_client {
     where
         S: QueryBuilder,
         T: Collection<S> + 'static,
-        T::Output: Serialize,
+        T::Data: Serialize,
     {
         #[inline]
         fn on_select(&self, stmt: &mut SelectSt<S>)
