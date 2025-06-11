@@ -1,12 +1,13 @@
 use std::marker::PhantomData;
 
-use sqlx::{ColumnIndex, Database, Pool, Sqlite, SqlitePool};
+use sqlx::{Database, Pool, Sqlite, SqlitePool};
 
 pub mod build_tuple;
 pub mod collections;
 pub mod dynamic_client;
 pub mod execute;
 pub mod expressions;
+pub mod filters;
 pub mod identity_management;
 pub mod links;
 pub mod migration;
@@ -14,7 +15,7 @@ pub mod operations;
 pub mod prelude;
 pub mod quick_query;
 pub mod statements;
-pub mod update;
+pub mod update_mod;
 pub mod macros {
     pub use claw_ql_macros::*;
 }
@@ -184,7 +185,7 @@ pub trait Accept<This>: QueryBuilder + Send {
     fn accept(
         this: This,
         ctx1: &mut Self::Context1,
-    ) -> impl FnOnce(&mut Self::Context2) -> String + 'static + Send;
+    ) -> impl FnOnce(&mut Self::Context2) -> String + 'static + Send + use<Self, This>;
 }
 
 pub trait IntoMutArguments<'q, DB>
@@ -256,29 +257,5 @@ pub trait ConnectInMemory: Database {
 impl ConnectInMemory for Sqlite {
     fn connect_in_memory() -> impl Future<Output = Pool<Self>> {
         async { SqlitePool::connect("sqlite::memory:").await.unwrap() }
-    }
-}
-
-#[derive(Debug)]
-pub struct StringScope(pub String);
-
-impl<R> ColumnIndex<R> for StringScope
-where
-    &'static str: ColumnIndex<R>,
-{
-    fn index(&self, row: &R) -> sqlx::Result<usize> {
-        unsafe {
-            // SAFETY: trust me bro.
-            //
-            // there just no way to have dangling ref while holding
-            // a ref to the "&R". and you return an owned value!!!
-            // sqlx should implement this trait for all Strings
-            //
-            // you can mutate (somwhow) the row and having usize
-            // that point to invalid location, but the same can
-            // happen to &'static str!!!!!!!!!! trust me.
-            let hack: &'static str = &*(self.0.as_str() as *const _);
-            hack.index(row)
-        }
     }
 }

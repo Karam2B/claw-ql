@@ -1,3 +1,5 @@
+use claw_ql::Accept;
+
 pub struct Todo {
     pub title: String,
     pub done: bool,
@@ -16,6 +18,7 @@ pub struct todo;
 const _: () = {
     use ::claw_ql::prelude::macro_derive_collection::*;
     impl CollectionBasic for todo {
+        type LinkedData = Todo;
         fn table_name(&self) -> &'static str {
             "Todo"
         }
@@ -37,16 +40,20 @@ const _: () = {
         ) -> impl Future<Output = ()> {
             async move {
                 let mut stmt = CreateTableSt::init(header::create, self.table_name());
-                stmt.column("id", primary_key::<S>());
-                stmt.column("title", col_type_check_if_null::<String>());
-                stmt.column("done", col_type_check_if_null::<bool>());
-                stmt.column("description", col_type_check_if_null::<Option<String>>());
+                stmt.column_def("id", primary_key::<S>());
+                stmt.column_def("title", col_type_check_if_null::<String>());
+                stmt.column_def("done", col_type_check_if_null::<bool>());
+                stmt.column_def("description", col_type_check_if_null::<Option<String>>());
                 stmt.execute(exec).await.unwrap();
             }
         }
     }
 
     impl HasHandler for Todo {
+        type Handler = todo;
+    }
+
+    impl HasHandler for TodoPartial {
         type Handler = todo;
     }
 
@@ -57,10 +64,13 @@ const _: () = {
         <S as DatabaseDefaultPrimaryKey>::KeyType:
             Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
         String: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
+        S: Accept<String>,
         bool: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
+        S: Accept<bool>,
         Option<String>: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
+        S: Accept<Option<String>>,
     {
-        type PartailCollection = TodoPartial;
+        type Partial = TodoPartial;
         type Data = Todo;
         fn on_select(&self, stmt: &mut SelectSt<S>) {
             stmt.select(col("title").table("Todo").alias("todo_title"));
@@ -74,6 +84,26 @@ const _: () = {
             stmt.col("title".to_string(), this.title);
             stmt.col("done".to_string(), this.done);
             stmt.col("description".to_string(), this.description);
+        }
+        fn on_update(
+            &self,
+            this: Self::Partial,
+            stmt: &mut UpdateOneSt<S>,
+        ) where
+            S: claw_ql::QueryBuilder,
+        {
+            match this.title {
+                update::keep => {}
+                update::set(set) => stmt.set_col("title".to_string(), set),
+            }
+            match this.done {
+                update::keep => {}
+                update::set(set) => stmt.set_col("done".to_string(), set),
+            }
+            match this.description {
+                update::keep => {}
+                update::set(set) => stmt.set_col("description".to_string(), set),
+            }
         }
         fn members(&self) -> Vec<String> {
             vec![

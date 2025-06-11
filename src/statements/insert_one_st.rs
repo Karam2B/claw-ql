@@ -28,7 +28,7 @@ impl<S: Database> InsertOneSt<S> {
     }
     pub fn returning(mut self, cols: Vec<String>) -> Self {
         self.returning = Some(cols);
-        Self { ..self }
+        self
     }
 }
 
@@ -66,24 +66,3 @@ impl<S: Database> crate::execute::Execute<S> for InsertOneSt<S> {
         )
     }
 }
-
-// pub struct InsertManySt<S: Database> {
-//     pub(crate) input: Vec<String>,
-//     pub(crate) returning: Option<Vec<String>>,
-//     pub(crate) table_name: String,
-//     pub(crate) col_count: usize,
-//     pub(crate) buffer: S::Arguments<'static>,
-// }
-//
-// impl<S: Database> InsertManySt<S> {
-//     pub fn init(table_name: String, cols: Vec<String>) -> Self {
-//         Self {
-//             table_name,
-//             col_count: cols.len(),
-//             returning: Default::default(),
-//             buffer: Default::default(),
-//
-//             input: Default::default(),
-//         }
-//     }
-// }

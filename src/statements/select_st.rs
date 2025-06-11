@@ -105,18 +105,21 @@ impl<S: QueryBuilder> Buildable for SelectSt<S> {
                 str.push_str(&join_.display_from(self.from.as_str()));
             }
 
-            for (index, item) in self.where_clause.into_iter().enumerate() {
+            let mut where_str = Vec::default();
+            for item in self.where_clause {
                 let item = S::build_sql_part_back(ctx, item);
                 if item.is_empty() {
-                    // tracing::error!("item should not be empty {}", item);
                     continue;
                 }
+
+                where_str.push(item);
+            }
+            for (index, item) in where_str.into_iter().enumerate() {
                 if index == 0 {
                     str.push_str(" WHERE ");
                 } else {
                     str.push_str(" AND ");
                 }
-
                 str.push_str(&item);
             }
 

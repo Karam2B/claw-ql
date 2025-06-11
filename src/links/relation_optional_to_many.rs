@@ -72,7 +72,7 @@ where
     type Output = Option<CollectionOutput<To::Data>>;
     type Inner = Option<(i64, To::Data)>;
 
-    fn on_select(&self, _: &mut Self::Inner, st: &mut SelectSt<S>) {
+    fn on_select(&mut self, _: &mut Self::Inner, st: &mut SelectSt<S>) {
         st.join(join::left_join {
             foriegn_table: self.to.table_name().to_string(),
             foriegn_column: "id".to_string(),
@@ -82,7 +82,7 @@ where
         self.to.on_select(st);
     }
 
-    fn from_row(&self, data: &mut Self::Inner, row: &S::Row) {
+    fn from_row(&mut self, data: &mut Self::Inner, row: &S::Row) {
         let id: Option<i64> = row.get(self.foriegn_key.as_str());
         if let Some(id) = id {
             let value = self.to.from_row_scoped(row);
@@ -90,7 +90,7 @@ where
         }
     }
 
-    async fn sub_op<'this>(&'this self, _: &'this mut Self::Inner, _: Pool<S>) {
+    async fn sub_op<'this>(&'this mut self, _: &'this mut Self::Inner, _: Pool<S>) {
         // no sub_op for optional_to_many
     }
 

@@ -2,7 +2,7 @@ use super::LinkedOutput;
 use crate::{
     QueryBuilder,
     build_tuple::BuildTuple,
-    operations::collections::{Collection, Filters},
+    operations::collections::{Collection, Filter},
     prelude::stmt,
     statements::select_st::SelectSt,
 };
@@ -17,10 +17,10 @@ use std::marker::PhantomData;
 pub trait SelectOneFragment<S: QueryBuilder>: Sync + Send {
     type Inner: Default + Send + Sync;
     type Output;
-    fn on_select(&self, data: &mut Self::Inner, st: &mut SelectSt<S>);
-    fn from_row(&self, data: &mut Self::Inner, row: &S::Row);
+    fn on_select(&mut self, data: &mut Self::Inner, st: &mut SelectSt<S>);
+    fn from_row(&mut self, data: &mut Self::Inner, row: &S::Row);
     fn sub_op<'this>(
-        &'this self,
+        &'this mut self,
         data: &'this mut Self::Inner,
         pool: Pool<S>,
     ) -> impl Future<Output = ()> + Send + use<'this, Self, S>;
@@ -85,7 +85,7 @@ where
     }
     pub fn filter<N>(self, ty: N) -> SelectOne<S, Base, L, F::Bigger<N>>
     where
-        N: Filters<S, Base>,
+        N: Filter<S, Base>,
     {
         SelectOne {
             links: self.links,
@@ -117,14 +117,14 @@ mod get_one_worker_tuple_impls {
         {
             type Output = ($($ty::Output,)*);
             type Inner = ($($ty::Inner,)*);
-            fn on_select(&self, data: &mut Self::Inner, st: &mut SelectSt<S>) {
+            fn on_select(&mut self, data: &mut Self::Inner, st: &mut SelectSt<S>) {
                 $(paste!(self.$part.on_select(&mut data.$part, st));)*
             }
-            fn from_row(&self, data: &mut Self::Inner, row: &S::Row) {
+            fn from_row(&mut self, data: &mut Self::Inner, row: &S::Row) {
                 $(paste!(self.$part.from_row(&mut data.$part, row));)*
             }
             fn sub_op<'a>(
-                &'a self,
+                &'a mut self,
                 data: &'a mut Self::Inner,
                 pool: Pool<S>,
             ) -> impl std::future::Future<Output = ()> + Send {
@@ -154,16 +154,16 @@ mod get_one_worker_tuple_impls {
     {
         type Output = (R0::Output, R1::Output);
         type Inner = (R0::Inner, R1::Inner);
-        fn on_select(&self, data: &mut Self::Inner, st: &mut SelectSt<S>) {
+        fn on_select(&mut self, data: &mut Self::Inner, st: &mut SelectSt<S>) {
             paste!(self.0.on_select(&mut data.0, st));
             paste!(self.1.on_select(&mut data.1, st));
         }
-        fn from_row(&self, data: &mut Self::Inner, row: &S::Row) {
+        fn from_row(&mut self, data: &mut Self::Inner, row: &S::Row) {
             paste!(self.0.from_row(&mut data.0, row));
             paste!(self.1.from_row(&mut data.1, row));
         }
         fn sub_op<'a>(
-            &'a self,
+            &'a mut self,
             data: &'a mut Self::Inner,
             pool: Pool<S>,
         ) -> impl std::future::Future<Output = ()> + Send {
@@ -184,13 +184,13 @@ where
     SelectSt<S>: Execute<S>,
     C: Collection<S>,
     L: SelectOneFragment<S> + Send + Sync,
-    F: Filters<S, C>,
+    F: Filter<S, C>,
     // sqlx gasim
     for<'c> &'c mut S::Connection: sqlx::Executor<'c, Database = S>,
     for<'e> i64: Encode<'e, S> + Type<S> + Decode<'e, S>,
     for<'e> &'e str: ColumnIndex<S::Row>,
 {
-    pub async fn exec_op(self, db: Pool<S>) -> Option<LinkedOutput<C::Data, L::Output>> {
+    pub async fn exec_op(mut self, db: Pool<S>) -> Option<LinkedOutput<C::Data, L::Output>> {
         let mut st = stmt::SelectSt::init(self.collection.table_name().to_string());
 
         #[rustfmt::skip]
@@ -201,7 +201,7 @@ where
         );
 
         self.collection.on_select(&mut st);
-        self.filters.on_select(&mut st);
+        self.filters.on_select(&self.collection, &mut st);
 
         let mut worker_data = L::Inner::default();
 

@@ -70,7 +70,7 @@ where
 
     type Output = CountResult;
 
-    fn on_select(&self, _data: &mut Self::Inner, st: &mut SelectSt<Sqlite>) {
+    fn on_select(&mut self, _data: &mut Self::Inner, st: &mut SelectSt<Sqlite>) {
         let column_name_in_junction = format!("{}_id", self.from.table_name().to_case(Case::Snake));
         let junction = format!("{}{}", self.to.table_name(), self.from.table_name());
         st.select(verbatim(format!(
@@ -85,13 +85,13 @@ where
         st.group_by(col("id").table(&self.from.table_name()));
     }
 
-    fn from_row(&self, data: &mut Self::Inner, row: &SqliteRow) {
+    fn from_row(&mut self, data: &mut Self::Inner, row: &SqliteRow) {
         use sqlx::Row;
         *data = Some(row.get(self.alias.as_str()));
     }
 
     fn sub_op<'this>(
-        &'this self,
+        &'this mut self,
         _data: &'this mut Self::Inner,
         _pool: sqlx::Pool<Sqlite>,
     ) -> impl Future<Output = ()> + Send + use<'this, From, To> {
@@ -121,7 +121,7 @@ impl SelectOneFragment<Sqlite> for CountDynamic {
 
     type Output = CountResult;
 
-    fn on_select(&self, _data: &mut Self::Inner, st: &mut SelectSt<Sqlite>) {
+    fn on_select(&mut self, _data: &mut Self::Inner, st: &mut SelectSt<Sqlite>) {
         let column_name_in_junction = format!("{}_id", self.from_table_name.to_case(Case::Snake));
         // let foriegn_table = self.to.table_name().to_string();
         let junction = format!("{}{}", self.to_table_name, self.from_table_name);
@@ -137,13 +137,13 @@ impl SelectOneFragment<Sqlite> for CountDynamic {
         st.group_by(col("id").table(&self.from_table_name));
     }
 
-    fn from_row(&self, data: &mut Self::Inner, row: &SqliteRow) {
+    fn from_row(&mut self, data: &mut Self::Inner, row: &SqliteRow) {
         use sqlx::Row;
         *data = Some(row.get(self.alias.as_str()));
     }
 
     fn sub_op<'this>(
-        &'this self,
+        &'this mut self,
         _data: &'this mut Self::Inner,
         _pool: sqlx::Pool<Sqlite>,
     ) -> impl Future<Output = ()> + Send + use<'this> {

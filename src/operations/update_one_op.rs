@@ -1,30 +1,28 @@
-use paste::paste;
-use serde::Serialize;
-use sqlx::{ColumnIndex, Database, Decode, Executor, Pool, Type};
-use std::{marker::PhantomData, pin::Pin};
-
 use crate::{
-    QueryBuilder, build_tuple::BuildTuple, execute::Execute, links::LinkData,
-    operations::CollectionOutput, prelude::stmt, statements::insert_one_st::InsertOneSt,
+    QueryBuilder, build_tuple::BuildTuple, execute::Execute, filters::by_id_mod::by_id,
+    links::LinkData, operations::CollectionOutput, statements::update_one_st::UpdateOneSt,
 };
+use serde::Serialize;
+use sqlx::{ColumnIndex, Decode, Executor, Pool, prelude::Type};
+use std::{marker::PhantomData, pin::Pin};
 
 use super::{
     LinkedOutput,
-    collections::{Collection, HasHandler},
+    collections::{Collection, Filter, HasHandler},
 };
 
-pub trait InsertOneFragment<S: Database>: Sync + Send {
+pub trait UpdateOneFragment<S: QueryBuilder>: Sync + Send {
     type Inner: Default + Send + Sync;
     type Output;
-    fn on_insert(&mut self, data: &mut Self::Inner, st: &mut InsertOneSt<S>);
+    fn on_update(&mut self, data: &mut Self::Inner, st: &mut UpdateOneSt<S>);
     fn returning(&mut self) -> Vec<String>;
     fn from_row(&mut self, data: &mut Self::Inner, row: &S::Row);
-    fn second_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
+    fn first_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
         &'this mut self,
         data: &'this mut Self::Inner,
         exec: E,
     ) -> impl Future<Output = ()> + Send + use<'this, Self, S, E>;
-    fn first_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
+    fn second_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
         &'this mut self,
         data: &'this mut Self::Inner,
         exec: E,
@@ -32,8 +30,8 @@ pub trait InsertOneFragment<S: Database>: Sync + Send {
     fn take(self, data: Self::Inner) -> Self::Output;
 }
 
-pub trait InsertOneJsonFragment<S: QueryBuilder>: Send + Sync {
-    fn on_insert(&mut self, st: &mut InsertOneSt<S>);
+pub trait UpdateOneJsonFragment<S: QueryBuilder>: Send + Sync {
+    fn on_update(&mut self, st: &mut UpdateOneSt<S>);
     fn from_row(&mut self, row: &S::Row);
     fn first_sub_op<'this>(
         &'this mut self,
@@ -46,15 +44,14 @@ pub trait InsertOneJsonFragment<S: QueryBuilder>: Send + Sync {
     fn take(self: Box<Self>) -> serde_json::Value;
 }
 
-impl<S: QueryBuilder, T> InsertOneJsonFragment<S> for (T, T::Inner)
+impl<S: QueryBuilder, T> UpdateOneJsonFragment<S> for (T, T::Inner)
 where
     T::Output: Serialize,
-    T: InsertOneFragment<S>,
+    T: UpdateOneFragment<S>,
     for<'c> &'c mut S::Connection: Executor<'c, Database = S>,
 {
-    #[inline]
-    fn on_insert(&mut self, st: &mut InsertOneSt<S>) {
-        self.0.on_insert(&mut self.1, st)
+    fn on_update(&mut self, st: &mut UpdateOneSt<S>) {
+        self.0.on_update(&mut self.1, st)
     }
 
     #[inline]
@@ -85,66 +82,102 @@ where
     }
 }
 
-pub struct InsertOne<S, C: Collection<S>, L> {
-    data: C::Data,
+pub struct UpdateOne<S, C: Collection<S>, L, F> {
+    data: C::Partial,
     handler: C,
     links: L,
+    filters: F,
     _pd: PhantomData<(S,)>,
 }
 
-pub fn insert_one<S, C: HasHandler>(collection: C) -> InsertOne<S, C::Handler, ()>
+pub fn update_one_no_id<S, C: HasHandler>(partial_collection: C) -> UpdateOne<S, C::Handler, (), ()>
 where
-    C: HasHandler<Handler: Collection<S, Data = C>>,
+    C: HasHandler<Handler: Collection<S, Partial = C>>,
 {
-    InsertOne {
+    UpdateOne {
         _pd: PhantomData,
-        data: collection,
+        data: partial_collection,
         handler: Default::default(),
         links: (),
+        filters: (),
+    }
+}
+pub fn update_one<S, C: HasHandler>(
+    id: i64,
+    partial_collection: C,
+) -> UpdateOne<S, C::Handler, (), (by_id,)>
+where
+    C: HasHandler<Handler: Collection<S, Partial = C>>,
+{
+    UpdateOne {
+        _pd: PhantomData,
+        data: partial_collection,
+        handler: Default::default(),
+        links: (),
+        filters: (by_id(id),),
     }
 }
 
-
-
-impl<S, H: Collection<S>, L> InsertOne<S, H, L>
+impl<S, H: Collection<S>, L, F> UpdateOne<S, H, L, F>
 where
     S: QueryBuilder,
     L: BuildTuple,
+    F: BuildTuple,
 {
-    pub fn link<D>(self, ty: D) -> InsertOne<S, H, L::Bigger<D::Spec>>
+    pub fn filter<Filter>(self, filter: Filter) -> UpdateOne<S, H, L, F::Bigger<Filter>>
     where
         H: Clone,
-        D: LinkData<H, Spec: InsertOneFragment<S> + Send>,
+        Filter: crate::collections::Filter<S, H>,
     {
-        let spec = ty.spec(self.handler.clone());
-        InsertOne {
-            links: self.links.into_bigger(spec),
+        UpdateOne {
+            links: self.links,
             data: self.data,
             handler: self.handler,
+            filters: self.filters.into_bigger(filter),
             _pd: PhantomData,
         }
     }
-
+    pub fn link<D>(self, ty: D) -> UpdateOne<S, H, L::Bigger<D::Spec>, F>
+    where
+        H: Clone,
+        D: LinkData<H, Spec: UpdateOneFragment<S> + Send>,
+    {
+        let spec = ty.spec(self.handler.clone());
+        UpdateOne {
+            links: self.links.into_bigger(spec),
+            data: self.data,
+            handler: self.handler,
+            filters: self.filters,
+            _pd: PhantomData,
+        }
+    }
     pub async fn exec_op(
         mut self,
         db: impl for<'e> Executor<'e, Database = S> + Clone,
-    ) -> LinkedOutput<H::Data, L::Output>
+    ) -> Option<LinkedOutput<H::Data, L::Output>>
     where
-        L: InsertOneFragment<S> + Send,
+        UpdateOneSt<S>: Execute<S>,
+        for<'c> &'c mut S::Connection: sqlx::Executor<'c, Database = S>,
+        L: UpdateOneFragment<S> + Send,
+        F: Filter<S, H>,
         i64: Type<S> + for<'e> Decode<'e, S>,
         for<'s> &'s str: ColumnIndex<S::Row>,
     {
+        use sqlx::Row;
+
         let handler = self.handler;
 
-        let mut st = stmt::InsertOneSt::init(handler.table_name().to_string());
+        let mut st = UpdateOneSt::init(handler.table_name().to_string());
 
-        handler.on_insert(self.data, &mut st);
+        handler.on_update(self.data, &mut st);
+
+        self.filters.on_update(&handler, &mut st);
 
         let mut worker_data = L::Inner::default();
 
-        self.links.first_sub_op(&mut worker_data, db.clone()).await;
+        // self.links.first_sub_op(&mut worker_data, db.clone()).await;
 
-        self.links.on_insert(&mut worker_data, &mut st);
+        self.links.on_update(&mut worker_data, &mut st);
 
         let mut s: Vec<String> = handler.members();
 
@@ -154,25 +187,24 @@ where
 
         let s = st
             .returning(s)
-            .fetch_one(db.clone(), |r| {
-                use sqlx::Row;
+            .fetch_optional(db.clone(), |r| {
                 let id: i64 = r.get("id");
                 let attr = handler.from_row_noscope(&r);
                 self.links.from_row(&mut worker_data, &r);
-                return Ok(CollectionOutput { id, attr });
+                Ok(CollectionOutput { id, attr })
             })
             .await
-            .unwrap();
+            .unwrap()?;
 
         self.links.second_sub_op(&mut worker_data, db).await;
 
         let links = self.links.take(worker_data);
 
-        return LinkedOutput {
+        Some(LinkedOutput {
             id: s.id,
             attr: s.attr,
             links,
-        };
+        })
     }
 }
 
@@ -181,44 +213,44 @@ macro_rules! implt {
 #[allow(unused)]
 impl
     <S, $($ty,)* >
-InsertOneFragment<S>
+UpdateOneFragment<S>
 for
     ($($ty,)*)
 where
     S: QueryBuilder,
-    $($ty: Send + InsertOneFragment<S>,)*
+    $($ty: Send + UpdateOneFragment<S>,)*
 {
     type Output = ($($ty::Output,)*);
     type Inner = ($($ty::Inner,)*);
-    fn on_insert(&mut self, data: &mut Self::Inner, st: &mut InsertOneSt<S>) {
-        $(paste!(self.$part.on_insert(&mut data.$part, st));)*
+    fn on_update(&mut self, data: &mut Self::Inner, st: &mut UpdateOneSt<S>) {
+        $(paste::paste!(self.$part.on_update(&mut data.$part, st));)*
     }
     fn returning(&mut self) -> Vec<String> {
         let mut rt = Vec::new();
 
-        $(rt.extend(paste!(self.$part.returning()));)*
+        $(rt.extend(paste::paste!(self.$part.returning()));)*
 
         rt
     }
     fn from_row(&mut self, data: &mut Self::Inner, row: &S::Row) {
-        $(paste!(self.$part.from_row(&mut data.$part, row));)*
+        $(paste::paste!(self.$part.from_row(&mut data.$part, row));)*
     }
     async fn first_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
         &'this mut self,
         data: &'this mut Self::Inner,
         exec: E,
     ) {
-        $(paste!(self.$part.first_sub_op(&mut data.$part, exec.clone()).await);)*
+        $(paste::paste!(self.$part.first_sub_op(&mut data.$part, exec.clone()).await);)*
     }
     async fn second_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
         &'this mut self,
         data: &'this mut Self::Inner,
         exec: E,
     ) {
-        $(paste!(self.$part.second_sub_op(&mut data.$part, exec.clone()).await);)*
+        $(paste::paste!(self.$part.second_sub_op(&mut data.$part, exec.clone()).await);)*
     }
     fn take(self, data: Self::Inner) -> Self::Output {
-        ($(paste!(self.$part.take(data.$part)),)*)
+        ($(paste::paste!(self.$part.take(data.$part)),)*)
     }
 }
     }
@@ -240,5 +272,3 @@ const _: () = {
     implt!([R0, 0], [R1, 1], [R2, 2], [R3, 3], [R4, 4], [R5, 5], [R6, 6], [R7, 7], [R8, 8], [R9, 9], [R10, 10]);
     implt!([R0, 0], [R1, 1], [R2, 2], [R3, 3], [R4, 4], [R5, 5], [R6, 6], [R7, 7], [R8, 8], [R9, 9], [R10, 10], [R11, 11]);
 };
-
-// todo impl insert_one on json_client

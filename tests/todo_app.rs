@@ -1,15 +1,14 @@
-use std::marker::PhantomData;
-
 use claw_ql::{
-    QueryBuilder,
     dynamic_client::DynamicClient,
-    links::{LinkData, id::SetId, relation::Relation},
+    filters::by_id_mod::by_id,
+    links::{relation::Relation, set_id::SetId, set_new::SetNew},
     operations::{
         CollectionOutput, LinkedOutput,
-        insert_one_op::{InsertOneFragment, insert_one},
+        insert_one_op::insert_one,
         select_one_op::select_one,
+        update_one_op::{update_one, update_one_no_id},
     },
-    prelude::{macro_relation::OptionalToMany, stmt::InsertOneSt},
+    update_mod::update,
 };
 use claw_ql_macros::{Collection, relation};
 use serde::{Deserialize, Serialize};
@@ -17,19 +16,19 @@ use serde_json::json;
 use sqlx::{Sqlite, SqlitePool};
 use tracing::Level;
 
-#[derive(Collection, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Collection, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Todo {
     pub title: String,
     pub done: bool,
     pub description: Option<String>,
 }
 
-#[derive(Collection, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Collection, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Category {
     pub title: String,
 }
 
-#[derive(Collection, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Collection, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Tag {
     pub title: String,
 }
@@ -69,7 +68,6 @@ async fn main() {
                 ('tag_1'), ('tag_2'), ('tag_3');
 
             INSERT INTO Category (title) VALUES ('category_1'), ('category_2'), ('category_3');
-            
 
             INSERT INTO Todo (title, done, category_id) VALUES
                 ('todo_1', 1, 3),
@@ -88,11 +86,15 @@ async fn main() {
         done: false,
         description: None,
     })
-    .link(SetId {
-        id: 3,
-        to: category,
+    .link(SetNew {
+        input: Category {
+            title: "new category".to_string(),
+        },
     })
-    // .link(tag::id(vec![3]))
+    .link(SetId {
+        to: tag,
+        input: vec![1, 3],
+    })
     .exec_op(&pool)
     .await;
 
@@ -105,29 +107,64 @@ async fn main() {
                 done: false,
                 description: None
             },
-            links: ((3),),
+            links: (
+                CollectionOutput {
+                    id: 4,
+                    attr: Category {
+                        title: "new category".to_string()
+                    }
+                },
+                vec![1, 3],
+            ),
         }
+    );
+
+    // let res = insert_one(Todo {
+    //     title: "new todo".to_string(),
+    //     done: false,
+    //     description: None,
+    // });
+
+    update_one(
+        6,
+        TodoPartial {
+            title: update::set("update title".to_string()),
+            done: update::keep,
+            description: update::keep,
+        },
+    )
+    .exec_op(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        sqlx::query_as::<_, (String,)>("SELECT title FROM Todo WHERE id = 6;")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        ("update title".to_string(),)
     );
 
     // using generic operatioin
     let res = select_one(todo)
         .relation(category)
+        .filter(by_id(4))
         .exec_op(pool.clone())
         .await;
 
     pretty_assertions::assert_eq!(
         res,
         Some(LinkedOutput {
-            id: 1,
+            id: 4,
             attr: Todo {
-                title: "todo_1".to_string(),
-                done: true,
+                title: "todo_4".to_string(),
+                done: false,
                 description: None
             },
             links: (Some(CollectionOutput {
-                id: 3,
+                id: 1,
                 attr: Category {
-                    title: "category_3".to_string()
+                    title: "category_1".to_string()
                 }
             }),),
         })

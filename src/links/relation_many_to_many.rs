@@ -69,11 +69,11 @@ where
 
     type Output = Vec<CollectionOutput<T2::Data>>;
 
-    fn on_select(&self, _data: &mut Self::Inner, _st: &mut SelectSt<Sqlite>) {
+    fn on_select(&mut self, _data: &mut Self::Inner, _st: &mut SelectSt<Sqlite>) {
         // no op
     }
 
-    fn from_row(&self, data: &mut Self::Inner, row: &SqliteRow) {
+    fn from_row(&mut self, data: &mut Self::Inner, row: &SqliteRow) {
         use sqlx::Row;
 
         let id: i32 = row.get("local_id");
@@ -81,7 +81,7 @@ where
     }
 
     fn sub_op<'this>(
-        &'this self,
+        &'this mut self,
         data: &'this mut Self::Inner,
         pool: sqlx::Pool<Sqlite>,
     ) -> impl Future<Output = ()> + Send + use<'this, T1, T2> {

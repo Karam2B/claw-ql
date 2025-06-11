@@ -86,6 +86,7 @@ pub fn main(input: DeriveInput) -> TokenStream {
         use ::claw_ql::prelude::macro_derive_collection::*;
 
         impl CollectionBasic for  #table_name_lower_case_ident {
+            type LinkedData = #table_name_camel_case;
             fn table_name(&self) -> &'static str {
                 stringify!(#table_name_camel_case)
             }
@@ -109,9 +110,9 @@ where
     {
         async move {
             let mut stmt = CreateTableSt::init(header::create, self.table_name());
-            stmt.column("id", primary_key::<S>());
+            stmt.column_def("id", primary_key::<S>());
             #(
-            stmt.column(
+            stmt.column_def(
                 stringify!(#member_name),
                 col_type_check_if_null::<#member_ty>(),
             );
@@ -125,16 +126,21 @@ impl HasHandler for #table_name_camel_case {
     type Handler = #table_name_lower_case_ident;
 }
 
+impl HasHandler for #partial_ident {
+    type Handler = #table_name_lower_case_ident;
+}
+
 impl<S> Collection<S> for #table_name_lower_case_ident
     where 
 S: QueryBuilder + DatabaseDefaultPrimaryKey,
 for<'s> &'s str: sqlx_::ColumnIndex<<S as Database>::Row>,
 <S as DatabaseDefaultPrimaryKey>::KeyType: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
 #(
+    S: Accept<#member_ty>,
     #member_ty: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
 )*
 {
-    type PartailCollection = #partial_ident;
+    type Partial = #partial_ident;
     type Data = #table_name_camel_case;
 
     fn on_insert(&self, this: Self::Data, stmt: &mut InsertOneSt<S>)
@@ -155,6 +161,21 @@ for<'s> &'s str: sqlx_::ColumnIndex<<S as Database>::Row>,
             alias(#member_name_scoped)
            );
         )*
+    }
+
+    fn on_update(
+        &self,
+        this: Self::Partial,
+        stmt: &mut UpdateOneSt<S>,
+    ) where
+        S: claw_ql::QueryBuilder,
+    {
+                #(
+        match this.#member_name {
+            update::keep => {}
+            update::set(set) => stmt.set_col(stringify!(#member_name).to_string(), set),
+        };
+            )*
     }
 
     fn members(&self) -> Vec<String> 

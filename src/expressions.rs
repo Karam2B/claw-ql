@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::{AcceptNoneBind, IdentSafety, unstable::Unsateble};
+use crate::{Accept, AcceptNoneBind, BindItem, IdentSafety, QueryBuilder, unstable::Unsateble};
 
 pub struct Col<IS = ()> {
     pub(crate) table: Option<String>,
@@ -31,6 +31,20 @@ pub struct ColEq<T, IS = ()> {
     pub(crate) col: Col<IS>,
     pub(crate) item: T,
     pub(crate) is: PhantomData<IS>,
+}
+
+impl<S, T> BindItem<S> for ColEq<T>
+where
+    S: QueryBuilder,
+    S: Accept<T>,
+{
+    fn bind_item(
+        self,
+        ctx: &mut S::Context1,
+    ) -> impl FnOnce(&mut S::Context2) -> String + 'static + use<T, S> {
+        let acc = S::accept(self.item, ctx);
+        move |ctx2| format!("{} = {}", self.col.accept(&(), Unsateble), acc(ctx2))
+    }
 }
 
 impl<IS: IdentSafety> Col<IS> {

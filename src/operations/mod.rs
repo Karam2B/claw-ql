@@ -1,5 +1,6 @@
 use serde::Serialize;
 pub mod collections;
+pub mod update_one_op;
 pub mod insert_one_op;
 pub mod select_one_op;
 

@@ -58,9 +58,9 @@ pub fn many_to_many(rest: TwoIdent) -> TokenStream {
                     );
                     ManyToMany {
                         junction,
-                        id_1: format!("{}_id", table_1.table_name()),
+                        id_1: format!("{}_id", stringify!(#from_lower_case)),
                         table_1,
-                        id_2: format!("{}_id", self.to.table_name()),
+                        id_2: format!("{}_id", stringify!(#to_lower_case)),
                         table_2: self.to,
                     }
                 }
@@ -75,9 +75,9 @@ pub fn many_to_many(rest: TwoIdent) -> TokenStream {
                     );
                     ManyToMany {
                         junction,
-                        id_1: format!("{}_id", table_1.table_name()),
+                        id_1: format!("{}_id", stringify!(#to_lower_case)),
                         table_1,
-                        id_2: format!("{}_id", self.to.table_name()),
+                        id_2: format!("{}_id", stringify!(#from_lower_case)),
                         table_2: self.to,
                     }
                 }
@@ -97,8 +97,7 @@ pub fn optional_to_many(rest: TwoIdent) -> TokenStream {
         rest.from.span(),
     );
     let from = rest.from;
-    let foriegn_key =
-        format!("{}_id", to.to_string().to_case(Case::Snake));
+    let foriegn_key = format!("{}_id", to.to_string().to_case(Case::Snake));
     quote! {
         const _: () = {
             use ::claw_ql::prelude::macro_relation::*;
@@ -128,22 +127,18 @@ pub fn optional_to_many(rest: TwoIdent) -> TokenStream {
 
 pub fn main(input: Input) -> TokenStream {
     match input.ident.to_string().as_str() {
-        "optional_to_many" => optional_to_many(
-            match syn::parse2::<TwoIdent>(input.rest) {
-                Ok(ok) => ok,
-                Err(err) => {
-                    return err.to_compile_error();
-                }
-            },
-        ),
-        "many_to_many" => many_to_many(
-            match syn::parse2::<TwoIdent>(input.rest) {
-                Ok(ok) => ok,
-                Err(err) => {
-                    return err.to_compile_error();
-                }
-            },
-        ),
+        "optional_to_many" => optional_to_many(match syn::parse2::<TwoIdent>(input.rest) {
+            Ok(ok) => ok,
+            Err(err) => {
+                return err.to_compile_error();
+            }
+        }),
+        "many_to_many" => many_to_many(match syn::parse2::<TwoIdent>(input.rest) {
+            Ok(ok) => ok,
+            Err(err) => {
+                return err.to_compile_error();
+            }
+        }),
         _ => abort!(
             input.ident.span(),
             "unknown relation, only {} are supported, consider implementing Related manually",

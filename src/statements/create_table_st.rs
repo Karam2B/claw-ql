@@ -77,7 +77,7 @@ impl<S: QueryBuilder> CreateTableSt<S> {
             _sqlx: PhantomData,
         }
     }
-    pub fn column<C>(&mut self, name: &str, constraint: C)
+    pub fn column_def<C>(&mut self, name: &str, constraint: C)
     where
         C: BindItem<S> + 'static + ColumPositionConstraint,
     {

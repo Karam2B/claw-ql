@@ -66,7 +66,7 @@ where
     fn accept(
         this: T,
         ctx1: &mut Self::Context1,
-    ) -> impl FnOnce(&mut Self::Context2) -> String + 'static + Send {
+    ) -> impl FnOnce(&mut Self::Context2) -> String + 'static + Send + use<T> {
         use sqlx::Arguments;
         ctx1.arg.add(this).unwrap();
         ctx1.size += 1;
