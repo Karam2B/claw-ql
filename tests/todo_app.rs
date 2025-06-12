@@ -1,14 +1,7 @@
 use claw_ql::{
-    dynamic_client::DynamicClient,
-    filters::by_id_mod::by_id,
-    links::{relation::Relation, set_id::SetId, set_new::SetNew},
-    operations::{
-        CollectionOutput, LinkedOutput,
-        insert_one_op::insert_one,
-        select_one_op::select_one,
-        update_one_op::{update_one, update_one_no_id},
-    },
-    update_mod::update,
+    builder_pattern::{on_json_client::to_json_client, on_migrate_builder::to_migrate, BuilderPattern}, filters::by_id_mod::by_id, links::{relation::Relation, set_id::SetId, set_new::SetNew}, operations::{
+        insert_one_op::insert_one, select_one_op::select_one, update_one_op::update_one, CollectionOutput, LinkedOutput
+    }, update_mod::update
 };
 use claw_ql_macros::{Collection, relation};
 use serde::{Deserialize, Serialize};
@@ -45,8 +38,10 @@ async fn main() {
         .init();
 
     let schema = {
-        DynamicClient::default()
-            .infer_db::<Sqlite>()
+        BuilderPattern::default()
+            // .infer_db::<Sqlite>()
+            .build_mode(to_migrate(Sqlite))
+            .build_mode(to_json_client(pool.clone()))
             .add_link(Relation {
                 from: todo,
                 to: tag,
@@ -58,9 +53,10 @@ async fn main() {
             .add_collection(category)
             .add_collection(tag)
             .add_collection(todo)
+            .finish()
     };
 
-    schema.migrate(&pool).await;
+    schema.0.migrate(pool.clone()).await;
 
     sqlx::query(
         r#"
@@ -170,7 +166,7 @@ async fn main() {
         })
     );
 
-    let jc = schema.create_json_client(pool.clone()).unwrap();
+    let jc = schema.1.unwrap();
 
     // using dynamic operation
     let res = jc

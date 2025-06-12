@@ -3,8 +3,8 @@ use std::marker::PhantomData;
 use sqlx::{Database, Pool, Sqlite, SqlitePool};
 
 pub mod build_tuple;
+pub mod builder_pattern;
 pub mod collections;
-pub mod dynamic_client;
 pub mod execute;
 pub mod expressions;
 pub mod filters;

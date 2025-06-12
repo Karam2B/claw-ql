@@ -17,11 +17,15 @@ pub trait UpdateOneFragment<S: QueryBuilder>: Sync + Send {
     fn on_update(&mut self, data: &mut Self::Inner, st: &mut UpdateOneSt<S>);
     fn returning(&mut self) -> Vec<String>;
     fn from_row(&mut self, data: &mut Self::Inner, row: &S::Row);
-    fn first_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
-        &'this mut self,
-        data: &'this mut Self::Inner,
-        exec: E,
-    ) -> impl Future<Output = ()> + Send + use<'this, Self, S, E>;
+    // // TODO: how to handle the case where update is not performed due
+    // // to 'RowNotFound' i.e. where clause did not target any entry
+    // // by that point first_sub_op already has executed, how it should
+    // // be reverted or what checks should exist to prevent it from executing
+    // fn first_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
+    //     &'this mut self,
+    //     data: &'this mut Self::Inner,
+    //     exec: E,
+    // ) -> impl Future<Output = ()> + Send + use<'this, Self, S, E>;
     fn second_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
         &'this mut self,
         data: &'this mut Self::Inner,
@@ -33,10 +37,10 @@ pub trait UpdateOneFragment<S: QueryBuilder>: Sync + Send {
 pub trait UpdateOneJsonFragment<S: QueryBuilder>: Send + Sync {
     fn on_update(&mut self, st: &mut UpdateOneSt<S>);
     fn from_row(&mut self, row: &S::Row);
-    fn first_sub_op<'this>(
-        &'this mut self,
-        pool: Pool<S>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>>;
+    // fn first_sub_op<'this>(
+    //     &'this mut self,
+    //     pool: Pool<S>,
+    // ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>>;
     fn second_sub_op<'this>(
         &'this mut self,
         pool: Pool<S>,
@@ -59,13 +63,13 @@ where
         self.0.from_row(&mut self.1, row)
     }
 
-    #[inline]
-    fn first_sub_op<'this>(
-        &'this mut self,
-        pool: Pool<S>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
-        Box::pin(async move { self.0.first_sub_op(&mut self.1, &pool).await })
-    }
+    // #[inline]
+    // fn first_sub_op<'this>(
+    //     &'this mut self,
+    //     pool: Pool<S>,
+    // ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
+    //     Box::pin(async move { self.0.first_sub_op(&mut self.1, &pool).await })
+    // }
 
     #[inline]
     fn second_sub_op<'this>(
@@ -235,13 +239,13 @@ where
     fn from_row(&mut self, data: &mut Self::Inner, row: &S::Row) {
         $(paste::paste!(self.$part.from_row(&mut data.$part, row));)*
     }
-    async fn first_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
-        &'this mut self,
-        data: &'this mut Self::Inner,
-        exec: E,
-    ) {
-        $(paste::paste!(self.$part.first_sub_op(&mut data.$part, exec.clone()).await);)*
-    }
+    // async fn first_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
+    //     &'this mut self,
+    //     data: &'this mut Self::Inner,
+    //     exec: E,
+    // ) {
+    //     $(paste::paste!(self.$part.first_sub_op(&mut data.$part, exec.clone()).await);)*
+    // }
     async fn second_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
         &'this mut self,
         data: &'this mut Self::Inner,

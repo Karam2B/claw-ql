@@ -95,7 +95,7 @@ mod on_migrate_tuple_impls {
             }
         }
     }
-    implt!();
+    // implt!();
     implt!([R0, 0], [R1, 1]);
     implt!([R0, 0], [R1, 1], [R2, 2]);
 }
@@ -195,7 +195,7 @@ mod has_where_clause_trati {
     }
 }
 
-// TODO: make generic method
+// TODO: should we use this trait of FilterGeneric? 
 pub trait Filter<Q, C>: Sync + Send {
     fn on_update(self, handler: &C, st: &mut UpdateOneSt<Q>)
     where

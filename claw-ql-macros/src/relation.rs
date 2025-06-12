@@ -96,7 +96,6 @@ pub fn optional_to_many(rest: TwoIdent) -> TokenStream {
         rest.from.to_string().to_case(Case::Snake).as_str(),
         rest.from.span(),
     );
-    let from = rest.from;
     let foriegn_key = format!("{}_id", to.to_string().to_case(Case::Snake));
     quote! {
         const _: () = {

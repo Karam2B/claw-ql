@@ -1,0 +1,68 @@
+use std::sync::Arc;
+use super::json_client::{JsonClient, JsonCollection};
+use super::{AddCollection, AddLink, BuildContext, Finish};
+use crate::{
+    QueryBuilder,
+    links::{DynamicLink, DynamicLinkTraitObject},
+};
+use sqlx::{Database, Pool};
+
+#[allow(non_camel_case_types)]
+pub struct to_json_client<S: Database>(pub Pool<S>);
+
+impl<S> BuildContext for to_json_client<S>
+where
+    S: Database,
+{
+    type Context = JsonClient<S>;
+    fn init_context(&self) -> Self::Context {
+        JsonClient {
+            collections: Default::default(),
+            links: Default::default(),
+            any_set: Default::default(),
+            db: self.0.clone(),
+        }
+    }
+}
+
+impl<T, N, S> AddCollection<T, N> for to_json_client<S>
+where
+    S: Database + QueryBuilder,
+    N: JsonCollection<S> + Clone,
+{
+    fn add_col(next: &N, ctx: &mut Self::Context) {
+        ctx.collections
+            .insert(next.table_name().to_string(), Arc::new(next.clone()));
+    }
+}
+
+impl<T, N, S> AddLink<T, N> for to_json_client<S>
+where
+    S: Database + QueryBuilder,
+    N: DynamicLink<S> + 'static + Send + Sync + Clone,
+{
+    fn add_link(next: &N, ctx: &mut Self::Context) {
+        if ctx.any_set.get::<N::Entry>().is_none() {
+            ctx.any_set.set(N::init_entry());
+        }
+        let entry = ctx.any_set.get_mut::<N::Entry>().unwrap();
+        let next = next.clone();
+        next.on_register(entry);
+        let name = next.json_entry();
+        ctx.links.insert(name, Arc::new(next));
+    }
+}
+
+impl<C, S> Finish<C> for to_json_client<S>
+where
+    S: Database,
+{
+    type Result = Result<JsonClient<S>, String>;
+    fn finish(self, ctx: Self::Context) -> Self::Result {
+        ctx.links
+            .values()
+            .try_for_each(|e| e.on_finish(&ctx.any_set))?;
+
+        Ok(ctx)
+    }
+}

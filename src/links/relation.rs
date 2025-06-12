@@ -2,8 +2,8 @@ use crate::{
     QueryBuilder,
     any_set::AnySet,
     collections::{Collection, OnMigrate},
-    dynamic_client::json_client::{JsonCollection, SelectOneJsonFragment},
-    operations::{ select_one_op::SelectOneFragment},
+    builder_pattern::json_client::{JsonCollection, SelectOneJsonFragment},
+    operations::select_one_op::SelectOneFragment,
 };
 use convert_case::{Case, Casing};
 use serde::Serialize;
@@ -46,6 +46,7 @@ pub struct RelationEntry {
 
 pub struct RelationEntries {
     pub entries: Vec<RelationEntry>,
+    #[allow(unused)]
     private_to_construct_hack: (),
 }
 

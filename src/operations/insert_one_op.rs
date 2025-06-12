@@ -24,6 +24,7 @@ pub trait InsertOneFragment<S: Database>: Sync + Send {
         data: &'this mut Self::Inner,
         exec: E,
     ) -> impl Future<Output = ()> + Send + use<'this, Self, S, E>;
+
     fn first_sub_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
         &'this mut self,
         data: &'this mut Self::Inner,
@@ -103,8 +104,6 @@ where
         links: (),
     }
 }
-
-
 
 impl<S, H: Collection<S>, L> InsertOne<S, H, L>
 where

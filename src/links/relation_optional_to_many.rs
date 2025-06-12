@@ -1,5 +1,5 @@
 use super::relation::DynamicLinkForRelation;
-use crate::dynamic_client::json_client::SelectOneJsonFragment;
+use crate::builder_pattern::json_client::SelectOneJsonFragment;
 use crate::operations::CollectionOutput;
 use crate::{
     QueryBuilder,
