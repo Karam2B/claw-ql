@@ -1,5 +1,6 @@
+use claw_ql::builder_pattern::BuilderPattern;
+use claw_ql::migration::to_migrate;
 use claw_ql::collections::CollectionBasic;
-use claw_ql::dynamic_client::DynamicClient;
 use claw_ql::links::LinkData;
 use claw_ql::links::group_by::{CountResult, count};
 use claw_ql::links::relation::Relation;
@@ -71,16 +72,17 @@ async fn group_by() {
         .with_max_level(tracing::Level::DEBUG)
         .init();
 
-    let schema = DynamicClient::default()
-        .infer_db::<Sqlite>()
-        .add_relation(Relation {
+    let schema = BuilderPattern::default()
+        .build_mode(to_migrate(Sqlite))
+        .add_collection(student)
+        .add_collection(course)
+        .add_link(Relation {
             from: student,
             to: course,
         })
-        .add_collection(student)
-        .add_collection(course);
+        .finish();
 
-    schema.migrate(&pool).await;
+    schema.0.migrate(pool.clone()).await;
 
     sqlx::query(
         "

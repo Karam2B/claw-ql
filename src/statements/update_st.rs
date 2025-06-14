@@ -1,6 +1,6 @@
 use crate::{Accept, BindItem, Buildable, QueryBuilder, expressions::ColEq, prelude::col};
 
-pub struct UpdateOneSt<S: QueryBuilder> {
+pub struct UpdateSt<S: QueryBuilder> {
     pub(crate) sets: Vec<(String, S::Fragment)>,
     pub(crate) where_clause: Vec<S::Fragment>,
     pub(crate) ctx: S::Context1,
@@ -8,7 +8,7 @@ pub struct UpdateOneSt<S: QueryBuilder> {
     pub(crate) returning: Option<Vec<String>>,
 }
 
-impl<S: QueryBuilder> UpdateOneSt<S> {
+impl<S: QueryBuilder> UpdateSt<S> {
     pub fn init_where_id_eq(table_name: String, id: i64) -> Self
     where
         ColEq<i64>: BindItem<S>,
@@ -33,7 +33,7 @@ impl<S: QueryBuilder> UpdateOneSt<S> {
     }
 }
 
-impl<S: QueryBuilder> Buildable for UpdateOneSt<S> {
+impl<S: QueryBuilder> Buildable for UpdateSt<S> {
     type Database = S;
 
     #[track_caller]
@@ -58,13 +58,22 @@ impl<S: QueryBuilder> Buildable for UpdateOneSt<S> {
                 str.push_str(&S::build_sql_part_back(ctx, value));
             }
 
-            for (index, where_item) in self.where_clause.into_iter().enumerate() {
+            let mut where_str = Vec::default();
+            for item in self.where_clause {
+                let item = S::build_sql_part_back(ctx, item);
+                if item.is_empty() {
+                    continue;
+                }
+
+                where_str.push(item);
+            }
+            for (index, where_item) in where_str.into_iter().enumerate() {
                 if index == 0 {
                     str.push_str(" WHERE ");
                 } else {
                     str.push_str(" AND ");
                 }
-                str.push_str(&S::build_sql_part_back(ctx, where_item));
+                str.push_str(&where_item);
             }
 
             if let Some(returning) = self.returning {
@@ -79,7 +88,7 @@ impl<S: QueryBuilder> Buildable for UpdateOneSt<S> {
     }
 }
 
-impl<S: QueryBuilder> UpdateOneSt<S> {
+impl<S: QueryBuilder> UpdateSt<S> {
     pub fn set_col<T>(&mut self, column: String, value: T)
     where
         S: Accept<T>,

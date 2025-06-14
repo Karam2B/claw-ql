@@ -1,6 +1,7 @@
-use claw_ql::builder_pattern::on_migrate_builder::to_migrate;
-use claw_ql::builder_pattern::{BuilderPattern, on_json_client::to_json_client};
-use claw_ql::links::relation::Relation;
+use claw_ql::{
+    builder_pattern::BuilderPattern, json_client::{builder_pattern::to_json_client, JsonClient},
+    links::relation::Relation, migration::to_migrate,
+};
 use claw_ql_macros::{Collection, relation};
 use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, SqlitePool};
@@ -33,7 +34,7 @@ async fn test() {
 
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
-    let client = {
+    let (migrator, client) = {
         BuilderPattern::default()
             .build_mode(to_migrate(Sqlite))
             .build_mode(to_json_client(pool.clone()))
@@ -48,10 +49,9 @@ async fn test() {
                 from: todo,
                 to: category,
             })
+            .finish()
     };
 
-    let results = client.finish();
-
-    results.0.migrate(pool.clone()).await;
-    // let jc = results.1.unwrap();
+    migrator.migrate(pool.clone()).await;
+    let _: JsonClient<Sqlite> = client.unwrap();
 }

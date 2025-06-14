@@ -1,6 +1,10 @@
 use super::relation::DynamicLinkForRelation;
-use crate::builder_pattern::json_client::SelectOneJsonFragment;
+use crate::Accept;
+use crate::execute::Execute;
+use crate::json_client::SelectOneJsonFragment;
 use crate::operations::CollectionOutput;
+use crate::operations::delete_one_op::DeleteOneFragment;
+use crate::prelude::join::left_join;
 use crate::{
     QueryBuilder,
     operations::{
@@ -61,10 +65,8 @@ ON DELETE SET NULL;
 impl<S, From, To> SelectOneFragment<S> for OptionalToMany<From, To>
 where
     S: QueryBuilder,
-    To: Send + Sync + Collection<S>,
-    To::Data: Send + Sync,
-    From: Send + Sync + Collection<S>,
-    From::Data: Send + Sync,
+    To: Collection<S, Data: Send + Sync>,
+    From: Collection<S, Data: Send + Sync>,
     for<'c> &'c str: ColumnIndex<S::Row>,
     for<'q> i64: Decode<'q, S>,
     i64: Type<S>,
@@ -96,6 +98,63 @@ where
 
     fn take(self, data: Self::Inner) -> Self::Output {
         data.map(|(id, attr)| CollectionOutput { id, attr })
+    }
+}
+
+impl<S, From, To> DeleteOneFragment<S> for OptionalToMany<From, To>
+where
+    From: Collection<S, Data: Sync + Send>,
+    To: Collection<S, Data: Sync + Send>,
+    S: QueryBuilder + Accept<i64>,
+    for<'s> &'s str: ColumnIndex<S::Row>,
+    SelectSt<S>: Execute<S>,
+    S::Fragment: Send,
+    S::Context1: Send,
+    i64: for<'d> sqlx::Decode<'d, S> + Type<S>,
+{
+    type Output = Option<CollectionOutput<To::Data>>;
+
+    type Inner = Option<CollectionOutput<To::Data>>;
+
+    async fn first_sup_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
+        &'this mut self,
+        data: &'this mut Self::Inner,
+        exec: E,
+        id: i64,
+    ) {
+        use sqlx::Row;
+        let mut st = SelectSt::init(self.from.table_name());
+        self.to.on_select(&mut st);
+        st.join(left_join {
+            local_column: self.foriegn_key.clone(),
+            foriegn_column: "id".to_string(),
+            foriegn_table: self.to.table_name().to_string(),
+        });
+let alias = format!("{}_id", self.to.table_name());
+        st.select(col("id").table(self.to.table_name()).alias(&alias));
+        st.where_(col("id").table(self.from.table_name()).eq(id));
+
+        *data = st
+            .fetch_optional(exec, |r| {
+                Ok(CollectionOutput {
+                    attr: self.to.from_row_scoped(&r),
+                    id: r.get(&*alias),
+                })
+            })
+            .await
+            .unwrap();
+    }
+
+    fn returning(&self) -> Vec<String> {
+        vec![]
+    }
+
+    fn from_row(&mut self, _data: &mut Self::Inner, _row: &S::Row) {
+        /* no-op */
+    }
+
+    fn take(self, data: Self::Inner) -> Self::Output {
+        data
     }
 }
 

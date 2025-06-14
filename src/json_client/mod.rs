@@ -1,3 +1,5 @@
+pub mod builder_pattern;
+use super::builder_pattern::BuilderPattern;
 use crate::{
     QueryBuilder,
     any_set::AnySet,
@@ -7,6 +9,7 @@ use crate::{
     operations::{LinkedOutput, select_one_op::SelectOneFragment},
     prelude::{col, stmt::SelectSt},
 };
+use builder_pattern::to_json_client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::{ColumnIndex, Database, Decode, Encode, Pool, prelude::Type};
@@ -18,6 +21,15 @@ pub struct JsonClient<S: Database> {
     pub(crate) links: HashMap<&'static str, Arc<dyn DynamicLinkTraitObject<S>>>,
     pub(crate) any_set: AnySet,
     pub(crate) db: Pool<S>,
+}
+
+impl<S> JsonClient<S>
+where
+    S: Database,
+{
+    pub fn init(db: Pool<S>) -> BuilderPattern<(to_json_client<S>,), (), (), ()> {
+        BuilderPattern::default().build_mode(to_json_client(db))
+    }
 }
 
 pub trait JsonCollection<S>: Send + Sync + 'static {
@@ -155,7 +167,7 @@ where
         let c = self
             .collections
             .get(&input.collection)
-            .ok_or("collection was not found")?;
+            .ok_or(format!("collection {} was not found", input.collection))?;
 
         let mut st = SelectSt::init(c.table_name());
 
@@ -167,8 +179,7 @@ where
             .filter_map(|e| {
                 let name = e.1.json_entry();
                 let input = input.links.get(*e.0)?.clone();
-                let s =
-                    e.1.on_each_json_request(c.as_ref(), input, &self.any_set);
+                let s = e.1.on_each_json_request(c.as_ref(), input, &self.any_set);
 
                 match s {
                     Some(Ok(s)) => Some((name, s)),
@@ -197,7 +208,7 @@ where
             link.1.on_select(&mut st);
         }
 
-        let mut res = st
+        let res = st
             .fetch_one(&self.db, |r| {
                 use sqlx::Row;
                 let id: i64 = r.get("local_id");
@@ -213,8 +224,13 @@ where
                     links: HashMap::new(),
                 })
             })
-            .await
-            .unwrap();
+            .await;
+
+        let mut res = match res {
+            Err(sqlx::Error::RowNotFound) => return Ok(serde_json::Value::Null),
+            Err(err) => panic!("bug: {err}"),
+            Ok(ok) => ok,
+        };
 
         for link in links.iter_mut() {
             link.1.sub_op(self.db.clone()).await;

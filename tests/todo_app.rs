@@ -1,13 +1,22 @@
+use core::panic;
 use claw_ql::{
-    builder_pattern::{on_json_client::to_json_client, on_migrate_builder::to_migrate, BuilderPattern}, filters::by_id_mod::by_id, links::{relation::Relation, set_id::SetId, set_new::SetNew}, operations::{
-        insert_one_op::insert_one, select_one_op::select_one, update_one_op::update_one, CollectionOutput, LinkedOutput
-    }, update_mod::update
+    builder_pattern::BuilderPattern,
+    filters::by_id_mod::by_id,
+    json_client::builder_pattern::to_json_client,
+    links::{relation::Relation, set_id::SetId, set_new::SetNew},
+    migration::to_migrate,
+    operations::{
+        CollectionOutput, LinkedOutput, delete_one_op::delete_one, insert_one_op::insert_one,
+        select_one_op::select_one, update_one_op::update_one,
+    },
+    update_mod::update,
 };
 use claw_ql_macros::{Collection, relation};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{Sqlite, SqlitePool};
-use tracing::Level;
+use sqlx::{Pool, Sqlite, SqlitePool};
+use tracing::{debug, subscriber};
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[derive(Collection, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Todo {
@@ -29,35 +38,7 @@ pub struct Tag {
 relation!(optional_to_many Todo Category);
 relation!(many_to_many Todo Tag);
 
-#[tokio::test]
-async fn main() {
-    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-
-    tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
-        .init();
-
-    let schema = {
-        BuilderPattern::default()
-            // .infer_db::<Sqlite>()
-            .build_mode(to_migrate(Sqlite))
-            .build_mode(to_json_client(pool.clone()))
-            .add_link(Relation {
-                from: todo,
-                to: tag,
-            })
-            .add_link(Relation {
-                from: todo,
-                to: category,
-            })
-            .add_collection(category)
-            .add_collection(tag)
-            .add_collection(todo)
-            .finish()
-    };
-
-    schema.0.migrate(pool.clone()).await;
-
+async fn dumpy_data(db: Pool<Sqlite>) {
     sqlx::query(
         r#"
             INSERT INTO Tag (title) VALUES 
@@ -73,9 +54,39 @@ async fn main() {
                 ('todo_5', 1, NULL);
             "#,
     )
-    .execute(&pool)
+    .execute(&db)
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn workflow_generic() {
+    let trace = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
+
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+
+    let schema = {
+        BuilderPattern::default()
+            .build_mode(to_migrate(Sqlite))
+            .add_collection(category)
+            .add_collection(tag)
+            .add_collection(todo)
+            .add_link(Relation {
+                from: todo,
+                to: tag,
+            })
+            .add_link(Relation {
+                from: todo,
+                to: category,
+            })
+            .finish()
+    };
+
+    schema.0.migrate(pool.clone()).await;
+
+    dumpy_data(pool.clone()).await;
 
     let res = insert_one(Todo {
         title: "new todo".to_string(),
@@ -115,12 +126,6 @@ async fn main() {
         }
     );
 
-    // let res = insert_one(Todo {
-    //     title: "new todo".to_string(),
-    //     done: false,
-    //     description: None,
-    // });
-
     update_one(
         6,
         TodoPartial {
@@ -141,7 +146,6 @@ async fn main() {
         ("update title".to_string(),)
     );
 
-    // using generic operatioin
     let res = select_one(todo)
         .relation(category)
         .filter(by_id(4))
@@ -166,9 +170,63 @@ async fn main() {
         })
     );
 
-    let jc = schema.1.unwrap();
+    let res = delete_one(4, todo).relation(category).exec_op(&pool).await;
 
-    // using dynamic operation
+    assert_eq!(
+        res,
+        Some(LinkedOutput {
+            id: 4,
+            attr: Todo {
+                title: "todo_4".to_string(),
+                done: false,
+                description: None
+            },
+            links: (Some(CollectionOutput {
+                id: 1,
+                attr: Category {
+                    title: "category_1".to_string()
+                }
+            }),),
+        })
+    );
+
+    assert!(
+        sqlx::query("SELECT title FROM Todo WHERE id = 4;")
+            .fetch_optional(&pool)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    drop(trace);
+}
+
+#[tokio::test]
+async fn workflow_dynamic() {
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+
+    let schema = {
+        BuilderPattern::default()
+            .build_mode(to_json_client(pool.clone()))
+            .build_mode(to_migrate(Sqlite))
+            .add_collection(category)
+            .add_collection(tag)
+            .add_collection(todo)
+            .add_link(Relation {
+                from: todo,
+                to: tag,
+            })
+            .add_link(Relation {
+                from: todo,
+                to: category,
+            })
+            .finish()
+    };
+
+    schema.1.migrate(pool.clone()).await;
+    dumpy_data(pool).await;
+    let jc = schema.0.unwrap();
+
     let res = jc
         .select_one(json!({
             "collection": "todo",

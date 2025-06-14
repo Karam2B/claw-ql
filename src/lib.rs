@@ -4,6 +4,7 @@ use sqlx::{Database, Pool, Sqlite, SqlitePool};
 
 pub mod build_tuple;
 pub mod builder_pattern;
+pub mod json_client;
 pub mod collections;
 pub mod execute;
 pub mod expressions;

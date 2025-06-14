@@ -1,7 +1,7 @@
 use super::relation::DynamicLinkForRelation;
 use crate::QueryBuilder;
 use crate::collections::Collection;
-use crate::builder_pattern::json_client::SelectOneJsonFragment;
+use crate::json_client::SelectOneJsonFragment;
 use crate::operations::CollectionOutput;
 use crate::{
     collections::OnMigrate, operations::select_one_op::SelectOneFragment, prelude::stmt::SelectSt,

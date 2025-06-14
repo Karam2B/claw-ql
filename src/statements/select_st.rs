@@ -18,7 +18,7 @@ pub struct SelectSt<S: QueryBuilder> {
     pub(crate) _sqlx: PhantomData<S>,
 }
 
-pub trait Join: 'static {
+pub trait Join: 'static + Send + Sync {
     fn display_from(self: Box<Self>, from: &str) -> String;
     fn global_table(&self) -> &str;
 }

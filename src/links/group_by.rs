@@ -1,7 +1,7 @@
 use crate::QueryBuilder;
 use crate::any_set::AnySet;
 use crate::collections::{Collection, OnMigrate};
-use crate::builder_pattern::json_client::{JsonCollection, SelectOneJsonFragment};
+use crate::json_client::{JsonCollection, SelectOneJsonFragment};
 use crate::links::relation::RelationEntries;
 use crate::prelude::col;
 use crate::prelude::macro_relation::OptionalToMany;

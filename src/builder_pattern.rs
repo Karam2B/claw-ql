@@ -1,24 +1,36 @@
-pub mod on_migrate_builder;
-pub mod on_json_client;
-pub mod json_client;
-
 use crate::build_tuple::BuildTuple;
 
-pub struct BuilderPattern<BuildMode: BuildContext, Database, Collections, Links, Filters> {
-    pub(crate) __build_mode: BuildMode,
-    pub(crate) __build_ctx: BuildMode::Context,
-    pub(crate) __database: Database,
-    pub(crate) __collections: Collections,
-    pub(crate) __links: Links,
-    pub(crate) __filters: Filters,
+pub struct BuilderPattern<BuildMode: BuildContext, Collections, Links, Filters> {
+    __build_mode: BuildMode,
+    __build_ctx: BuildMode::Context,
+    __collections: Collections,
+    __links: Links,
+    __filters: Filters,
 }
 
-impl Default for BuilderPattern<(), (), (), (), ()> {
+pub trait BuildContext {
+    type Context;
+    fn init_context(&self) -> Self::Context;
+}
+
+pub trait AddCollection<Tuple, Next>: BuildContext {
+    fn add_col(next: &Next, ctx: &mut Self::Context);
+}
+
+pub trait AddLink<Tuple, Next>: BuildContext {
+    fn add_link(next: &Next, ctx: &mut Self::Context);
+}
+
+pub trait Finish<C>: BuildContext {
+    type Result;
+    fn finish(self, ctx: Self::Context) -> Self::Result;
+}
+
+impl Default for BuilderPattern<(), (), (), ()> {
     fn default() -> Self {
         BuilderPattern {
             __build_mode: (),
             __build_ctx: (),
-            __database: (),
             __collections: (),
             __links: (),
             __filters: (),
@@ -26,11 +38,11 @@ impl Default for BuilderPattern<(), (), (), (), ()> {
     }
 }
 
-impl<B, S> BuilderPattern<B, S, (), (), ()>
+impl<B> BuilderPattern<B, (), (), ()>
 where
     B: BuildTuple + BuildContext,
 {
-    pub fn build_mode<BM>(self, build_mode: BM) -> BuilderPattern<B::Bigger<BM>, S, (), (), ()>
+    pub fn build_mode<BM>(self, build_mode: BM) -> BuilderPattern<B::Bigger<BM>, (), (), ()>
     where
         BM: BuildContext,
         B::Context: BuildTuple,
@@ -41,7 +53,6 @@ where
         BuilderPattern {
             __build_ctx: build_ctx,
             __build_mode: build_mode,
-            __database: self.__database,
             __collections: (),
             __links: (),
             __filters: (),
@@ -49,14 +60,14 @@ where
     }
 }
 
-impl<B, S, C, L, F> BuilderPattern<B, S, C, L, F>
+impl<B, C, L, F> BuilderPattern<B, C, L, F>
 where
     B: BuildTuple + BuildContext,
     C: BuildTuple,
     L: BuildTuple,
     F: BuildTuple,
 {
-    pub fn add_collection<Cn>(mut self, collection: Cn) -> BuilderPattern<B, S, C::Bigger<Cn>, L, F>
+    pub fn add_collection<Cn>(mut self, collection: Cn) -> BuilderPattern<B, C::Bigger<Cn>, L, F>
     where
         B: AddCollection<C, Cn>,
     {
@@ -64,13 +75,12 @@ where
         BuilderPattern {
             __build_mode: self.__build_mode,
             __build_ctx: self.__build_ctx,
-            __database: self.__database,
             __collections: self.__collections.into_bigger(collection),
             __links: self.__links,
             __filters: self.__filters,
         }
     }
-    pub fn add_link<Ln>(mut self, link: Ln) -> BuilderPattern<B, S, C, L::Bigger<Ln>, F>
+    pub fn add_link<Ln>(mut self, link: Ln) -> BuilderPattern<B, C, L::Bigger<Ln>, F>
     where
         B: AddLink<L, Ln>,
     {
@@ -78,7 +88,6 @@ where
         BuilderPattern {
             __build_mode: self.__build_mode,
             __build_ctx: self.__build_ctx,
-            __database: self.__database,
             __collections: self.__collections,
             __links: self.__links.into_bigger(link),
             __filters: self.__filters,
@@ -92,36 +101,18 @@ where
     }
 }
 
-pub trait BuildContext {
-    type Context;
-    fn init_context(&self) -> Self::Context;
-}
-
-pub trait AddCollection<T, Next>: BuildContext {
-    fn add_col(next: &Next, ctx: &mut Self::Context);
-}
-
-pub trait AddLink<T, Next>: BuildContext {
-    fn add_link(next: &Next, ctx: &mut Self::Context);
-}
-
-pub trait Finish<C>: BuildContext {
-    type Result;
-    fn finish(self, ctx: Self::Context) -> Self::Result;
-}
-
 macro_rules! it {
     ($([$ty:ident, $part:literal]),*) => {
+
 impl<$($ty,)*> BuildContext for ($($ty,)*)
     where $($ty: BuildContext,)*
 {
     type Context = ( $($ty::Context,)*);
     fn init_context(&self) -> Self::Context {
-        ($(
-        paste::paste!(self.$part.init_context()),
-        )*)
+        ($(paste::paste!(self.$part.init_context()),)*)
     }
 }
+
 impl<Next,Tuple, $($ty),* > AddLink<Tuple, Next> for ($($ty,)*)
     where $($ty: BuildContext + AddLink<Tuple, Next>,)*
 {
@@ -129,6 +120,7 @@ impl<Next,Tuple, $($ty),* > AddLink<Tuple, Next> for ($($ty,)*)
         $($ty::add_link(next, &mut paste::paste!(ctx.$part));)*
     }
 }
+
 impl<Next,Tuple, $($ty),* > AddCollection<Tuple, Next> for ($($ty,)*)
     where $($ty: BuildContext + AddCollection<Tuple, Next>,)*
 {
@@ -145,8 +137,8 @@ impl<C, $($ty,)*> Finish<C> for ($($ty,)*)
         ($(paste::paste!(self.$part.finish(ctx.$part)),)*)
     }
 }
-    }
-}
+
+    }}
 
 #[rustfmt::skip]
 #[allow(unused)]

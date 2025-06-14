@@ -29,7 +29,7 @@ pub mod macro_derive_collection {
     pub use crate::statements::create_table_st::header;
     pub use crate::statements::insert_one_st::InsertOneSt;
     pub use crate::statements::select_st::SelectSt;
-    pub use crate::statements::update_one_st::UpdateOneSt;
+    pub use crate::statements::update_st::UpdateSt;
     pub use crate::update_mod::update;
     pub use core::marker::PhantomData;
     #[cfg(feature = "serde")]

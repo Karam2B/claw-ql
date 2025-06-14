@@ -87,6 +87,12 @@ pub fn main(input: DeriveInput) -> TokenStream {
 
         impl CollectionBasic for  #table_name_lower_case_ident {
             type LinkedData = #table_name_camel_case;
+            fn members(&self) -> Vec<String> 
+            {
+                vec![
+                    #(String::from(stringify!(#member_name)),)*
+                ]
+            }
             fn table_name(&self) -> &'static str {
                 stringify!(#table_name_camel_case)
             }
@@ -166,7 +172,7 @@ for<'s> &'s str: sqlx_::ColumnIndex<<S as Database>::Row>,
     fn on_update(
         &self,
         this: Self::Partial,
-        stmt: &mut UpdateOneSt<S>,
+        stmt: &mut UpdateSt<S>,
     ) where
         S: claw_ql::QueryBuilder,
     {
@@ -178,12 +184,7 @@ for<'s> &'s str: sqlx_::ColumnIndex<<S as Database>::Row>,
             )*
     }
 
-    fn members(&self) -> Vec<String> 
-    {
-        vec![
-            #(String::from(stringify!(#member_name)),)*
-        ]
-    }
+
 
     fn from_row_noscope(&self, row: &<S as Database>::Row) -> Self::Data
     {

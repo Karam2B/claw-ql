@@ -1,9 +1,5 @@
 use crate::{
-    BindItem, QueryBuilder,
-    collections::{Collection, Filter},
-    expressions::ColEq,
-    prelude::{col, stmt::SelectSt},
-    statements::update_one_st::UpdateOneSt,
+    collections::{Collection, Filter}, expressions::ColEq, prelude::{col, stmt::SelectSt}, statements::{delete_st::DeleteSt, update_st::{ UpdateSt}}, BindItem, QueryBuilder
 };
 
 #[allow(non_camel_case_types)]
@@ -15,7 +11,13 @@ where
     C: Collection<S>,
     S: QueryBuilder,
 {
-    fn on_update(self, handler: &C, st: &mut UpdateOneSt<S>)
+    fn on_delete(self, handler: &C, st: &mut DeleteSt<S>)
+    where
+        S: QueryBuilder,
+    {
+        st.where_(col("id").table(handler.table_name()).eq(self.0));
+    }
+    fn on_update(self, handler: &C, st: &mut UpdateSt<S>)
     where
         S: QueryBuilder,
     {

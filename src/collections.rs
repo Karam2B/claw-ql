@@ -3,11 +3,12 @@ use sqlx::{Database, Executor};
 use crate::{
     QueryBuilder,
     prelude::stmt::InsertOneSt,
-    statements::{select_st::SelectSt, update_one_st::UpdateOneSt},
+    statements::{delete_st::DeleteSt, select_st::SelectSt, update_st::UpdateSt},
 };
 
 pub trait CollectionBasic {
     fn table_name(&self) -> &'static str;
+    fn members(&self) -> Vec<String>;
     type LinkedData;
 }
 
@@ -15,7 +16,6 @@ pub trait HasHandler {
     type Handler: Default;
 }
 
-//
 pub trait Collection<S>: Sized + Send + Sync + CollectionBasic<LinkedData = Self::Data> {
     type Partial;
     type Data;
@@ -26,13 +26,11 @@ pub trait Collection<S>: Sized + Send + Sync + CollectionBasic<LinkedData = Self
     fn on_insert(&self, this: Self::Data, stmt: &mut InsertOneSt<S>)
     where
         S: sqlx::Database;
-    fn on_update(&self, this: Self::Partial, stmt: &mut UpdateOneSt<S>)
+    fn on_update(&self, this: Self::Partial, stmt: &mut UpdateSt<S>)
     where
         S: QueryBuilder;
 
-    fn members(&self) -> Vec<String>;
-    // fn members_scoped(&self) -> &'static [&'static str];
-    // fn table_name(&self) -> &'static str;
+
     fn from_row_noscope(&self, row: &S::Row) -> Self::Data
     where
         S: Database;
@@ -104,7 +102,9 @@ mod on_migrate_tuple_impls {
 // oppose of having three method one for update, select, and delete
 mod has_where_clause_trati {
     use crate::{
-        BindItem, QueryBuilder, prelude::stmt::SelectSt, statements::update_one_st::UpdateOneSt,
+        BindItem, QueryBuilder,
+        prelude::stmt::SelectSt,
+        statements::{delete_st::DeleteSt, update_st::UpdateSt},
     };
 
     use super::Filter;
@@ -147,10 +147,16 @@ mod has_where_clause_trati {
         fn delegate_where(&mut self, item: Box<dyn BindItemBoxed<S>>);
     }
 
-    #[allow(unused)]
-    pub fn on_where_concept<S>(_statement: &dyn HasWhereClause<S>) {}
+    impl<S> HasWhereClause<S> for DeleteSt<S>
+    where
+        S: QueryBuilder,
+    {
+        fn delegate_where(&mut self, item: Box<dyn BindItemBoxed<S>>) {
+            self.where_(item);
+        }
+    }
 
-    impl<S> HasWhereClause<S> for UpdateOneSt<S>
+    impl<S> HasWhereClause<S> for UpdateSt<S>
     where
         S: QueryBuilder,
     {
@@ -173,20 +179,26 @@ mod has_where_clause_trati {
             Q: QueryBuilder;
     }
 
-    // temperoraly trait to solve conflicting impl with std-types
+    // non-generic trait to solve conflicting impl
     pub trait LocalizeFilter {}
 
     impl<S, C, T> Filter<S, C> for T
     where
         T: FilterGeneric<S, C> + LocalizeFilter,
     {
+        fn on_delete(self, handler: &C, st: &mut DeleteSt<S>)
+        where
+            S: QueryBuilder,
+        {
+            self.on_where(handler, st);
+        }
         fn on_select(self, handler: &C, st: &mut SelectSt<S>)
         where
             S: QueryBuilder,
         {
             self.on_where(handler, st);
         }
-        fn on_update(self, handler: &C, st: &mut UpdateOneSt<S>)
+        fn on_update(self, handler: &C, st: &mut UpdateSt<S>)
         where
             S: QueryBuilder,
         {
@@ -195,9 +207,12 @@ mod has_where_clause_trati {
     }
 }
 
-// TODO: should we use this trait of FilterGeneric? 
+// TODO: should we use this trait or FilterGeneric?
 pub trait Filter<Q, C>: Sync + Send {
-    fn on_update(self, handler: &C, st: &mut UpdateOneSt<Q>)
+    fn on_delete(self, handler: &C, st: &mut DeleteSt<Q>)
+    where
+        Q: QueryBuilder;
+    fn on_update(self, handler: &C, st: &mut UpdateSt<Q>)
     where
         Q: QueryBuilder;
     fn on_select(self, handler: &C, st: &mut SelectSt<Q>)
@@ -209,7 +224,8 @@ pub trait Filter<Q, C>: Sync + Send {
 mod filters_tuple_impls {
     use super::Filter;
     use crate::{
-        QueryBuilder, statements::select_st::SelectSt, statements::update_one_st::UpdateOneSt,
+        QueryBuilder,
+        statements::{delete_st::DeleteSt, select_st::SelectSt, update_st::UpdateSt},
     };
     use paste::paste;
 
@@ -226,7 +242,10 @@ mod filters_tuple_impls {
         S: QueryBuilder,
         $($ty:  Filter<S, C>,)*
     {
-        fn on_update(self, h: &C, st: &mut UpdateOneSt<S>) {
+        fn on_delete(self, h: &C, st: &mut DeleteSt<S>) {
+            $(paste!(self.$part.on_delete(h, st));)*
+        }
+        fn on_update(self, h: &C, st: &mut UpdateSt<S>) {
             $(paste!(self.$part.on_update(h, st));)*
         }
         fn on_select(self, h: &C, st: &mut SelectSt<S>) {
@@ -242,7 +261,10 @@ mod filters_tuple_impls {
         S: QueryBuilder,
         R0: Filter<S, C>,
     {
-        fn on_update(self, h: &C, st: &mut UpdateOneSt<S>) {
+        fn on_delete(self, h: &C, st: &mut DeleteSt<S>) {
+            paste!(self.0.on_delete(h, st));
+        }
+        fn on_update(self, h: &C, st: &mut UpdateSt<S>) {
             paste!(self.0.on_update(h, st));
         }
         fn on_select(self, h: &C, st: &mut SelectSt<S>) {

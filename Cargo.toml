@@ -20,6 +20,7 @@ tracing = "0.1.40"
 tokio = { version = "1.37.0", features = ["full"] }
 pretty_assertions = "1"
 sqlx = { version = "0.8.5", features = ["runtime-tokio"] }
+# tracing-test-macro = { path = "../tracing-test/tracing-test-macro" }
 
 [features]
 default = ["sqlite", "serde", "beta", "trace"]

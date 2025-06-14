@@ -1,6 +1,6 @@
 use crate::{
     QueryBuilder, build_tuple::BuildTuple, execute::Execute, filters::by_id_mod::by_id,
-    links::LinkData, operations::CollectionOutput, statements::update_one_st::UpdateOneSt,
+    links::LinkData, operations::CollectionOutput, statements::update_st::UpdateSt,
 };
 use serde::Serialize;
 use sqlx::{ColumnIndex, Decode, Executor, Pool, prelude::Type};
@@ -14,7 +14,7 @@ use super::{
 pub trait UpdateOneFragment<S: QueryBuilder>: Sync + Send {
     type Inner: Default + Send + Sync;
     type Output;
-    fn on_update(&mut self, data: &mut Self::Inner, st: &mut UpdateOneSt<S>);
+    fn on_update(&mut self, data: &mut Self::Inner, st: &mut UpdateSt<S>);
     fn returning(&mut self) -> Vec<String>;
     fn from_row(&mut self, data: &mut Self::Inner, row: &S::Row);
     // // TODO: how to handle the case where update is not performed due
@@ -35,12 +35,8 @@ pub trait UpdateOneFragment<S: QueryBuilder>: Sync + Send {
 }
 
 pub trait UpdateOneJsonFragment<S: QueryBuilder>: Send + Sync {
-    fn on_update(&mut self, st: &mut UpdateOneSt<S>);
+    fn on_update(&mut self, st: &mut UpdateSt<S>);
     fn from_row(&mut self, row: &S::Row);
-    // fn first_sub_op<'this>(
-    //     &'this mut self,
-    //     pool: Pool<S>,
-    // ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>>;
     fn second_sub_op<'this>(
         &'this mut self,
         pool: Pool<S>,
@@ -54,7 +50,7 @@ where
     T: UpdateOneFragment<S>,
     for<'c> &'c mut S::Connection: Executor<'c, Database = S>,
 {
-    fn on_update(&mut self, st: &mut UpdateOneSt<S>) {
+    fn on_update(&mut self, st: &mut UpdateSt<S>) {
         self.0.on_update(&mut self.1, st)
     }
 
@@ -160,7 +156,7 @@ where
         db: impl for<'e> Executor<'e, Database = S> + Clone,
     ) -> Option<LinkedOutput<H::Data, L::Output>>
     where
-        UpdateOneSt<S>: Execute<S>,
+        UpdateSt<S>: Execute<S>,
         for<'c> &'c mut S::Connection: sqlx::Executor<'c, Database = S>,
         L: UpdateOneFragment<S> + Send,
         F: Filter<S, H>,
@@ -171,7 +167,7 @@ where
 
         let handler = self.handler;
 
-        let mut st = UpdateOneSt::init(handler.table_name().to_string());
+        let mut st = UpdateSt::init(handler.table_name().to_string());
 
         handler.on_update(self.data, &mut st);
 
@@ -226,7 +222,7 @@ where
 {
     type Output = ($($ty::Output,)*);
     type Inner = ($($ty::Inner,)*);
-    fn on_update(&mut self, data: &mut Self::Inner, st: &mut UpdateOneSt<S>) {
+    fn on_update(&mut self, data: &mut Self::Inner, st: &mut UpdateSt<S>) {
         $(paste::paste!(self.$part.on_update(&mut data.$part, st));)*
     }
     fn returning(&mut self) -> Vec<String> {

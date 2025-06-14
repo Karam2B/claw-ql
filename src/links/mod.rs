@@ -3,7 +3,7 @@ use std::any::Any;
 
 use crate::{
     any_set::AnySet,
-    builder_pattern::json_client::{JsonCollection, SelectOneJsonFragment},
+    json_client::{JsonCollection, SelectOneJsonFragment},
 };
 
 pub mod group_by;

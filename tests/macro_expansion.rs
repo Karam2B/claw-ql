@@ -22,6 +22,13 @@ const _: () = {
         fn table_name(&self) -> &'static str {
             "Todo"
         }
+        fn members(&self) -> Vec<String> {
+            vec![
+                String::from("title"),
+                String::from("done"),
+                String::from("description"),
+            ]
+        }
     }
     impl<S> OnMigrate<S> for todo
     where
@@ -88,7 +95,7 @@ const _: () = {
         fn on_update(
             &self,
             this: Self::Partial,
-            stmt: &mut UpdateOneSt<S>,
+            stmt: &mut UpdateSt<S>,
         ) where
             S: claw_ql::QueryBuilder,
         {
@@ -105,13 +112,7 @@ const _: () = {
                 update::set(set) => stmt.set_col("description".to_string(), set),
             }
         }
-        fn members(&self) -> Vec<String> {
-            vec![
-                String::from("title"),
-                String::from("done"),
-                String::from("description"),
-            ]
-        }
+
         fn from_row_noscope(&self, row: &<S as Database>::Row) -> Self::Data {
             Self::Data {
                 title: row.get("title"),

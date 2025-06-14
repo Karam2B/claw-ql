@@ -1,11 +1,12 @@
-use std::sync::Arc;
-use super::json_client::{JsonClient, JsonCollection};
-use super::{AddCollection, AddLink, BuildContext, Finish};
+use super::{JsonClient, JsonCollection};
+use crate::builder_pattern::{AddCollection, AddLink, BuildContext, Finish};
 use crate::{
     QueryBuilder,
     links::{DynamicLink, DynamicLinkTraitObject},
 };
+use convert_case::{Case, Casing};
 use sqlx::{Database, Pool};
+use std::sync::Arc;
 
 #[allow(non_camel_case_types)]
 pub struct to_json_client<S: Database>(pub Pool<S>);
@@ -31,8 +32,10 @@ where
     N: JsonCollection<S> + Clone,
 {
     fn add_col(next: &N, ctx: &mut Self::Context) {
-        ctx.collections
-            .insert(next.table_name().to_string(), Arc::new(next.clone()));
+        ctx.collections.insert(
+            next.table_name().to_case(Case::Snake),
+            Arc::new(next.clone()),
+        );
     }
 }
 

@@ -2,7 +2,7 @@ use crate::{
     QueryBuilder,
     any_set::AnySet,
     collections::{Collection, OnMigrate},
-    builder_pattern::json_client::{JsonCollection, SelectOneJsonFragment},
+    json_client::{JsonCollection, SelectOneJsonFragment},
     operations::select_one_op::SelectOneFragment,
 };
 use convert_case::{Case, Casing};
