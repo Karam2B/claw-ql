@@ -16,6 +16,7 @@ use serde::Serialize;
 use sqlx::{ColumnIndex, Executor};
 use sqlx::{Sqlite, sqlite::SqliteRow};
 use std::ops::Not;
+use std::sync::Arc;
 
 use super::LinkData;
 use super::relation::Relation;
@@ -142,7 +143,7 @@ impl SelectOneJsonFragment<Sqlite> for CountDynamic {
 
     fn sub_op<'this>(
         &'this mut self,
-        pool: sqlx::Pool<Sqlite>,
+        _pool: sqlx::Pool<Sqlite>,
     ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
         Box::pin(async {})
     }
@@ -227,9 +228,9 @@ impl DynamicLink<Sqlite> for count<()> {
     type SelectOne = ReturnAsJsonMap<CountDynamic>;
     fn on_select_one(
         &self,
-        base_col: &dyn JsonCollection<Sqlite>,
+        base_col: Arc<dyn JsonCollection<Sqlite>>,
         input: Self::SelectOneInput,
-        ctx: &AnySet,
+        ctx: Arc<AnySet>,
     ) -> Result<Option<Self::SelectOne>, String> {
         // let input = serde_json::from_value::<Vec<String>>(input).ok()?;
         let base = base_col.table_name().to_case(Case::Snake);
@@ -274,5 +275,43 @@ impl DynamicLink<Sqlite> for count<()> {
             .collect::<Vec<_>>();
 
         return Ok(Some(ReturnAsJsonMap(s)));
+    }
+    type InsertOneInput = ();
+
+    type InsertOne = ();
+
+    fn on_insert_one(
+        &self,
+        _base_col: std::sync::Arc<dyn crate::json_client::JsonCollection<Sqlite>>,
+        _input: Self::InsertOneInput,
+        _ctx: std::sync::Arc<crate::any_set::AnySet>,
+    ) -> Result<Option<Self::InsertOne>, String> {
+        todo!()
+    }
+
+    type DeleteOneInput = ();
+
+    type DeleteOne = ();
+
+    fn on_delete_one(
+        &self,
+        _base_col: std::sync::Arc<dyn crate::json_client::JsonCollection<Sqlite>>,
+        _input: Self::DeleteOneInput,
+        _ctx: std::sync::Arc<crate::any_set::AnySet>,
+    ) -> Result<Option<Self::DeleteOne>, String> {
+        todo!()
+    }
+
+    type UpdateOneInput = ();
+
+    type UpdateOne = ();
+
+    fn on_update_one(
+        &self,
+        _base_col: std::sync::Arc<dyn crate::json_client::JsonCollection<Sqlite>>,
+        _input: Self::UpdateOneInput,
+        _ctx: std::sync::Arc<crate::any_set::AnySet>,
+    ) -> Result<Option<Self::UpdateOne>, String> {
+        todo!()
     }
 }

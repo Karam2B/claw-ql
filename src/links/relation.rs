@@ -1,3 +1,5 @@
+use std::{any::Any, collections::HashMap, ops::Not, sync::Arc};
+
 use crate::{
     QueryBuilder,
     any_set::AnySet,
@@ -9,7 +11,6 @@ use convert_case::{Case, Casing};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::Executor;
-use std::{any::Any, collections::HashMap, ops::Not};
 
 use super::LinkData;
 
@@ -107,9 +108,9 @@ where
     type SelectOne = ReturnAsJsonMap<Box<dyn SelectOneJsonFragment<S>>>;
     fn on_select_one(
         &self,
-        base_col: &dyn JsonCollection<S>,
+        base_col: Arc<dyn JsonCollection<S>>,
         input: Self::SelectOneInput,
-        ctx: &AnySet,
+        ctx: Arc<AnySet>,
     ) -> Result<Option<Self::SelectOne>, String> {
         let base = base_col.table_name().to_case(Case::Snake);
         let spec = self.clone().spec(self.from.clone());
@@ -153,5 +154,44 @@ where
         }
 
         Ok(Some(ReturnAsJsonMap(s)))
+    }
+
+    type InsertOneInput = ();
+
+    type InsertOne = ();
+
+    fn on_insert_one(
+        &self,
+        _base_col: std::sync::Arc<dyn crate::json_client::JsonCollection<S>>,
+        _input: Self::InsertOneInput,
+        _ctx: std::sync::Arc<crate::any_set::AnySet>,
+    ) -> Result<Option<Self::InsertOne>, String> {
+        todo!()
+    }
+
+    type DeleteOneInput = ();
+
+    type DeleteOne = ();
+
+    fn on_delete_one(
+        &self,
+        _base_col: std::sync::Arc<dyn crate::json_client::JsonCollection<S>>,
+        _input: Self::DeleteOneInput,
+        _ctx: std::sync::Arc<crate::any_set::AnySet>,
+    ) -> Result<Option<Self::DeleteOne>, String> {
+        todo!()
+    }
+
+    type UpdateOneInput = ();
+
+    type UpdateOne = ();
+
+    fn on_update_one(
+        &self,
+        _base_col: std::sync::Arc<dyn crate::json_client::JsonCollection<S>>,
+        _input: Self::UpdateOneInput,
+        _ctx: std::sync::Arc<crate::any_set::AnySet>,
+    ) -> Result<Option<Self::UpdateOne>, String> {
+        todo!()
     }
 }

@@ -2,9 +2,8 @@ use crate::{
     QueryBuilder, build_tuple::BuildTuple, execute::Execute, filters::by_id_mod::by_id,
     links::LinkData, operations::CollectionOutput, statements::update_st::UpdateSt,
 };
-use serde::Serialize;
-use sqlx::{ColumnIndex, Decode, Executor, Pool, prelude::Type};
-use std::{marker::PhantomData, pin::Pin};
+use sqlx::{ColumnIndex, Decode, Executor, prelude::Type};
+use std::marker::PhantomData;
 
 use super::{
     LinkedOutput,
@@ -32,54 +31,6 @@ pub trait UpdateOneFragment<S: QueryBuilder>: Sync + Send {
         exec: E,
     ) -> impl Future<Output = ()> + Send + use<'this, Self, S, E>;
     fn take(self, data: Self::Inner) -> Self::Output;
-}
-
-pub trait UpdateOneJsonFragment<S: QueryBuilder>: Send + Sync {
-    fn on_update(&mut self, st: &mut UpdateSt<S>);
-    fn from_row(&mut self, row: &S::Row);
-    fn second_sub_op<'this>(
-        &'this mut self,
-        pool: Pool<S>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>>;
-    fn take(self: Box<Self>) -> serde_json::Value;
-}
-
-impl<S: QueryBuilder, T> UpdateOneJsonFragment<S> for (T, T::Inner)
-where
-    T::Output: Serialize,
-    T: UpdateOneFragment<S>,
-    for<'c> &'c mut S::Connection: Executor<'c, Database = S>,
-{
-    fn on_update(&mut self, st: &mut UpdateSt<S>) {
-        self.0.on_update(&mut self.1, st)
-    }
-
-    #[inline]
-    fn from_row(&mut self, row: &<S>::Row) {
-        self.0.from_row(&mut self.1, row)
-    }
-
-    // #[inline]
-    // fn first_sub_op<'this>(
-    //     &'this mut self,
-    //     pool: Pool<S>,
-    // ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
-    //     Box::pin(async move { self.0.first_sub_op(&mut self.1, &pool).await })
-    // }
-
-    #[inline]
-    fn second_sub_op<'this>(
-        &'this mut self,
-        pool: Pool<S>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
-        Box::pin(async move { self.0.second_sub_op(&mut self.1, &pool).await })
-    }
-
-    #[inline]
-    fn take(self: Box<Self>) -> serde_json::Value {
-        let taken = self.0.take(self.1);
-        serde_json::to_value(taken).unwrap()
-    }
 }
 
 pub struct UpdateOne<S, C: Collection<S>, L, F> {
@@ -174,8 +125,6 @@ where
         self.filters.on_update(&handler, &mut st);
 
         let mut worker_data = L::Inner::default();
-
-        // self.links.first_sub_op(&mut worker_data, db.clone()).await;
 
         self.links.on_update(&mut worker_data, &mut st);
 

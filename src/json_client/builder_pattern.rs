@@ -52,10 +52,11 @@ where
     N: DynamicLink<S> + 'static + Send + Sync + Clone,
 {
     fn add_link(next: &N, ctx: &mut Self::Context) {
-        if ctx.any_set.get::<N::Entry>().is_none() {
-            ctx.any_set.set(N::init_entry());
+        let amut = Arc::get_mut(&mut ctx.any_set).expect("one at a time");
+        if amut.get::<N::Entry>().is_none() {
+            amut.set(N::init_entry());
         }
-        let entry = ctx.any_set.get_mut::<N::Entry>().unwrap();
+        let entry = amut.get_mut::<N::Entry>().unwrap();
         let next = next.clone();
         next.on_register(entry);
         let name = next.json_entry();

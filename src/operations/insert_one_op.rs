@@ -1,7 +1,6 @@
 use paste::paste;
-use serde::Serialize;
-use sqlx::{ColumnIndex, Database, Decode, Executor, Pool, Type};
-use std::{marker::PhantomData, pin::Pin};
+use sqlx::{ColumnIndex, Database, Decode, Executor, Type};
+use std::marker::PhantomData;
 
 use crate::{
     QueryBuilder, build_tuple::BuildTuple, execute::Execute, links::LinkData,
@@ -31,59 +30,6 @@ pub trait InsertOneFragment<S: Database>: Sync + Send {
         exec: E,
     ) -> impl Future<Output = ()> + Send + use<'this, Self, S, E>;
     fn take(self, data: Self::Inner) -> Self::Output;
-}
-
-pub trait InsertOneJsonFragment<S: QueryBuilder>: Send + Sync {
-    fn on_insert(&mut self, st: &mut InsertOneSt<S>);
-    fn from_row(&mut self, row: &S::Row);
-    fn first_sub_op<'this>(
-        &'this mut self,
-        pool: Pool<S>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>>;
-    fn second_sub_op<'this>(
-        &'this mut self,
-        pool: Pool<S>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>>;
-    fn take(self: Box<Self>) -> serde_json::Value;
-}
-
-impl<S: QueryBuilder, T> InsertOneJsonFragment<S> for (T, T::Inner)
-where
-    T::Output: Serialize,
-    T: InsertOneFragment<S>,
-    for<'c> &'c mut S::Connection: Executor<'c, Database = S>,
-{
-    #[inline]
-    fn on_insert(&mut self, st: &mut InsertOneSt<S>) {
-        self.0.on_insert(&mut self.1, st)
-    }
-
-    #[inline]
-    fn from_row(&mut self, row: &<S>::Row) {
-        self.0.from_row(&mut self.1, row)
-    }
-
-    #[inline]
-    fn first_sub_op<'this>(
-        &'this mut self,
-        pool: Pool<S>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
-        Box::pin(async move { self.0.first_sub_op(&mut self.1, &pool).await })
-    }
-
-    #[inline]
-    fn second_sub_op<'this>(
-        &'this mut self,
-        pool: Pool<S>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
-        Box::pin(async move { self.0.second_sub_op(&mut self.1, &pool).await })
-    }
-
-    #[inline]
-    fn take(self: Box<Self>) -> serde_json::Value {
-        let taken = self.0.take(self.1);
-        serde_json::to_value(taken).unwrap()
-    }
 }
 
 pub struct InsertOne<S, C: Collection<S>, L> {
