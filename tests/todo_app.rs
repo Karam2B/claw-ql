@@ -1,4 +1,3 @@
-use core::panic;
 use claw_ql::{
     builder_pattern::BuilderPattern,
     filters::by_id_mod::by_id,
@@ -12,6 +11,7 @@ use claw_ql::{
     update_mod::update,
 };
 use claw_ql_macros::{Collection, relation};
+use core::panic;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{Pool, Sqlite, SqlitePool};
@@ -197,8 +197,6 @@ async fn workflow_generic() {
             .unwrap()
             .is_none()
     );
-
-    drop(trace);
 }
 
 #[tokio::test]
@@ -223,9 +221,9 @@ async fn workflow_dynamic() {
             .finish()
     };
 
+    let jc = schema.0.unwrap();
     schema.1.migrate(pool.clone()).await;
     dumpy_data(pool).await;
-    let jc = schema.0.unwrap();
 
     let res = jc
         .select_one(json!({

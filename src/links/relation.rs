@@ -2,7 +2,7 @@ use crate::{
     QueryBuilder,
     any_set::AnySet,
     collections::{Collection, OnMigrate},
-    json_client::{JsonCollection, SelectOneJsonFragment},
+    json_client::{DynamicLink, JsonCollection, ReturnAsJsonMap, SelectOneJsonFragment},
     operations::select_one_op::SelectOneFragment,
 };
 use convert_case::{Case, Casing};
@@ -11,7 +11,7 @@ use serde_json::Value;
 use sqlx::Executor;
 use std::{any::Any, collections::HashMap, ops::Not};
 
-use super::{DynamicLink, LinkData};
+use super::LinkData;
 
 #[derive(Clone)]
 pub struct Relation<From, To> {
@@ -103,14 +103,14 @@ where
         "relation"
     }
 
-    fn on_each_json_request(
+    type SelectOneInput = HashMap<String, Value>;
+    type SelectOne = ReturnAsJsonMap<Box<dyn SelectOneJsonFragment<S>>>;
+    fn on_select_one(
         &self,
         base_col: &dyn JsonCollection<S>,
-        input: Value,
+        input: Self::SelectOneInput,
         ctx: &AnySet,
-    ) -> Option<Result<Box<(dyn SelectOneJsonFragment<S> + 'static)>, String>> {
-        let input = serde_json::from_value::<HashMap<String, Value>>(input).ok()?;
-
+    ) -> Result<Option<Self::SelectOne>, String> {
         let base = base_col.table_name().to_case(Case::Snake);
         let spec = self.clone().spec(self.from.clone());
 
@@ -149,9 +149,9 @@ where
             .collect::<Vec<_>>();
 
         if not_related.is_empty().not() {
-            return Some(Err(not_related.last().unwrap().clone()));
+            return Err(not_related.last().unwrap().clone());
         }
 
-        return Some(Ok(Box::new(s)));
+        Ok(Some(ReturnAsJsonMap(s)))
     }
 }

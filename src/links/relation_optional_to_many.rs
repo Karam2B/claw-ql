@@ -130,7 +130,7 @@ where
             foriegn_column: "id".to_string(),
             foriegn_table: self.to.table_name().to_string(),
         });
-let alias = format!("{}_id", self.to.table_name());
+        let alias = format!("{}_id", self.to.table_name());
         st.select(col("id").table(self.to.table_name()).alias(&alias));
         st.where_(col("id").table(self.from.table_name()).eq(id));
 

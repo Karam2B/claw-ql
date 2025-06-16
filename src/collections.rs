@@ -30,7 +30,6 @@ pub trait Collection<S>: Sized + Send + Sync + CollectionBasic<LinkedData = Self
     where
         S: QueryBuilder;
 
-
     fn from_row_noscope(&self, row: &S::Row) -> Self::Data
     where
         S: Database;

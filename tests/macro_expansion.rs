@@ -92,11 +92,8 @@ const _: () = {
             stmt.col("done".to_string(), this.done);
             stmt.col("description".to_string(), this.description);
         }
-        fn on_update(
-            &self,
-            this: Self::Partial,
-            stmt: &mut UpdateSt<S>,
-        ) where
+        fn on_update(&self, this: Self::Partial, stmt: &mut UpdateSt<S>)
+        where
             S: claw_ql::QueryBuilder,
         {
             match this.title {

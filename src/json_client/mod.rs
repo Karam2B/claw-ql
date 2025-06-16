@@ -5,21 +5,22 @@ use crate::{
     any_set::AnySet,
     collections::Collection,
     execute::Execute,
-    links::DynamicLinkTraitObject,
     operations::{LinkedOutput, select_one_op::SelectOneFragment},
     prelude::{col, stmt::SelectSt},
 };
 use builder_pattern::to_json_client;
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::{from_value, Map, Value};
 use sqlx::{ColumnIndex, Database, Decode, Encode, Pool, prelude::Type};
-use std::ops::Not;
+use std::{any::Any, ops::Not};
 use std::{collections::HashMap, pin::Pin, sync::Arc};
 
 pub struct JsonClient<S: Database> {
     pub(crate) collections: HashMap<String, Arc<dyn JsonCollection<S>>>,
     pub(crate) links: HashMap<&'static str, Arc<dyn DynamicLinkTraitObject<S>>>,
     pub(crate) any_set: AnySet,
+    // errors the builder pattern can't detect at a build time
+    pub(crate) dynamic_errors: Vec<String>,
     pub(crate) db: Pool<S>,
 }
 
@@ -32,6 +33,79 @@ where
     }
 }
 
+// === Other Requirement ===
+pub trait DynamicLink<S>
+where
+    S: QueryBuilder,
+{
+    fn init_entry() -> Self::Entry;
+    type Entry: Any;
+    fn on_register(&self, entry: &mut Self::Entry);
+    fn on_finish(&self, build_ctx: &AnySet) -> Result<(), String>;
+
+    fn json_entry() -> &'static str;
+    fn get_entry<'a>(&self, ctx: &'a AnySet) -> &'a Self::Entry {
+        ctx.get::<Self::Entry>()
+            .expect("any set should always contain entry")
+    }
+    type SelectOneInput: DeserializeOwned;
+    type SelectOne: SelectOneJsonFragment<S>;
+    fn on_select_one(
+        &self,
+        base_col: &dyn JsonCollection<S>,
+        input: Self::SelectOneInput,
+        ctx: &AnySet,
+    ) -> Result<Option<Self::SelectOne>, String>;
+}
+
+// a version of DynamicLink that is trait-object compatible
+pub trait DynamicLinkTraitObject<S>: Send + Sync {
+    fn on_finish(&self, build_ctx: &AnySet) -> Result<(), String>;
+    fn json_entry(&self) -> &'static str;
+    fn on_select_one(
+        &self,
+        _base_col: &dyn JsonCollection<S>,
+        input: Value,
+        ctx: &AnySet,
+    ) -> Result<Option<Box<dyn SelectOneJsonFragment<S>>>, String>;
+}
+
+impl<S, T> DynamicLinkTraitObject<S> for T
+where
+    S: QueryBuilder,
+    T: DynamicLink<S, Entry: Any> + Send + Sync,
+    T::SelectOne: SelectOneJsonFragment<S>,
+{
+    fn on_finish(&self, build_ctx: &AnySet) -> Result<(), String> {
+        <Self as DynamicLink<S>>::on_finish(self, build_ctx)
+    }
+    fn json_entry(&self) -> &'static str {
+        T::json_entry()
+    }
+    fn on_select_one(
+        &self,
+        base_col: &dyn JsonCollection<S>,
+        input: Value,
+        ctx: &AnySet,
+    ) -> Result<Option<Box<dyn SelectOneJsonFragment<S>>>, String> {
+        let input = from_value::<T::SelectOneInput>(input);
+        let input = match input {
+            Ok(ok) => ok,
+            Err(err) => return Err(err.to_string()),
+        };
+
+        let output = self.on_select_one(base_col, input, ctx)?;
+        let output = match output {
+            Some(ok) => ok,
+            None => return Ok(None),
+        };
+        let output: Box<dyn SelectOneJsonFragment<S>> = Box::new(output);
+
+        Ok(Some(output))
+    }
+}
+
+// === Extentions ===
 pub trait JsonCollection<S>: Send + Sync + 'static {
     fn on_select(&self, stmt: &mut SelectSt<S>)
     where
@@ -69,7 +143,7 @@ where
     }
 }
 
-pub trait SelectOneJsonFragment<S: QueryBuilder>: Send + Sync {
+pub trait SelectOneJsonFragment<S: QueryBuilder>: Send + Sync + 'static {
     fn on_select(&mut self, st: &mut SelectSt<S>);
     fn from_row(&mut self, row: &S::Row);
     fn sub_op<'this>(
@@ -79,10 +153,34 @@ pub trait SelectOneJsonFragment<S: QueryBuilder>: Send + Sync {
     fn take(self: Box<Self>) -> serde_json::Value;
 }
 
+impl<S: QueryBuilder, T> SelectOneJsonFragment<S> for Box<T>
+where
+    T: ?Sized,
+    T: SelectOneJsonFragment<S>,
+{
+    fn on_select(&mut self, st: &mut SelectSt<S>) {
+        T::on_select(self, st)
+    }
+
+    fn from_row(&mut self, row: &<S>::Row) {
+        T::from_row(self, row)
+    }
+
+    fn sub_op<'this>(
+        &'this mut self,
+        pool: Pool<S>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
+        T::sub_op(self, pool)
+    }
+
+    fn take(self: Box<Self>) -> serde_json::Value {
+        T::take(*self)
+    }
+}
 impl<S: QueryBuilder, T> SelectOneJsonFragment<S> for (T, T::Inner)
 where
     T::Output: Serialize,
-    T: SelectOneFragment<S>,
+    T: SelectOneFragment<S> + 'static,
 {
     #[inline]
     fn on_select(&mut self, st: &mut SelectSt<S>) {
@@ -109,17 +207,21 @@ where
     }
 }
 
+// === Usefuls ===
+pub struct ReturnAsJsonMap<T>(pub Vec<(String, T)>);
+
 // a common pattern is you have array of fragments and you
 // want to build them as a map
-impl<S: QueryBuilder> SelectOneJsonFragment<S>
-    for Vec<(String, Box<dyn SelectOneJsonFragment<S>>)>
+impl<S: QueryBuilder, T> SelectOneJsonFragment<S> for ReturnAsJsonMap<T>
+where
+    T: SelectOneJsonFragment<S>,
 {
     fn on_select(&mut self, st: &mut SelectSt<S>) {
-        self.iter_mut().for_each(|e| e.1.on_select(st))
+        self.0.iter_mut().for_each(|e| e.1.on_select(st))
     }
 
     fn from_row(&mut self, row: &<S>::Row) {
-        self.iter_mut().for_each(|e| e.1.from_row(row))
+        self.0.iter_mut().for_each(|e| e.1.from_row(row))
     }
 
     fn sub_op<'this>(
@@ -127,7 +229,7 @@ impl<S: QueryBuilder> SelectOneJsonFragment<S>
         pool: Pool<S>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
         Box::pin(async move {
-            for item in self.iter_mut() {
+            for item in self.0.iter_mut() {
                 item.1.sub_op(pool.clone()).await
             }
         })
@@ -135,13 +237,14 @@ impl<S: QueryBuilder> SelectOneJsonFragment<S>
 
     fn take(self: Box<Self>) -> serde_json::Value {
         let mut map = serde_json::Map::new();
-        self.into_iter().for_each(|e| {
-            map.insert(e.0, e.1.take());
+        self.0.into_iter().for_each(|e| {
+            map.insert(e.0, Box::new(e.1).take());
         });
         map.into()
     }
 }
 
+// === main methods ===
 impl<S> JsonClient<S>
 where
     S: QueryBuilder<Output = <S as Database>::Arguments<'static>>,
@@ -179,12 +282,12 @@ where
             .filter_map(|e| {
                 let name = e.1.json_entry();
                 let input = input.links.get(*e.0)?.clone();
-                let s = e.1.on_each_json_request(c.as_ref(), input, &self.any_set);
+                let s = e.1.on_select_one(c.as_ref(), input, &self.any_set);
 
                 match s {
-                    Some(Ok(s)) => Some((name, s)),
-                    None => None,
-                    Some(Err(e)) => {
+                    Ok(Some(s)) => Some((name, s)),
+                    Ok(None) => None,
+                    Err(e) => {
                         link_errors.push(e);
                         None
                     }
@@ -197,11 +300,11 @@ where
         }
 
         #[rustfmt::skip]
-            st.select(
-                col("id").
-                table(c.table_name()).
-                alias("local_id")
-            );
+        st.select(
+            col("id").
+            table(c.table_name()).
+            alias("local_id")
+        );
 
         c.on_select(&mut st);
         for link in links.iter_mut() {

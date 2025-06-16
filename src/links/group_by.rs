@@ -1,7 +1,7 @@
 use crate::QueryBuilder;
 use crate::any_set::AnySet;
 use crate::collections::{Collection, OnMigrate};
-use crate::json_client::{JsonCollection, SelectOneJsonFragment};
+use crate::json_client::{DynamicLink, JsonCollection, ReturnAsJsonMap, SelectOneJsonFragment};
 use crate::links::relation::RelationEntries;
 use crate::prelude::col;
 use crate::prelude::macro_relation::OptionalToMany;
@@ -17,9 +17,9 @@ use sqlx::{ColumnIndex, Executor};
 use sqlx::{Sqlite, sqlite::SqliteRow};
 use std::ops::Not;
 
+use super::LinkData;
 use super::relation::Relation;
 use super::relation_many_to_many::ManyToMany;
-use super::{DynamicLink, LinkData};
 
 #[allow(non_camel_case_types)]
 pub struct count<T>(pub T);
@@ -103,11 +103,13 @@ where
     }
 }
 
-struct CountDynamic {
+#[derive(Serialize)]
+pub struct CountDynamic {
     from_table_name: String,
     to_table_name: String,
     alias: String,
     junction: String,
+    inner: Option<i64>,
 }
 
 // I can't access Count<F, T> in dynamic code because
@@ -116,6 +118,39 @@ struct CountDynamic {
 // unlike Relation<F,T>
 //
 // Count is too "dynamic" so CountDynamic is there to solve this issue
+impl SelectOneJsonFragment<Sqlite> for CountDynamic {
+    fn on_select(&mut self, st: &mut SelectSt<Sqlite>) {
+        let column_name_in_junction = format!("{}_id", self.from_table_name.to_case(Case::Snake));
+        // let foriegn_table = self.to.table_name().to_string();
+        let junction = format!("{}{}", self.to_table_name, self.from_table_name);
+        st.select(verbatim(format!(
+            "COUNT({junction}.{column_name_in_junction}) AS {alias}",
+            alias = self.alias
+        )));
+        st.join(join {
+            foriegn_table: self.junction.clone(),
+            foriegn_column: column_name_in_junction,
+            local_column: "id".to_string(),
+        });
+        st.group_by(col("id").table(&self.from_table_name));
+    }
+
+    fn from_row(&mut self, row: &SqliteRow) {
+        use sqlx::Row;
+        *&mut self.inner = Some(row.get(self.alias.as_str()));
+    }
+
+    fn sub_op<'this>(
+        &'this mut self,
+        pool: sqlx::Pool<Sqlite>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
+        Box::pin(async {})
+    }
+
+    fn take(self: Box<Self>) -> serde_json::Value {
+        serde_json::to_value(CountResult(self.inner.unwrap())).unwrap()
+    }
+}
 impl SelectOneFragment<Sqlite> for CountDynamic {
     type Inner = Option<i64>;
 
@@ -188,13 +223,15 @@ impl DynamicLink<Sqlite> for count<()> {
     fn json_entry() -> &'static str {
         "count"
     }
-    fn on_each_json_request(
+    type SelectOneInput = Vec<String>;
+    type SelectOne = ReturnAsJsonMap<CountDynamic>;
+    fn on_select_one(
         &self,
         base_col: &dyn JsonCollection<Sqlite>,
-        input: serde_json::Value,
+        input: Self::SelectOneInput,
         ctx: &AnySet,
-    ) -> Option<Result<Box<dyn SelectOneJsonFragment<Sqlite>>, String>> {
-        let input = serde_json::from_value::<Vec<String>>(input).ok()?;
+    ) -> Result<Option<Self::SelectOne>, String> {
+        // let input = serde_json::from_value::<Vec<String>>(input).ok()?;
         let base = base_col.table_name().to_case(Case::Snake);
 
         let rels = ctx
@@ -218,7 +255,8 @@ impl DynamicLink<Sqlite> for count<()> {
                     ))
                 }
 
-                let boxed = Box::new((
+                return (
+                    to.clone(),
                     CountDynamic {
                         from_table_name: base_col.table_name().to_string(),
                         to_table_name: to.to_case(Case::Camel),
@@ -229,14 +267,12 @@ impl DynamicLink<Sqlite> for count<()> {
                             first = base_col.table_name().to_string(),
                             second = to
                         ),
+                        inner: None,
                     },
-                    Default::default(),
-                )) as Box<dyn SelectOneJsonFragment<Sqlite>>;
-
-                return (to, boxed);
+                );
             })
             .collect::<Vec<_>>();
 
-        return Some(Ok(Box::new(s)));
+        return Ok(Some(ReturnAsJsonMap(s)));
     }
 }

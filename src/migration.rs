@@ -1,7 +1,7 @@
-use std::{marker::PhantomData, pin::Pin};
+use crate::builder_pattern::{AddCollection, AddLink, BuildContext, Finish};
 use crate::{QueryBuilder, collections::OnMigrate};
 use sqlx::{Database, Pool, Sqlite};
-use crate::builder_pattern::{AddCollection, AddLink, BuildContext, Finish};
+use std::{marker::PhantomData, pin::Pin};
 
 #[allow(non_camel_case_types)]
 pub struct to_migrate<S>(pub S);

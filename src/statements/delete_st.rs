@@ -1,4 +1,4 @@
-use crate::{ BindItem, Buildable, QueryBuilder, expressions::ColEq, prelude::col};
+use crate::{BindItem, Buildable, QueryBuilder, expressions::ColEq, prelude::col};
 
 use super::build_where;
 

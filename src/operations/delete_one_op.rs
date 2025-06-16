@@ -46,11 +46,10 @@ where
     S: QueryBuilder,
     L: BuildTuple,
 {
-    pub fn relation<D>(self, ty: D) -> DeleteOne<S, H, L::Bigger<
-    <Relation<H, D> as LinkData<
-    H>>
-    ::Spec
-    >>
+    pub fn relation<D>(
+        self,
+        ty: D,
+    ) -> DeleteOne<S, H, L::Bigger<<Relation<H, D> as LinkData<H>>::Spec>>
     where
         H: Clone,
         Relation<H, D>: LinkData<H, Spec: DeleteOneFragment<S>>,
