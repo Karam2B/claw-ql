@@ -8,7 +8,7 @@ pub mod collections;
 pub mod execute;
 pub mod expressions;
 pub mod filters;
-pub mod identity_management;
+mod identity_management;
 pub mod json_client;
 pub mod links;
 pub mod migration;
@@ -44,59 +44,6 @@ pub trait QueryBuilder: Database {
         T: 'static + Send,
         Self: Accept<T>;
 }
-
-#[cfg(test)]
-#[test]
-fn test() {}
-
-pub trait IdentSafety {
-    #[track_caller]
-    fn check(ident: &str);
-}
-impl IdentSafety for () {
-    fn check(_: &str) {}
-}
-
-pub(crate) mod unstable {
-    pub struct Unsateble;
-}
-
-/// very similar signature to ToString, but take care of things
-/// like sql-injection and ident-safety
-///
-/// This trait decide which type can be accepted in the SQL syntax
-/// but is not binding data to the SQL buffer. identity safety is
-/// also important to consider -- does this type have sql-injection?
-/// it is accessing data it should not access or result in runtime
-/// error?
-///
-/// implimenting AcceptNoneBind is not stable for now
-/// because its linked to the IdentSafety feature which is not
-/// fully implemented or understood so far
-pub trait AcceptNoneBind {
-    type IdentSafety;
-    fn accept(self, is: &Self::IdentSafety, _: unstable::Unsateble) -> String;
-}
-
-pub mod verbatim {
-    use crate::AcceptNoneBind;
-
-    #[allow(non_camel_case_types)]
-    pub struct verbatim(pub String);
-
-    impl AcceptNoneBind for verbatim {
-        type IdentSafety = ();
-        fn accept(self, _: &Self::IdentSafety, _: crate::unstable::Unsateble) -> String {
-            self.0
-        }
-    }
-}
-
-// impl AcceptNoneBind for &str {
-//     fn to_string(self) -> String {
-//         <str>::to_string(self)
-//     }
-// }
 
 pub trait Buildable: Sized {
     type Database: QueryBuilder;
@@ -198,16 +145,16 @@ where
     fn into_arguments(self, argument: &mut DB::Arguments<'q>);
 }
 
-pub trait IntoInferFromPhantom<T> {
-    fn into_pd(self, _: PhantomData<T>) -> T;
+pub trait IntoInferFromPhantom<I> {
+    fn into_pd(self, _: PhantomData<I>) -> I;
 }
 
-impl<From_, Into> IntoInferFromPhantom<Into> for From_
+impl<F, I> IntoInferFromPhantom<I> for F
 where
-    Into: From<From_>,
+    I: From<F>,
 {
     #[inline]
-    fn into_pd(self, _: PhantomData<Into>) -> Into {
+    fn into_pd(self, _: PhantomData<I>) -> I {
         self.into()
     }
 }

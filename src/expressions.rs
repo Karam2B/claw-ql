@@ -1,25 +1,23 @@
 use std::marker::PhantomData;
 
-use crate::{Accept, AcceptNoneBind, BindItem, IdentSafety, QueryBuilder, unstable::Unsateble};
+use crate::{Accept, BindItem, IntoInferFromPhantom, QueryBuilder};
 
-pub struct Col<IS = ()> {
+pub struct Col {
     pub(crate) table: Option<String>,
     pub(crate) alias: Option<String>,
     pub(crate) col: String,
-    pub(crate) is: PhantomData<IS>,
 }
 
-impl<IS: IdentSafety> AcceptNoneBind for Col<IS> {
-    type IdentSafety = IS;
-    fn accept(self, _: &IS, _: Unsateble) -> String {
+impl From<Col> for String {
+    fn from(value: Col) -> Self {
         format!(
             "{}{}{}",
-            match self.table {
+            match value.table {
                 Some(table) => format!("{table}."),
                 None => "".to_string(),
             },
-            self.col,
-            match self.alias {
+            value.col,
+            match value.alias {
                 Some(alias) => format!(" AS {alias}"),
                 None => "".to_string(),
             }
@@ -27,10 +25,9 @@ impl<IS: IdentSafety> AcceptNoneBind for Col<IS> {
     }
 }
 
-pub struct ColEq<T, IS = ()> {
-    pub(crate) col: Col<IS>,
+pub struct ColEq<T> {
+    pub(crate) col: Col,
     pub(crate) item: T,
-    pub(crate) is: PhantomData<IS>,
 }
 
 impl<S, T> BindItem<S> for ColEq<T>
@@ -43,11 +40,17 @@ where
         ctx: &mut S::Context1,
     ) -> impl FnOnce(&mut S::Context2) -> String + 'static + use<T, S> {
         let acc = S::accept(self.item, ctx);
-        move |ctx2| format!("{} = {}", self.col.accept(&(), Unsateble), acc(ctx2))
+        move |ctx2| {
+            format!(
+                "{} = {}",
+                self.col.into_pd(PhantomData::<String>),
+                acc(ctx2)
+            )
+        }
     }
 }
 
-impl<IS: IdentSafety> Col<IS> {
+impl Col {
     pub fn table(mut self, table: &str) -> Self {
         self.table = Some(table.to_string());
         self
@@ -56,11 +59,10 @@ impl<IS: IdentSafety> Col<IS> {
         self.alias = Some(alias.to_string());
         self
     }
-    pub fn eq<T1>(self, value: T1) -> ColEq<T1, IS> {
+    pub fn eq<T1>(self, value: T1) -> ColEq<T1> {
         ColEq {
             col: self,
             item: value,
-            is: PhantomData,
         }
     }
 }
@@ -187,12 +189,10 @@ pub mod exports {
     use std::marker::PhantomData;
 
     #[track_caller]
-    pub fn col<IS: IdentSafety>(str: &str) -> Col<IS> {
-        IS::check(str);
+    pub fn col(str: &str) -> Col {
         Col {
             table: None,
             col: str.to_string(),
-            is: PhantomData::<IS>,
             alias: None,
         }
     }

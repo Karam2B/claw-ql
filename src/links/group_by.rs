@@ -5,7 +5,6 @@ use crate::json_client::{DynamicLink, JsonCollection, ReturnAsJsonMap, SelectOne
 use crate::links::relation::RelationEntries;
 use crate::prelude::col;
 use crate::prelude::macro_relation::OptionalToMany;
-use crate::verbatim::verbatim;
 use crate::{
     collections::CollectionBasic,
     operations::select_one_op::SelectOneFragment,
@@ -74,10 +73,10 @@ where
     fn on_select(&mut self, _data: &mut Self::Inner, st: &mut SelectSt<Sqlite>) {
         let column_name_in_junction = format!("{}_id", self.from.table_name().to_case(Case::Snake));
         let junction = format!("{}{}", self.to.table_name(), self.from.table_name());
-        st.select(verbatim(format!(
+        st.select(format!(
             "COUNT({junction}.{column_name_in_junction}) AS {alias}",
             alias = self.alias
-        )));
+        ));
         st.join(join {
             foriegn_table: self.junction.clone(),
             foriegn_column: column_name_in_junction,
@@ -124,10 +123,10 @@ impl SelectOneJsonFragment<Sqlite> for CountDynamic {
         let column_name_in_junction = format!("{}_id", self.from_table_name.to_case(Case::Snake));
         // let foriegn_table = self.to.table_name().to_string();
         let junction = format!("{}{}", self.to_table_name, self.from_table_name);
-        st.select(verbatim(format!(
+        st.select(format!(
             "COUNT({junction}.{column_name_in_junction}) AS {alias}",
             alias = self.alias
-        )));
+        ));
         st.join(join {
             foriegn_table: self.junction.clone(),
             foriegn_column: column_name_in_junction,
@@ -161,10 +160,10 @@ impl SelectOneFragment<Sqlite> for CountDynamic {
         let column_name_in_junction = format!("{}_id", self.from_table_name.to_case(Case::Snake));
         // let foriegn_table = self.to.table_name().to_string();
         let junction = format!("{}{}", self.to_table_name, self.from_table_name);
-        st.select(verbatim(format!(
+        st.select(format!(
             "COUNT({junction}.{column_name_in_junction}) AS {alias}",
             alias = self.alias
-        )));
+        ));
         st.join(join {
             foriegn_table: self.junction.clone(),
             foriegn_column: column_name_in_junction,

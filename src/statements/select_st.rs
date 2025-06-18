@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::{Accept, AcceptNoneBind, BindItem, Buildable, QueryBuilder, unstable::Unsateble};
+use crate::{Accept, BindItem, Buildable, QueryBuilder};
 
 pub struct SelectSt<S: QueryBuilder> {
     pub(crate) select_list: Vec<String>,
@@ -12,9 +12,6 @@ pub struct SelectSt<S: QueryBuilder> {
     pub(crate) shift: Option<S::Fragment>,
     pub(crate) ctx: S::Context1,
     pub(crate) from: String,
-
-    #[allow(unused)]
-    pub(crate) ident_safety: (),
     pub(crate) _sqlx: PhantomData<S>,
 }
 
@@ -171,23 +168,21 @@ impl<S: QueryBuilder> SelectSt<S> {
             ctx: Default::default(),
             from: from.as_ref().to_string(),
             _sqlx: PhantomData,
-            ident_safety: (),
             group_by: None,
         }
     }
 
     pub fn group_by<T>(&mut self, item: T)
     where
-        T: AcceptNoneBind<IdentSafety = ()>,
+        T: Into<String>,
     {
-        self.group_by = Some(item.accept(&self.ident_safety, Unsateble));
+        self.group_by = Some(item.into())
     }
     pub fn select<T>(&mut self, item: T)
     where
-        T: AcceptNoneBind<IdentSafety = ()>,
+        T: Into<String>,
     {
-        self.select_list
-            .push(item.accept(&self.ident_safety, Unsateble));
+        self.select_list.push(item.into())
     }
 
     #[track_caller]
