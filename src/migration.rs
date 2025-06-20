@@ -19,7 +19,7 @@ impl<S> BuildContext for to_migrate<S> {
     type Context = Vec<Box<dyn OnMigrateDyn<S>>>;
 }
 
-impl<T, N, S> AddCollection<T, N> for to_migrate<S>
+impl<N, S> AddCollection<N> for to_migrate<S>
 where
     N: OnMigrate<S> + Clone + 'static,
     S: Database,
@@ -31,7 +31,7 @@ where
     }
 }
 
-impl<T, N, S> AddLink<T, N> for to_migrate<S>
+impl< N, S> AddLink<N> for to_migrate<S>
 where
     N: OnMigrate<S> + Clone + 'static,
     S: Database,
@@ -43,7 +43,7 @@ where
     }
 }
 
-impl<C, S> Finish<C> for to_migrate<S> {
+impl<S> Finish for to_migrate<S> {
     type Result = MigrateResult<S>;
     fn finish(self, ctx: Self::Context) -> Self::Result {
         MigrateResult {

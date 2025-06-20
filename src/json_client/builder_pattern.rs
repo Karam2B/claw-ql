@@ -1,26 +1,42 @@
-use super::{DynamicLink, DynamicLinkTraitObject};
+use super::DynamicLinkTraitObject;
 use super::{JsonClient, JsonCollection};
 use crate::QueryBuilder;
 use crate::builder_pattern::{AddCollection, AddLink, BuildContext, Finish};
+use crate::json_client::{JsonClientBuilder, JsonClientBuilderDyn};
 use convert_case::{Case, Casing};
 use sqlx::{Database, Pool};
-use std::ops::Not;
+use std::any::Any;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[allow(non_camel_case_types)]
 pub struct to_json_client<S: Database>(pub Pool<S>);
 
+pub struct JsonClientBuilding<S: Database> {
+    pub(crate) collections: HashMap<String, Arc<dyn JsonCollection<S>>>,
+    pub(crate) links: HashMap<
+        Vec<&'static str>,
+        (
+            Box<dyn JsonClientBuilderDyn>,
+            Arc<dyn DynamicLinkTraitObject<S>>,
+        ),
+    >,
+    pub(crate) ctx: Vec<Box<dyn Any>>,
+    pub(crate) finishes: Vec<Box<dyn JsonClientBuilderDyn>>,
+    pub(crate) db: Pool<S>,
+}
+
 impl<S> BuildContext for to_json_client<S>
 where
     S: Database,
 {
-    type Context = JsonClient<S>;
+    type Context = JsonClientBuilding<S>;
     fn init_context(&self) -> Self::Context {
-        JsonClient {
+        JsonClientBuilding {
             collections: Default::default(),
             links: Default::default(),
-            any_set: Default::default(),
-            dynamic_errors: Default::default(),
+            ctx: Default::default(),
+            finishes: Default::default(),
             db: self.0.clone(),
         }
     }
@@ -37,30 +53,26 @@ where
             Arc::new(next.clone()),
         );
 
-        if ret.is_some() {
-            ctx.dynamic_errors.push(format!(
-                "collections are globally unique, the identifier {} detected twice",
-                next.table_name()
-            ))
-        }
+        // if ret.is_some() {
+        //     ctx.dynamic_errors.push(format!(
+        //         "collections are globally unique, the identifier {} detected twice",
+        //         next.table_name()
+        //     ))
+        // }
     }
 }
 
 impl<T, N, S> AddLink<T, N> for to_json_client<S>
 where
     S: Database + QueryBuilder,
-    N: DynamicLink<S> + 'static + Send + Sync + Clone,
+    N: DynamicLinkTraitObject<S> + 'static + Send + Sync + Clone + JsonClientBuilder,
 {
     fn add_link(next: &N, ctx: &mut Self::Context) {
-        let amut = Arc::get_mut(&mut ctx.any_set).expect("one at a time");
-        if amut.get::<N::Entry>().is_none() {
-            amut.set(N::init_entry());
-        }
-        let entry = amut.get_mut::<N::Entry>().unwrap();
+        let build_entry = next.init();
+        ctx.ctx.push(Box::new(build_entry));
         let next = next.clone();
-        next.on_register(entry);
         let name = next.json_entry();
-        ctx.links.insert(name, Arc::new(next));
+        ctx.links.insert(name, ((), Arc::new(next)));
     }
 }
 
@@ -70,15 +82,17 @@ where
 {
     type Result = Result<JsonClient<S>, String>;
     fn finish(self, ctx: Self::Context) -> Self::Result {
-        ctx.links
-            .values()
-            .try_for_each(|e| e.on_finish(&ctx.any_set))?;
-
-        if ctx.dynamic_errors.is_empty().not() {
-            let err = ctx.dynamic_errors.join(", ");
-            return Err(err);
+        // ctx.ctx
+        let mut vecc = HashMap::new();
+        for (key, e) in ctx.links {
+            let new = e.0.finish(&ctx.ctx)?;
+            vecc.insert(key, (e.1, new));
         }
 
-        Ok(ctx)
+        Ok(JsonClient {
+            collections: ctx.collections,
+            links: vecc,
+            db: ctx.db
+        })
     }
 }

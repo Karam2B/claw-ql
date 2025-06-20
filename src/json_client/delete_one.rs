@@ -1,6 +1,7 @@
 use super::JsonClient;
 use crate::{
     Accept, QueryBuilder,
+    json_client::{from_map, map_is_empty},
     operations::{LinkedOutput, delete_one_op::DeleteOneFragment},
     statements::delete_st::DeleteSt,
 };
@@ -26,23 +27,24 @@ where
     for<'e> i64: Encode<'e, S> + Type<S> + Decode<'e, S>,
     for<'e> &'e str: ColumnIndex<S::Row>,
 {
+    #[inline]
     pub async fn delete_one(&self, input: Value) -> Result<Value, String> {
         let input: DeleteOneInput =
             from_value(input).map_err(|e| format!("invalid input: {e:?}"))?;
         self.delete_one_serialized(input).await
     }
 
-    pub async fn delete_one_serialized(&self, input: DeleteOneInput) -> Result<Value, String> {
+    pub async fn delete_one_serialized(&self, mut input: DeleteOneInput) -> Result<Value, String> {
         use crate::execute::Execute;
         use sqlx::Row;
 
-        let handler = self
+        let c = self
             .collections
             .get(&input.collection)
             .ok_or(format!("collection {} was not found", input.collection))?
             .clone();
 
-        let st = DeleteSt::init_where_id_eq(handler.table_name().to_string(), input.id);
+        let st = DeleteSt::init_where_id_eq(c.table_name().to_string(), input.id);
 
         let mut links = {
             let mut link_errors = Vec::default();
@@ -51,9 +53,8 @@ where
                 .iter()
                 .filter_map(|e| {
                     let name = e.1.json_entry();
-                    let input = input.retrieve.get(*e.0)?.clone();
-                    let s =
-                        e.1.on_delete_one(handler.clone(), input, self.any_set.clone());
+                    let input = from_map(&mut input.retrieve, e.0)?;
+                    let s = e.1.on_delete_one(c.clone(), input, self.any_set.clone());
 
                     match s {
                         Ok(Some(s)) => Some((name, s)),
@@ -68,6 +69,9 @@ where
             if link_errors.is_empty().not() {
                 return Err(format!("{link_errors:?}"));
             };
+            if map_is_empty(&mut input.retrieve).not() {
+                return Err("unused input")?;
+            }
             links
         };
 
@@ -75,7 +79,7 @@ where
             link.1.first_sub_op(self.db.clone(), input.id).await;
         }
 
-        let mut s: Vec<String> = handler.members();
+        let mut s: Vec<String> = c.members();
 
         for link in links.iter_mut() {
             s.extend(link.1.returning());
@@ -87,7 +91,7 @@ where
             .returning(s)
             .fetch_optional(&self.db, |r| {
                 let id: i64 = r.get("id");
-                let attr = handler.from_row_noscope(&r);
+                let attr = c.from_row_noscope(&r);
                 for link in links.iter_mut() {
                     link.1.from_row(&r);
                 }
@@ -128,7 +132,7 @@ impl<S: QueryBuilder> DeleteOneJsonFragment<S> for () {
     fn first_sub_op<'this>(
         &'this mut self,
         _pool: Pool<S>,
-        _id: i64
+        _id: i64,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
         Box::pin(async {})
     }

@@ -1,4 +1,4 @@
-use crate::build_tuple::BuildTuple;
+use claw_ql::build_tuple::BuildTuple;
 
 pub struct BuilderPattern<BuildMode: BuildContext, Collections, Links, Filters> {
     __build_mode: BuildMode,
@@ -100,60 +100,3 @@ where
         self.__build_mode.finish(self.__build_ctx)
     }
 }
-
-macro_rules! it {
-    ($([$ty:ident, $part:literal]),*) => {
-
-impl<$($ty,)*> BuildContext for ($($ty,)*)
-    where $($ty: BuildContext,)*
-{
-    type Context = ( $($ty::Context,)*);
-    fn init_context(&self) -> Self::Context {
-        ($(paste::paste!(self.$part.init_context()),)*)
-    }
-}
-
-impl<Next,$($ty),* > AddLink<Next> for ($($ty,)*)
-    where $($ty: BuildContext + AddLink<Next>,)*
-{
-    fn add_link(next: &Next, ctx: &mut Self::Context) {
-        $($ty::add_link(next, &mut paste::paste!(ctx.$part));)*
-    }
-}
-
-impl<Next, $($ty),* > AddCollection<Next> for ($($ty,)*)
-    where $($ty: BuildContext + AddCollection<Next>,)*
-{
-    fn add_col(next: &Next, ctx: &mut Self::Context) {
-        $($ty::add_col(next, &mut paste::paste!(ctx.$part));)*
-    }
-}
-
-impl<$($ty,)*> Finish for ($($ty,)*)
-    where $($ty: BuildContext+Finish,)*
-{
-    type Result = ($($ty::Result,)*);
-    fn finish(self, ctx: Self::Context) -> Self::Result {
-        ($(paste::paste!(self.$part.finish(ctx.$part)),)*)
-    }
-}
-
-    }}
-
-#[rustfmt::skip]
-#[allow(unused)]
-const _: () = {
-    it!();
-    it!([R0, 0]);
-    it!([R0, 0], [R1, 1]);
-    it!([R0, 0], [R1, 1], [R2, 2]);
-    it!([R0, 0], [R1, 1], [R2, 2], [R3, 3]);
-    it!([R0, 0], [R1, 1], [R2, 2], [R3, 3], [R4, 4]);
-    it!([R0, 0], [R1, 1], [R2, 2], [R3, 3], [R4, 4], [R5, 5]);
-    it!([R0, 0], [R1, 1], [R2, 2], [R3, 3], [R4, 4], [R5, 5], [R6, 6]);
-    it!([R0, 0], [R1, 1], [R2, 2], [R3, 3], [R4, 4], [R5, 5], [R6, 6], [R7, 7]);
-    it!([R0, 0], [R1, 1], [R2, 2], [R3, 3], [R4, 4], [R5, 5], [R6, 6], [R7, 7], [R8, 8]);
-    it!([R0, 0], [R1, 1], [R2, 2], [R3, 3], [R4, 4], [R5, 5], [R6, 6], [R7, 7], [R8, 8], [R9, 9]);
-    it!([R0, 0], [R1, 1], [R2, 2], [R3, 3], [R4, 4], [R5, 5], [R6, 6], [R7, 7], [R8, 8], [R9, 9], [R10, 10]);
-    it!([R0, 0], [R1, 1], [R2, 2], [R3, 3], [R4, 4], [R5, 5], [R6, 6], [R7, 7], [R8, 8], [R9, 9], [R10, 10], [R11, 11]);
-};

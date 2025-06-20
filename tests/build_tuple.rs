@@ -1,7 +1,10 @@
-use claw_ql::{
-    builder_pattern::BuilderPattern, json_client::{builder_pattern::to_json_client, JsonClient},
-    links::relation::Relation, migration::to_migrate,
-};
+#![allow(non_camel_case_types)]
+#![allow(dead_code)]
+#![allow(unused)]
+#![warn(unused_must_use)]
+use std::marker::PhantomData;
+
+use claw_ql::{builder_pattern::BuilderPattern, links::relation::Relation};
 use claw_ql_macros::{Collection, relation};
 use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, SqlitePool};
@@ -26,6 +29,24 @@ pub struct Tag {
 relation!(optional_to_many Todo Category);
 relation!(many_to_many Todo Tag);
 
+pub trait BuildContext {
+    type Context;
+    fn init_context(&self) -> Self::Context;
+}
+
+pub trait AddCollection<Tuple, Next>: BuildContext {
+    fn add_col(next: &Next, ctx: &mut Self::Context);
+}
+
+pub trait AddLink<Tuple, Next>: BuildContext {
+    fn add_link(next: &Next, ctx: &mut Self::Context);
+}
+
+pub trait Finish<C>: BuildContext {
+    type Result;
+    fn finish(self, ctx: Self::Context) -> Self::Result;
+}
+
 #[tokio::test]
 async fn test() {
     tracing_subscriber::fmt()
@@ -34,10 +55,9 @@ async fn test() {
 
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
-    let (migrator, client) = {
+    let res = {
         BuilderPattern::default()
-            .build_mode(to_migrate(Sqlite))
-            .build_mode(to_json_client(pool.clone()))
+            .build_mode(experiment(PhantomData))
             .add_collection(todo)
             .add_collection(tag)
             .add_collection(category)
@@ -51,7 +71,25 @@ async fn test() {
             })
             .finish()
     };
+}
 
-    migrator.migrate(pool.clone()).await;
-    let _: JsonClient<Sqlite> = client.unwrap();
+struct experiment<C>(PhantomData<C>);
+
+impl<C> BuildContext for experiment<C> {
+    type Context = ();
+
+    fn init_context(&self) -> Self::Context {}
+}
+
+impl<T: BuildTuple, N> AddCollection<T, N> for experiment<T> {
+    fn add_col(next: &N, ctx: &mut Self::Context) {}
+}
+
+impl<T, L, N> AddLink<L, N> for experiment<T> {
+    fn add_link(next: &N, ctx: &mut Self::Context) {}
+}
+
+impl<C> Finish<C> for experiment<C> {
+    type Result = ();
+    fn finish(self, ctx: Self::Context) -> Self::Result {}
 }

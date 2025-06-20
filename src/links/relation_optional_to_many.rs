@@ -1,7 +1,5 @@
-use super::relation::DynamicLinkForRelation;
 use crate::Accept;
 use crate::execute::Execute;
-use crate::json_client::SelectOneJsonFragment;
 use crate::operations::CollectionOutput;
 use crate::operations::delete_one_op::DeleteOneFragment;
 use crate::prelude::join::left_join;
@@ -14,10 +12,8 @@ use crate::{
     prelude::{col, join, stmt::SelectSt},
 };
 use convert_case::{Case, Casing};
-use serde::Serialize;
 use sqlx::Pool;
 use sqlx::{ColumnIndex, Decode, Executor, Row, Sqlite, prelude::Type};
-use std::ops::Not;
 
 #[derive(Clone)]
 pub struct OptionalToMany<F, T> {
@@ -158,26 +154,26 @@ where
     }
 }
 
-impl<S, F, T> DynamicLinkForRelation<S> for OptionalToMany<F, T>
-where
-    F: 'static,
-    T: 'static,
-    Self: Clone,
-    Self: SelectOneFragment<S, Output: Serialize, Inner: 'static>,
-    S: QueryBuilder,
-{
-    fn global_ident(&self) -> &'static str {
-        "optional_to_many"
-    }
-    fn on_each_select_one_request(
-        &self,
-        input: serde_json::Value,
-    ) -> Result<Box<dyn SelectOneJsonFragment<S>>, String> {
-        if input.is_object().not() {
-            return Err("many_to_many relation is only input is {}".to_string());
-        }
-        let this = self.clone();
-
-        Ok(Box::new((this, Default::default())))
-    }
-}
+// impl<S, F, T> DynamicLinkForRelation<S> for OptionalToMany<F, T>
+// where
+//     F: 'static,
+//     T: 'static,
+//     Self: Clone,
+//     Self: SelectOneFragment<S, Output: Serialize, Inner: 'static>,
+//     S: QueryBuilder,
+// {
+//     fn global_ident(&self) -> &'static str {
+//         "optional_to_many"
+//     }
+//     fn on_each_select_one_request(
+//         &self,
+//         input: serde_json::Value,
+//     ) -> Result<Box<dyn SelectOneJsonFragment<S>>, String> {
+//         if input.is_object().not() {
+//             return Err("many_to_many relation is only input is {}".to_string());
+//         }
+//         let this = self.clone();
+//
+//         Ok(Box::new((this, Default::default())))
+//     }
+// }

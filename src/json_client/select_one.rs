@@ -1,9 +1,6 @@
 use super::JsonClient;
 use crate::{
-    QueryBuilder,
-    execute::Execute,
-    operations::{LinkedOutput, select_one_op::SelectOneFragment},
-    prelude::{col, stmt::SelectSt},
+    execute::Execute, json_client::{from_map, map_is_empty}, operations::{select_one_op::SelectOneFragment, LinkedOutput}, prelude::{col, stmt::SelectSt}, QueryBuilder
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -29,12 +26,13 @@ where
     for<'e> i64: Encode<'e, S> + Type<S> + Decode<'e, S>,
     for<'e> &'e str: ColumnIndex<S::Row>,
 {
+    #[inline]
     pub async fn select_one(&self, input: Value) -> Result<Value, String> {
         let input: SelectOneInput =
             serde_json::from_value(input).map_err(|e| format!("invalid input: {e:?}"))?;
         self.select_one_serialized(input).await
     }
-    pub async fn select_one_serialized(&self, input: SelectOneInput) -> Result<Value, String> {
+    pub async fn select_one_serialized(&self, mut input: SelectOneInput) -> Result<Value, String> {
         let c = self
             .collections
             .get(&input.collection)
@@ -42,30 +40,35 @@ where
 
         let mut st = SelectSt::init(c.table_name());
 
-        let mut link_errors = Vec::default();
+        let mut links = {
+            let mut link_errors = Vec::default();
+            let links = self
+                .links
+                .iter()
+                .filter_map(|e| {
+                    let name = e.1.json_entry();
+                    let input = from_map(&mut input.links, e.0)?;
+                    e.1.on_select_one(c.table_name().to_string(), input, &());
 
-        let mut links = self
-            .links
-            .iter()
-            .filter_map(|e| {
-                let name = e.1.json_entry();
-                let input = input.links.get(*e.0)?.clone();
-                let s = e.1.on_select_one(c.clone(), input, self.any_set.clone());
-
-                match s {
-                    Ok(Some(s)) => Some((name, s)),
-                    Ok(None) => None,
-                    Err(e) => {
-                        link_errors.push(e);
-                        None
+                    match s {
+                        Ok(Some(s)) => Some((name, s)),
+                        Ok(None) => None,
+                        Err(e) => {
+                            link_errors.push(e);
+                            None
+                        }
                     }
-                }
-            })
-            .collect::<Vec<_>>();
+                })
+                .collect::<Vec<_>>();
 
-        if link_errors.is_empty().not() {
-            return Err(format!("{link_errors:?}"));
-        }
+            if link_errors.is_empty().not() {
+                return Err(format!("{link_errors:?}"));
+            }
+            if map_is_empty(&mut input.links).not() {
+                return Err("unused input")?;
+            }
+            links
+        };
 
         #[rustfmt::skip]
         st.select(

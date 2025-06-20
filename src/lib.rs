@@ -9,7 +9,7 @@ pub mod execute;
 pub mod expressions;
 pub mod filters;
 mod identity_management;
-pub mod json_client;
+// pub mod json_client;
 pub mod links;
 pub mod migration;
 pub mod operations;

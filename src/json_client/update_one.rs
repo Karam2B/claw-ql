@@ -2,6 +2,7 @@ use super::JsonClient;
 use crate::{
     QueryBuilder,
     execute::Execute,
+    json_client::{from_map, map_is_empty},
     operations::{LinkedOutput, update_one_op::UpdateOneFragment},
     statements::update_st::UpdateSt,
 };
@@ -33,20 +34,20 @@ where
         self.update_one_serialized(input).await
     }
 
-    pub async fn update_one_serialized(&self, input: UpdateOneInput) -> Result<Value, String> {
+    #[inline]
+    pub async fn update_one_serialized(&self, mut input: UpdateOneInput) -> Result<Value, String> {
         use sqlx::Row;
 
-        let handler = self
+        let c = self
             .collections
             .get(&input.collection)
             .ok_or(format!("collection {} was not found", input.collection))?
             .clone();
 
-        let mut st = UpdateSt::init(handler.table_name().to_string());
+        let mut st = UpdateSt::init(c.table_name().to_string());
 
-        handler
-            .on_update(input.data, &mut st)
-            .map_err(|e| format!("invalid {}: {e:?}", handler.table_name()))?;
+        c.on_update(input.data, &mut st)
+            .map_err(|e| format!("invalid {}: {e:?}", c.table_name()))?;
 
         (|| {
             // self.filters.on_update(&handler, &mut st);
@@ -62,9 +63,9 @@ where
                 .iter()
                 .filter_map(|e| {
                     let name = e.1.json_entry();
-                    let input = input.links.get(*e.0)?.clone();
-                    let s =
-                        e.1.on_update_one(handler.clone(), input, self.any_set.clone());
+                    let input = from_map(&mut input.links, e.0)?;
+                    let s = e.1.on_update_one(c.table_name().to_string(), input, &());
+                    // let s = e.1.on_update_one(c.clone(), input, self.any_set.clone());
 
                     match s {
                         Ok(Some(s)) => Some((name, s)),
@@ -79,6 +80,9 @@ where
             if link_errors.is_empty().not() {
                 return Err(format!("{link_errors:?}"));
             }
+            if map_is_empty(&mut input.links).not() {
+                return Err("unused input")?;
+            }
             links
         };
 
@@ -86,7 +90,7 @@ where
             link.1.on_update(&mut st);
         }
 
-        let mut s: Vec<String> = handler.members();
+        let mut s: Vec<String> = c.members();
 
         for link in links.iter_mut() {
             s.extend(link.1.returning());
@@ -98,7 +102,7 @@ where
             .returning(s)
             .fetch_optional(&self.db, |r| {
                 let id: i64 = r.get("id");
-                let attr = handler.from_row_noscope(&r);
+                let attr = c.from_row_noscope(&r);
                 for link in links.iter_mut() {
                     link.1.from_row(&r);
                 }

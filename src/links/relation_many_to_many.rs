@@ -1,7 +1,5 @@
-use super::relation::DynamicLinkForRelation;
 use crate::QueryBuilder;
 use crate::collections::Collection;
-use crate::json_client::SelectOneJsonFragment;
 use crate::operations::CollectionOutput;
 use crate::{
     collections::OnMigrate, operations::select_one_op::SelectOneFragment, prelude::stmt::SelectSt,
@@ -114,26 +112,26 @@ where
     }
 }
 
-impl<S: QueryBuilder, T0, T1> DynamicLinkForRelation<S> for ManyToMany<T0, T1>
-where
-    Self: Clone,
-    T0: 'static,
-    T1: 'static,
-    ManyToMany<T0, T1>: SelectOneFragment<S, Output: Serialize, Inner: 'static>,
-{
-    fn global_ident(&self) -> &'static str {
-        "many_to_many"
-    }
-
-    fn on_each_select_one_request(
-        &self,
-        input: serde_json::Value,
-    ) -> Result<Box<dyn SelectOneJsonFragment<S>>, String> {
-        if input.is_object().not() {
-            return Err("many_to_many relation is only input is {}".to_string());
-        }
-        let this = self.clone();
-
-        Ok(Box::new((this, Default::default())))
-    }
-}
+// impl<S: QueryBuilder, T0, T1> DynamicLinkForRelation<S> for ManyToMany<T0, T1>
+// where
+//     Self: Clone,
+//     T0: 'static,
+//     T1: 'static,
+//     ManyToMany<T0, T1>: SelectOneFragment<S, Output: Serialize, Inner: 'static>,
+// {
+//     fn global_ident(&self) -> &'static str {
+//         "many_to_many"
+//     }
+//
+//     fn on_each_select_one_request(
+//         &self,
+//         input: serde_json::Value,
+//     ) -> Result<Box<dyn SelectOneJsonFragment<S>>, String> {
+//         if input.is_object().not() {
+//             return Err("many_to_many relation is only input is {}".to_string());
+//         }
+//         let this = self.clone();
+//
+//         Ok(Box::new((this, Default::default())))
+//     }
+// }

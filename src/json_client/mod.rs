@@ -5,7 +5,7 @@ use crate::statements::update_st::UpdateSt;
 use crate::{QueryBuilder, any_set::AnySet, collections::Collection, prelude::stmt::SelectSt};
 use builder_pattern::to_json_client;
 use serde::{Serialize, de::DeserializeOwned};
-use serde_json::{Value, from_value};
+use serde_json::{Map, Value, from_value};
 use sqlx::{Database, Pool};
 use std::any::Any;
 use std::{collections::HashMap, pin::Pin, sync::Arc};
@@ -22,10 +22,8 @@ pub use insert_one::InsertOneJsonFragment;
 
 pub struct JsonClient<S: Database> {
     pub(crate) collections: HashMap<String, Arc<dyn JsonCollection<S>>>,
-    pub(crate) links: HashMap<&'static str, Arc<dyn DynamicLinkTraitObject<S>>>,
-    pub(crate) any_set: Arc<AnySet>,
-    // errors the builder pattern can't detect at a build time
-    pub(crate) dynamic_errors: Vec<String>,
+    pub(crate) links:
+        HashMap<Vec<&'static str>, (Arc<dyn DynamicLinkTraitObject<S>>, Box<dyn Any>)>,
     pub(crate) db: Pool<S>,
 }
 
@@ -126,100 +124,110 @@ where
 }
 
 // === Other Requirement ===
+pub struct BuildTimeCtx(pub Vec<Box<dyn Any>>);
+
+pub trait JsonClientBuilder {
+    type BuildEntry: Any;
+    fn init(&self) -> Self::BuildEntry;
+    type RuntimeEntry: Any;
+    fn finish(&self, build_ctx: &Vec<Box<dyn Any>>) -> Result<Self::RuntimeEntry, String>;
+}
+
+pub trait JsonClientBuilderDyn {
+    fn finish(&self, build_ctx: &Vec<Box<dyn Any>>) -> Result<Box<dyn Any>, String>;
+}
+
+impl<T> JsonClientBuilderDyn for T
+where
+    T: JsonClientBuilder,
+{
+    fn finish(&self, build_ctx: &Vec<Box<dyn Any>>) -> Result<Box<dyn Any>, String> {
+        Ok(Box::new(JsonClientBuilder::finish(self, build_ctx)?))
+    }
+}
+
 pub trait DynamicLink<S>
 where
+    Self: JsonClientBuilder,
     S: QueryBuilder,
 {
-    fn init_entry() -> Self::Entry;
-    type Entry: Any;
-    fn on_register(&self, entry: &mut Self::Entry);
-    fn on_finish(&self, build_ctx: &AnySet) -> Result<(), String>;
-
-    fn json_entry() -> &'static str;
-    fn get_entry<'a>(&self, ctx: &'a AnySet) -> &'a Self::Entry {
-        ctx.get::<Self::Entry>()
-            .expect("any set should always contain entry")
-    }
+    fn json_entry(&self) -> Vec<&'static str>;
     type SelectOneInput: DeserializeOwned;
     type SelectOne: SelectOneJsonFragment<S>;
     fn on_select_one(
         &self,
-        base_col: Arc<dyn JsonCollection<S>>,
+        base_col: String,
         input: Self::SelectOneInput,
-        ctx: Arc<AnySet>,
+        entry: &Self::RuntimeEntry,
     ) -> Result<Option<Self::SelectOne>, String>;
     type InsertOneInput: DeserializeOwned;
     type InsertOne: InsertOneJsonFragment<S>;
     fn on_insert_one(
         &self,
-        base_col: Arc<dyn JsonCollection<S>>,
+        base_col: String,
         input: Self::InsertOneInput,
-        ctx: Arc<AnySet>,
+        entry: &Self::RuntimeEntry,
     ) -> Result<Option<Self::InsertOne>, String>;
     type DeleteOneInput: DeserializeOwned;
     type DeleteOne: DeleteOneJsonFragment<S>;
     fn on_delete_one(
         &self,
-        base_col: Arc<dyn JsonCollection<S>>,
+        base_col: String,
         input: Self::DeleteOneInput,
-        ctx: Arc<AnySet>,
+        entry: &Self::RuntimeEntry,
     ) -> Result<Option<Self::DeleteOne>, String>;
     type UpdateOneInput: DeserializeOwned;
     type UpdateOne: UpdateOneJsonFragment<S>;
     fn on_update_one(
         &self,
-        base_col: Arc<dyn JsonCollection<S>>,
+        base_col: String,
         input: Self::UpdateOneInput,
-        ctx: Arc<AnySet>,
+        entry: &Self::RuntimeEntry,
     ) -> Result<Option<Self::UpdateOne>, String>;
 }
 
 // a version of DynamicLink that is trait-object compatible
 pub trait DynamicLinkTraitObject<S>: Send + Sync {
-    fn on_finish(&self, build_ctx: &AnySet) -> Result<(), String>;
-    fn json_entry(&self) -> &'static str;
+    fn json_entry(&self) -> Vec<&'static str>;
     fn on_select_one(
         &self,
-        _base_col: Arc<dyn JsonCollection<S>>,
+        _base_col: String,
         input: Value,
-        ctx: Arc<AnySet>,
+        ctx: &dyn Any,
     ) -> Result<Option<Box<dyn SelectOneJsonFragment<S>>>, String>;
     fn on_update_one(
         &self,
-        _base_col: Arc<dyn JsonCollection<S>>,
+        base_col: String,
         input: Value,
-        ctx: Arc<AnySet>,
+        ctx: &dyn Any,
     ) -> Result<Option<Box<dyn UpdateOneJsonFragment<S>>>, String>;
     fn on_insert_one(
         &self,
-        _base_col: Arc<dyn JsonCollection<S>>,
+        base_col: String,
         input: Value,
-        ctx: Arc<AnySet>,
+        ctx: &dyn Any,
     ) -> Result<Option<Box<dyn InsertOneJsonFragment<S>>>, String>;
     fn on_delete_one(
         &self,
-        _base_col: Arc<dyn JsonCollection<S>>,
+        base_col: String,
         input: Value,
-        ctx: Arc<AnySet>,
+        ctx: &dyn Any,
     ) -> Result<Option<Box<dyn DeleteOneJsonFragment<S>>>, String>;
 }
 
 impl<S, T> DynamicLinkTraitObject<S> for T
 where
     S: QueryBuilder,
-    T: DynamicLink<S, Entry: Any> + Send + Sync,
+    T: DynamicLink<S> + Send + Sync,
 {
-    fn on_finish(&self, build_ctx: &AnySet) -> Result<(), String> {
-        <Self as DynamicLink<S>>::on_finish(self, build_ctx)
-    }
-    fn json_entry(&self) -> &'static str {
-        T::json_entry()
+    fn json_entry(&self) -> Vec<&'static str> {
+        T::json_entry(self)
     }
     fn on_select_one(
         &self,
-        base_col: Arc<dyn JsonCollection<S>>,
+        base_col: String,
         input: Value,
-        ctx: Arc<AnySet>,
+        entry: &dyn Any,
     ) -> Result<Option<Box<dyn SelectOneJsonFragment<S>>>, String> {
         let input = from_value::<T::SelectOneInput>(input);
         let input = match input {
@@ -227,7 +235,13 @@ where
             Err(err) => return Err(err.to_string()),
         };
 
-        let output = self.on_select_one(base_col, input, ctx)?;
+        let output = DynamicLink::on_select_one(
+            self,
+            base_col,
+            input,
+            entry.downcast_ref::<T::RuntimeEntry>().unwrap(),
+        )?;
+
         let output = match output {
             Some(ok) => ok,
             None => return Ok(None),
@@ -239,9 +253,9 @@ where
 
     fn on_update_one(
         &self,
-        base_col: Arc<dyn JsonCollection<S>>,
+        base_col: String,
         input: Value,
-        ctx: Arc<AnySet>,
+        ctx: &dyn Any,
     ) -> Result<Option<Box<dyn UpdateOneJsonFragment<S>>>, String> {
         let input = from_value::<T::UpdateOneInput>(input);
         let input = match input {
@@ -249,7 +263,12 @@ where
             Err(err) => return Err(err.to_string()),
         };
 
-        let output = self.on_update_one(base_col, input, ctx)?;
+        let output = DynamicLink::on_update_one(
+            self,
+            base_col,
+            input,
+            ctx.downcast_ref::<T::RuntimeEntry>().unwrap(),
+        )?;
         let output = match output {
             Some(ok) => ok,
             None => return Ok(None),
@@ -261,9 +280,9 @@ where
 
     fn on_insert_one(
         &self,
-        base_col: Arc<dyn JsonCollection<S>>,
+        base_col: String,
         input: Value,
-        ctx: Arc<AnySet>,
+        entry: &dyn Any,
     ) -> Result<Option<Box<dyn InsertOneJsonFragment<S>>>, String> {
         let input = from_value::<T::InsertOneInput>(input);
         let input = match input {
@@ -271,7 +290,12 @@ where
             Err(err) => return Err(err.to_string()),
         };
 
-        let output = self.on_insert_one(base_col, input, ctx)?;
+        let output = DynamicLink::on_insert_one(
+            self,
+            base_col,
+            input,
+            entry.downcast_ref::<T::RuntimeEntry>().unwrap(),
+        )?;
         let output = match output {
             Some(ok) => ok,
             None => return Ok(None),
@@ -283,9 +307,9 @@ where
 
     fn on_delete_one(
         &self,
-        base_col: Arc<dyn JsonCollection<S>>,
+        base_col: String,
         input: Value,
-        ctx: Arc<AnySet>,
+        entry: &dyn Any,
     ) -> Result<Option<Box<dyn DeleteOneJsonFragment<S>>>, String> {
         let input = from_value::<T::DeleteOneInput>(input);
         let input = match input {
@@ -293,7 +317,13 @@ where
             Err(err) => return Err(err.to_string()),
         };
 
-        let output = self.on_delete_one(base_col, input, ctx)?;
+        let output = DynamicLink::on_delete_one(
+            self,
+            base_col,
+            input,
+            entry.downcast_ref::<T::RuntimeEntry>().unwrap(),
+        )?;
+
         let output = match output {
             Some(ok) => ok,
             None => return Ok(None),
@@ -338,5 +368,45 @@ where
             map.insert(e.0, Box::new(e.1).take());
         });
         map.into()
+    }
+}
+
+pub fn from_map(map: &mut Map<String, Value>, from: &Vec<&'static str>) -> Option<Value> {
+    if from.len() == 1 {
+        return Some(map.remove_entry(from[0])?.1);
+    } else if from.len() == 2 {
+        return Some(
+            map.get_mut(from[0])?
+                .as_object_mut()?
+                .remove_entry(from[1])?
+                .1,
+        );
+    } else if from.len() == 3 {
+        return Some(
+            map.get_mut(from[0])?
+                .as_object_mut()?
+                .get_mut(from[1])?
+                .as_object_mut()?
+                .remove_entry(from[1])?
+                .1,
+        );
+    } else {
+        panic!(
+            "accessor more that 3 should be supported via recursive function but need unit testing to make sure it is valid"
+        );
+    }
+}
+
+pub fn map_is_empty(map: &mut Map<String, Value>) -> bool {
+    if map.len() == 0 {
+        true
+    } else {
+        map.values_mut().any(|e| {
+            if let Some(e) = e.as_object_mut() {
+                map_is_empty(e)
+            } else {
+                false
+            }
+        })
     }
 }
