@@ -1,9 +1,6 @@
-use crate::{
-    QueryBuilder,
-    collections::{ OnMigrate},
-};
-use sqlx::Executor;
 use super::LinkData;
+use crate::{QueryBuilder, collections::OnMigrate};
+use sqlx::Executor;
 
 #[derive(Clone)]
 pub struct Relation<From, To> {

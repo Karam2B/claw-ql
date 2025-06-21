@@ -1,5 +1,3 @@
-use claw_ql::Accept;
-
 pub struct Todo {
     pub title: String,
     pub done: bool,

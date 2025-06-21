@@ -1,3 +1,6 @@
+use super::LinkData;
+use super::relation::Relation;
+use super::relation_many_to_many::ManyToMany;
 use crate::QueryBuilder;
 use crate::collections::{Collection, OnMigrate};
 use crate::prelude::col;
@@ -11,9 +14,6 @@ use convert_case::{Case, Casing};
 use serde::Serialize;
 use sqlx::{ColumnIndex, Executor};
 use sqlx::{Sqlite, sqlite::SqliteRow};
-use super::LinkData;
-use super::relation::Relation;
-use super::relation_many_to_many::ManyToMany;
 
 #[allow(non_camel_case_types)]
 pub struct count<T>(pub T);
@@ -96,8 +96,6 @@ where
         CountResult(data.unwrap())
     }
 }
-
-
 
 // no op
 impl<S> OnMigrate<S> for count<()> {

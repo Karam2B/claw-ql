@@ -79,7 +79,7 @@ mod tracing_testing {
     async fn main() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
-        let db = DebugMetaNew {
+        let _db = DebugMetaNew {
             name: "dsf",
             target: "dsf",
             level: Level::DEBUG,

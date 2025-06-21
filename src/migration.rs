@@ -31,7 +31,7 @@ where
     }
 }
 
-impl< N, S> AddLink<N> for to_migrate<S>
+impl<N, S> AddLink<N> for to_migrate<S>
 where
     N: OnMigrate<S> + Clone + 'static,
     S: Database,
