@@ -1,6 +1,6 @@
 use super::JsonClient;
 use crate::{
-    execute::Execute, json_client::{from_map, map_is_empty}, operations::{select_one_op::SelectOneFragment, LinkedOutput}, prelude::{col, stmt::SelectSt}, QueryBuilder
+    execute::Execute, json_client::{from_map, map_is_empty, RuntimeResult}, operations::{select_one_op::SelectOneFragment, LinkedOutput}, prelude::{col, stmt::SelectSt}, QueryBuilder
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -48,12 +48,12 @@ where
                 .filter_map(|e| {
                     let name = e.1.json_entry();
                     let input = from_map(&mut input.links, e.0)?;
-                    e.1.on_select_one(c.table_name().to_string(), input, &());
+                    let s = e.1.on_select_one(c.table_name().to_string(), input, &());
 
                     match s {
-                        Ok(Some(s)) => Some((name, s)),
-                        Ok(None) => None,
-                        Err(e) => {
+                        RuntimeResult::Ok(s) => Some((name, s)),
+                        RuntimeResult::Skip => None,
+                        RuntimeResult::RuntimeError(e) => {
                             link_errors.push(e);
                             None
                         }

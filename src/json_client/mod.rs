@@ -1,29 +1,30 @@
 use super::builder_pattern::BuilderPattern;
 use crate::collections::CollectionBasic;
+use crate::json_client::builder_pattern::JsonClientBuilding;
 use crate::prelude::stmt::InsertOneSt;
 use crate::statements::update_st::UpdateSt;
-use crate::{QueryBuilder, any_set::AnySet, collections::Collection, prelude::stmt::SelectSt};
+use crate::{QueryBuilder, collections::Collection, prelude::stmt::SelectSt};
 use builder_pattern::to_json_client;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, from_value};
 use sqlx::{Database, Pool};
 use std::any::Any;
+use std::marker::PhantomData;
 use std::{collections::HashMap, pin::Pin, sync::Arc};
 
 pub mod builder_pattern;
 pub mod select_one;
 pub use select_one::SelectOneJsonFragment;
-pub mod update_one;
-pub use update_one::UpdateOneJsonFragment;
-pub mod delete_one;
-pub use delete_one::DeleteOneJsonFragment;
-pub mod insert_one;
-pub use insert_one::InsertOneJsonFragment;
+// pub mod update_one;
+// pub use update_one::UpdateOneJsonFragment;
+// pub mod delete_one;
+// pub use delete_one::DeleteOneJsonFragment;
+// pub mod insert_one;
+// pub use insert_one::InsertOneJsonFragment;
 
 pub struct JsonClient<S: Database> {
     pub(crate) collections: HashMap<String, Arc<dyn JsonCollection<S>>>,
-    pub(crate) links:
-        HashMap<Vec<&'static str>, (Arc<dyn DynamicLinkTraitObject<S>>, Box<dyn Any>)>,
+    pub(crate) links: HashMap<Vec<&'static str>, Arc<dyn DynamicLinkRT<S>>>,
     pub(crate) db: Pool<S>,
 }
 
@@ -31,8 +32,12 @@ impl<S> JsonClient<S>
 where
     S: Database,
 {
-    pub fn init(db: Pool<S>) -> BuilderPattern<(to_json_client<S>,), (), (), ()> {
-        BuilderPattern::default().build_mode(to_json_client(db))
+    pub fn init(
+        db: Pool<S>,
+    ) -> BuilderPattern<PhantomData<(to_json_client<S>,)>, (JsonClientBuilding<S>,)> {
+        BuilderPattern::default()
+            .build_component(to_json_client(db))
+            .start()
     }
 }
 
@@ -124,33 +129,55 @@ where
 }
 
 // === Other Requirement ===
-pub struct BuildTimeCtx(pub Vec<Box<dyn Any>>);
+// pub struct BuildTimeCtx(pub Vec<Box<dyn Any>>);
+//
+// pub trait JsonClientBuilder {
+//     type BuildEntry: Any;
+//     fn init(&self) -> Self::BuildEntry;
+//     type RuntimeEntry: Any;
+//     fn finish(&self, build_ctx: &Vec<Box<dyn Any>>) -> Result<Self::RuntimeEntry, String>;
+// }
+//
+// pub trait JsonClientBuilderDyn {
+//     fn finish(&self, build_ctx: &Vec<Box<dyn Any>>) -> Result<Box<dyn Any>, String>;
+// }
+//
+// impl<T> JsonClientBuilderDyn for T
+// where
+//     T: JsonClientBuilder,
+// {
+//     fn finish(&self, build_ctx: &Vec<Box<dyn Any>>) -> Result<Box<dyn Any>, String> {
+//         Ok(Box::new(JsonClientBuilder::finish(self, build_ctx)?))
+//     }
+// }
 
-pub trait JsonClientBuilder {
-    type BuildEntry: Any;
-    fn init(&self) -> Self::BuildEntry;
-    type RuntimeEntry: Any;
-    fn finish(&self, build_ctx: &Vec<Box<dyn Any>>) -> Result<Self::RuntimeEntry, String>;
+pub enum RuntimeResult<T> {
+    Skip,
+    RuntimeError(String),
+    Ok(T),
 }
 
-pub trait JsonClientBuilderDyn {
-    fn finish(&self, build_ctx: &Vec<Box<dyn Any>>) -> Result<Box<dyn Any>, String>;
-}
+impl<T> RuntimeResult<T> {
+    pub fn map<F, O>(self, f: F) -> RuntimeResult<O>
+    where
+        F: FnOnce(T) -> O,
+    {
+        let output = match self {
+            RuntimeResult::Ok(output) => RuntimeResult::Ok(f(output)),
+            RuntimeResult::Skip => RuntimeResult::Skip,
+            RuntimeResult::RuntimeError(str) => RuntimeResult::RuntimeError(str),
+        };
 
-impl<T> JsonClientBuilderDyn for T
-where
-    T: JsonClientBuilder,
-{
-    fn finish(&self, build_ctx: &Vec<Box<dyn Any>>) -> Result<Box<dyn Any>, String> {
-        Ok(Box::new(JsonClientBuilder::finish(self, build_ctx)?))
+        todo!()
     }
 }
 
 pub trait DynamicLink<S>
 where
-    Self: JsonClientBuilder,
+    Self: Send + Sync,
     S: QueryBuilder,
 {
+    type RuntimeEntry: Send + Sync + 'static;
     fn json_entry(&self) -> Vec<&'static str>;
     type SelectOneInput: DeserializeOwned;
     type SelectOne: SelectOneJsonFragment<S>;
@@ -159,217 +186,214 @@ where
         base_col: String,
         input: Self::SelectOneInput,
         entry: &Self::RuntimeEntry,
-    ) -> Result<Option<Self::SelectOne>, String>;
-    type InsertOneInput: DeserializeOwned;
-    type InsertOne: InsertOneJsonFragment<S>;
-    fn on_insert_one(
-        &self,
-        base_col: String,
-        input: Self::InsertOneInput,
-        entry: &Self::RuntimeEntry,
-    ) -> Result<Option<Self::InsertOne>, String>;
-    type DeleteOneInput: DeserializeOwned;
-    type DeleteOne: DeleteOneJsonFragment<S>;
-    fn on_delete_one(
-        &self,
-        base_col: String,
-        input: Self::DeleteOneInput,
-        entry: &Self::RuntimeEntry,
-    ) -> Result<Option<Self::DeleteOne>, String>;
-    type UpdateOneInput: DeserializeOwned;
-    type UpdateOne: UpdateOneJsonFragment<S>;
-    fn on_update_one(
-        &self,
-        base_col: String,
-        input: Self::UpdateOneInput,
-        entry: &Self::RuntimeEntry,
-    ) -> Result<Option<Self::UpdateOne>, String>;
+    ) -> RuntimeResult<Self::SelectOne>;
+    // type InsertOneInput: DeserializeOwned;
+    // type InsertOne: InsertOneJsonFragment<S>;
+    // fn on_insert_one(
+    //     &self,
+    //     base_col: String,
+    //     input: Self::InsertOneInput,
+    //     entry: &Self::RuntimeEntry,
+    // ) -> Result<Option<Self::InsertOne>, String>;
+    // type DeleteOneInput: DeserializeOwned;
+    // type DeleteOne: DeleteOneJsonFragment<S>;
+    // fn on_delete_one(
+    //     &self,
+    //     base_col: String,
+    //     input: Self::DeleteOneInput,
+    //     entry: &Self::RuntimeEntry,
+    // ) -> Result<Option<Self::DeleteOne>, String>;
+    // type UpdateOneInput: DeserializeOwned;
+    // type UpdateOne: UpdateOneJsonFragment<S>;
+    // fn on_update_one(
+    //     &self,
+    //     base_col: String,
+    //     input: Self::UpdateOneInput,
+    //     entry: &Self::RuntimeEntry,
+    // ) -> Result<Option<Self::UpdateOne>, String>;
 }
 
+// a version of DynamicLink used during build_pattern
+pub trait DynamicLinkBT<S> {}
+
 // a version of DynamicLink that is trait-object compatible
-pub trait DynamicLinkTraitObject<S>: Send + Sync {
+pub trait DynamicLinkRT<S>: Send + Sync {
     fn json_entry(&self) -> Vec<&'static str>;
     fn on_select_one(
         &self,
         _base_col: String,
         input: Value,
         ctx: &dyn Any,
-    ) -> Result<Option<Box<dyn SelectOneJsonFragment<S>>>, String>;
-    fn on_update_one(
-        &self,
-        base_col: String,
-        input: Value,
-        ctx: &dyn Any,
-    ) -> Result<Option<Box<dyn UpdateOneJsonFragment<S>>>, String>;
-    fn on_insert_one(
-        &self,
-        base_col: String,
-        input: Value,
-        ctx: &dyn Any,
-    ) -> Result<Option<Box<dyn InsertOneJsonFragment<S>>>, String>;
-    fn on_delete_one(
-        &self,
-        base_col: String,
-        input: Value,
-        ctx: &dyn Any,
-    ) -> Result<Option<Box<dyn DeleteOneJsonFragment<S>>>, String>;
+    ) -> RuntimeResult<Box<dyn SelectOneJsonFragment<S>>>;
+    // fn on_update_one(
+    //     &self,
+    //     base_col: String,
+    //     input: Value,
+    //     ctx: &dyn Any,
+    // ) -> Result<Option<Box<dyn UpdateOneJsonFragment<S>>>, String>;
+    // fn on_insert_one(
+    //     &self,
+    //     base_col: String,
+    //     input: Value,
+    //     ctx: &dyn Any,
+    // ) -> Result<Option<Box<dyn InsertOneJsonFragment<S>>>, String>;
+    // fn on_delete_one(
+    //     &self,
+    //     base_col: String,
+    //     input: Value,
+    //     ctx: &dyn Any,
+    // ) -> Result<Option<Box<dyn DeleteOneJsonFragment<S>>>, String>;
 }
 
-impl<S, T> DynamicLinkTraitObject<S> for T
+impl<S, T> DynamicLinkRT<S> for (T, T::RuntimeEntry)
 where
     S: QueryBuilder,
-    T: DynamicLink<S> + Send + Sync,
+    T: DynamicLink<S>,
 {
     fn json_entry(&self) -> Vec<&'static str> {
-        T::json_entry(self)
+        T::json_entry(&self.0)
     }
     fn on_select_one(
         &self,
         base_col: String,
         input: Value,
         entry: &dyn Any,
-    ) -> Result<Option<Box<dyn SelectOneJsonFragment<S>>>, String> {
+    ) -> RuntimeResult<Box<dyn SelectOneJsonFragment<S>>> {
         let input = from_value::<T::SelectOneInput>(input);
         let input = match input {
             Ok(ok) => ok,
-            Err(err) => return Err(err.to_string()),
+            Err(err) => return RuntimeResult::RuntimeError(err.to_string()),
         };
 
-        let output = DynamicLink::on_select_one(
-            self,
+        DynamicLink::on_select_one(
+            &self.0,
             base_col,
             input,
             entry.downcast_ref::<T::RuntimeEntry>().unwrap(),
-        )?;
+        )
+        .map(|e| Box::new(e) as Box<dyn SelectOneJsonFragment<S>>)
 
-        let output = match output {
-            Some(ok) => ok,
-            None => return Ok(None),
-        };
-        let output: Box<dyn SelectOneJsonFragment<S>> = Box::new(output);
-
-        Ok(Some(output))
     }
-
-    fn on_update_one(
-        &self,
-        base_col: String,
-        input: Value,
-        ctx: &dyn Any,
-    ) -> Result<Option<Box<dyn UpdateOneJsonFragment<S>>>, String> {
-        let input = from_value::<T::UpdateOneInput>(input);
-        let input = match input {
-            Ok(ok) => ok,
-            Err(err) => return Err(err.to_string()),
-        };
-
-        let output = DynamicLink::on_update_one(
-            self,
-            base_col,
-            input,
-            ctx.downcast_ref::<T::RuntimeEntry>().unwrap(),
-        )?;
-        let output = match output {
-            Some(ok) => ok,
-            None => return Ok(None),
-        };
-        let output: Box<dyn UpdateOneJsonFragment<S>> = Box::new(output);
-
-        Ok(Some(output))
-    }
-
-    fn on_insert_one(
-        &self,
-        base_col: String,
-        input: Value,
-        entry: &dyn Any,
-    ) -> Result<Option<Box<dyn InsertOneJsonFragment<S>>>, String> {
-        let input = from_value::<T::InsertOneInput>(input);
-        let input = match input {
-            Ok(ok) => ok,
-            Err(err) => return Err(err.to_string()),
-        };
-
-        let output = DynamicLink::on_insert_one(
-            self,
-            base_col,
-            input,
-            entry.downcast_ref::<T::RuntimeEntry>().unwrap(),
-        )?;
-        let output = match output {
-            Some(ok) => ok,
-            None => return Ok(None),
-        };
-        let output: Box<dyn InsertOneJsonFragment<S>> = Box::new(output);
-
-        Ok(Some(output))
-    }
-
-    fn on_delete_one(
-        &self,
-        base_col: String,
-        input: Value,
-        entry: &dyn Any,
-    ) -> Result<Option<Box<dyn DeleteOneJsonFragment<S>>>, String> {
-        let input = from_value::<T::DeleteOneInput>(input);
-        let input = match input {
-            Ok(ok) => ok,
-            Err(err) => return Err(err.to_string()),
-        };
-
-        let output = DynamicLink::on_delete_one(
-            self,
-            base_col,
-            input,
-            entry.downcast_ref::<T::RuntimeEntry>().unwrap(),
-        )?;
-
-        let output = match output {
-            Some(ok) => ok,
-            None => return Ok(None),
-        };
-        let output: Box<dyn DeleteOneJsonFragment<S>> = Box::new(output);
-
-        Ok(Some(output))
-    }
+    //
+    // fn on_update_one(
+    //     &self,
+    //     base_col: String,
+    //     input: Value,
+    //     ctx: &dyn Any,
+    // ) -> Result<Option<Box<dyn UpdateOneJsonFragment<S>>>, String> {
+    //     let input = from_value::<T::UpdateOneInput>(input);
+    //     let input = match input {
+    //         Ok(ok) => ok,
+    //         Err(err) => return Err(err.to_string()),
+    //     };
+    //
+    //     let output = DynamicLink::on_update_one(
+    //         self,
+    //         base_col,
+    //         input,
+    //         ctx.downcast_ref::<T::RuntimeEntry>().unwrap(),
+    //     )?;
+    //     let output = match output {
+    //         Some(ok) => ok,
+    //         None => return Ok(None),
+    //     };
+    //     let output: Box<dyn UpdateOneJsonFragment<S>> = Box::new(output);
+    //
+    //     Ok(Some(output))
+    // }
+    //
+    // fn on_insert_one(
+    //     &self,
+    //     base_col: String,
+    //     input: Value,
+    //     entry: &dyn Any,
+    // ) -> Result<Option<Box<dyn InsertOneJsonFragment<S>>>, String> {
+    //     let input = from_value::<T::InsertOneInput>(input);
+    //     let input = match input {
+    //         Ok(ok) => ok,
+    //         Err(err) => return Err(err.to_string()),
+    //     };
+    //
+    //     let output = DynamicLink::on_insert_one(
+    //         self,
+    //         base_col,
+    //         input,
+    //         entry.downcast_ref::<T::RuntimeEntry>().unwrap(),
+    //     )?;
+    //     let output = match output {
+    //         Some(ok) => ok,
+    //         None => return Ok(None),
+    //     };
+    //     let output: Box<dyn InsertOneJsonFragment<S>> = Box::new(output);
+    //
+    //     Ok(Some(output))
+    // }
+    //
+    // fn on_delete_one(
+    //     &self,
+    //     base_col: String,
+    //     input: Value,
+    //     entry: &dyn Any,
+    // ) -> Result<Option<Box<dyn DeleteOneJsonFragment<S>>>, String> {
+    //     let input = from_value::<T::DeleteOneInput>(input);
+    //     let input = match input {
+    //         Ok(ok) => ok,
+    //         Err(err) => return Err(err.to_string()),
+    //     };
+    //
+    //     let output = DynamicLink::on_delete_one(
+    //         self,
+    //         base_col,
+    //         input,
+    //         entry.downcast_ref::<T::RuntimeEntry>().unwrap(),
+    //     )?;
+    //
+    //     let output = match output {
+    //         Some(ok) => ok,
+    //         None => return Ok(None),
+    //     };
+    //     let output: Box<dyn DeleteOneJsonFragment<S>> = Box::new(output);
+    //
+    //     Ok(Some(output))
+    // }
 }
 
 // === Usefuls ===
 pub struct ReturnAsJsonMap<T>(pub Vec<(String, T)>);
 
-// a common pattern is you have array of fragments and you
-// want to build them as a map
-impl<S: QueryBuilder, T> SelectOneJsonFragment<S> for ReturnAsJsonMap<T>
-where
-    T: SelectOneJsonFragment<S>,
-{
-    fn on_select(&mut self, st: &mut SelectSt<S>) {
-        self.0.iter_mut().for_each(|e| e.1.on_select(st))
-    }
-
-    fn from_row(&mut self, row: &<S>::Row) {
-        self.0.iter_mut().for_each(|e| e.1.from_row(row))
-    }
-
-    fn sub_op<'this>(
-        &'this mut self,
-        pool: Pool<S>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
-        Box::pin(async move {
-            for item in self.0.iter_mut() {
-                item.1.sub_op(pool.clone()).await
-            }
-        })
-    }
-
-    fn take(self: Box<Self>) -> serde_json::Value {
-        let mut map = serde_json::Map::new();
-        self.0.into_iter().for_each(|e| {
-            map.insert(e.0, Box::new(e.1).take());
-        });
-        map.into()
-    }
-}
+// // a common pattern is you have array of fragments and you
+// // want to build them as a map
+// impl<S: QueryBuilder, T> SelectOneJsonFragment<S> for ReturnAsJsonMap<T>
+// where
+//     T: SelectOneJsonFragment<S>,
+// {
+//     fn on_select(&mut self, st: &mut SelectSt<S>) {
+//         self.0.iter_mut().for_each(|e| e.1.on_select(st))
+//     }
+//
+//     fn from_row(&mut self, row: &<S>::Row) {
+//         self.0.iter_mut().for_each(|e| e.1.from_row(row))
+//     }
+//
+//     fn sub_op<'this>(
+//         &'this mut self,
+//         pool: Pool<S>,
+//     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'this>> {
+//         Box::pin(async move {
+//             for item in self.0.iter_mut() {
+//                 item.1.sub_op(pool.clone()).await
+//             }
+//         })
+//     }
+//
+//     fn take(self: Box<Self>) -> serde_json::Value {
+//         let mut map = serde_json::Map::new();
+//         self.0.into_iter().for_each(|e| {
+//             map.insert(e.0, Box::new(e.1).take());
+//         });
+//         map.into()
+//     }
+// }
 
 pub fn from_map(map: &mut Map<String, Value>, from: &Vec<&'static str>) -> Option<Value> {
     if from.len() == 1 {

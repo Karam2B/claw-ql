@@ -1,4 +1,4 @@
-use crate::builder_pattern::{AddCollection, AddLink, BuildContext, Finish};
+use crate::builder_pattern::{AddCollection, AddLink, Finish, InitializeContext};
 use crate::{QueryBuilder, collections::OnMigrate};
 use sqlx::{Database, Pool, Sqlite};
 use std::{marker::PhantomData, pin::Pin};
@@ -12,11 +12,13 @@ impl Clone for to_migrate<Sqlite> {
     }
 }
 
-impl<S> BuildContext for to_migrate<S> {
-    fn init_context(&self) -> Self::Context {
+type ThisContext<S> = Vec<Box<dyn OnMigrateDyn<S>>>;
+
+impl<S> InitializeContext for to_migrate<S> {
+    type Context = ThisContext<S>;
+    fn initialize_context(self) -> Self::Context {
         Default::default()
     }
-    type Context = Vec<Box<dyn OnMigrateDyn<S>>>;
 }
 
 impl<N, S> AddCollection<N> for to_migrate<S>
@@ -25,9 +27,12 @@ where
     S: Database,
     for<'c> &'c mut <S as sqlx::Database>::Connection: sqlx::Executor<'c, Database = S>,
 {
-    fn add_col(next: &N, ctx: &mut Self::Context) {
-        let n = next.clone();
-        ctx.push(Box::new(n))
+    type This = to_migrate<S>;
+    type Context = ThisContext<S>;
+    type NextContext = Self::Context;
+    fn build_component(collection: &N, mut ctx: Self::Context) -> Self::NextContext {
+        ctx.push(Box::new(collection.clone()));
+        ctx
     }
 }
 
@@ -37,15 +42,20 @@ where
     S: Database,
     for<'c> &'c mut <S as sqlx::Database>::Connection: sqlx::Executor<'c, Database = S>,
 {
-    fn add_link(next: &N, ctx: &mut Self::Context) {
-        let next = next.clone();
-        ctx.push(Box::new(next))
+    type This = to_migrate<S>;
+    type Context = ThisContext<S>;
+    type NextContext = Self::Context;
+    fn build_component(link: &N, mut ctx: Self::Context) -> Self::NextContext {
+        ctx.push(Box::new(link.clone()));
+        ctx
     }
 }
 
 impl<S> Finish for to_migrate<S> {
     type Result = MigrateResult<S>;
-    fn finish(self, ctx: Self::Context) -> Self::Result {
+    type Context = ThisContext<S>;
+
+    fn build_component(ctx: Self::Context) -> Self::Result {
         MigrateResult {
             pd: PhantomData,
             collections: ctx,
@@ -87,7 +97,7 @@ where
     S: Database,
     for<'c> &'c mut <S as sqlx::Database>::Connection: sqlx::Executor<'c, Database = S>,
 {
-    pub async fn migrate<'e>(&self, exec: Pool<S>)
+    pub async fn migrate(&self, exec: Pool<S>)
     where
         S: crate::QueryBuilder,
     {

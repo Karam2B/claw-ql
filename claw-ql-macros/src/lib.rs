@@ -31,3 +31,26 @@ pub fn relation(input: TokenStream) -> TokenStream {
 
     relation::main(input).into()
 }
+
+// // TODO
+// builder_trait! {
+//     components = ["link", "collection"];
+//     level = mut;
+//     rename mod_name = handler;
+//     type Setting = ();
+//     type ImplDefaultSetting = ();
+//     
+// }
+//
+// struct Builder;
+//
+// builder_impl! {
+//     impl handler for Builder {
+//         type Context = String;
+//         fn add_collection(&mut next, &mut context) 
+//            where Next: Clone
+//         {
+//             let _ = next.clone();
+//         }
+//     }
+// }

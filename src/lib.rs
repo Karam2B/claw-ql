@@ -1,3 +1,5 @@
+#![allow(unused)]
+#![deny(unused_must_use)]
 use std::marker::PhantomData;
 
 use sqlx::{Database, Pool, Sqlite, SqlitePool};
@@ -9,9 +11,9 @@ pub mod execute;
 pub mod expressions;
 pub mod filters;
 mod identity_management;
-// pub mod json_client;
+pub mod json_client;
 pub mod links;
-// pub mod migration;
+pub mod migration;
 pub mod operations;
 pub mod prelude;
 pub mod quick_query;

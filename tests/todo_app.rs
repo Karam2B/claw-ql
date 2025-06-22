@@ -1,11 +1,19 @@
 use claw_ql::{
     // builder_pattern::BuilderPattern,
-    filters::by_id_mod::by_id, links::{set_id::SetId, set_new::SetNew}, operations::{
-        delete_one_op::delete_one, insert_one_op::insert_one, select_one_op::select_one, update_one_op::update_one, CollectionOutput, LinkedOutput
-    }, update_mod::update
+    builder_pattern::BuilderPattern,
+    filters::by_id_mod::by_id,
+    json_client::builder_pattern::to_json_client,
+    links::{relation::Relation, set_id::SetId, set_new::SetNew},
+    migration::to_migrate,
+    operations::{
+        CollectionOutput, LinkedOutput, delete_one_op::delete_one, insert_one_op::insert_one,
+        select_one_op::select_one, update_one_op::update_one,
+    },
+    update_mod::update,
 };
 use claw_ql_macros::{Collection, relation};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 // use serde_json::json;
 use sqlx::{Pool, Sqlite, SqlitePool};
 
@@ -29,7 +37,7 @@ pub struct Tag {
 relation!(optional_to_many Todo Category);
 relation!(many_to_many Todo Tag);
 
-async fn _dumpy_data(db: Pool<Sqlite>) {
+async fn dumpy_data(db: Pool<Sqlite>) {
     sqlx::query(
         r#"
             INSERT INTO Tag (title) VALUES 
@@ -50,7 +58,7 @@ async fn _dumpy_data(db: Pool<Sqlite>) {
     .unwrap();
 }
 
-// #[tokio::test]
+#[tokio::test]
 async fn _workflow_generic() {
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
@@ -58,26 +66,27 @@ async fn _workflow_generic() {
 
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
-    // let schema = {
-    //     BuilderPattern::default()
-    //         .build_mode(to_migrate(Sqlite))
-    //         .add_collection(category)
-    //         .add_collection(tag)
-    //         .add_collection(todo)
-    //         .add_link(Relation {
-    //             from: todo,
-    //             to: tag,
-    //         })
-    //         .add_link(Relation {
-    //             from: todo,
-    //             to: category,
-    //         })
-    //         .finish()
-    // };
-    //
-    // schema.0.migrate(pool.clone()).await;
+    let schema = {
+        BuilderPattern::default()
+            .build_component(to_migrate(Sqlite))
+            .start()
+            .add_collection(category)
+            .add_collection(tag)
+            .add_collection(todo)
+            .add_link(Relation {
+                from: todo,
+                to: tag,
+            })
+            .add_link(Relation {
+                from: todo,
+                to: category,
+            })
+            .finish()
+    };
 
-    _dumpy_data(pool.clone()).await;
+    schema.0.migrate(pool.clone()).await;
+
+    dumpy_data(pool.clone()).await;
 
     let res = insert_one(Todo {
         title: "new todo".to_string(),
@@ -191,53 +200,54 @@ async fn _workflow_generic() {
 }
 
 // #[tokio::test]
-// async fn workflow_dynamic() {
-//     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-//
-// let schema = {
-//     BuilderPattern::default()
-//         .build_mode(to_json_client(pool.clone()))
-//         .build_mode(to_migrate(Sqlite))
-//         .add_collection(category)
-//         .add_collection(tag)
-//         .add_collection(todo)
-//         .add_link(Relation {
-//             from: todo,
-//             to: tag,
-//         })
-//         .add_link(Relation {
-//             from: todo,
-//             to: category,
-//         })
-//         .finish()
-// };
-//
-//     let jc = schema.0.unwrap();
-//     schema.1.migrate(pool.clone()).await;
-//     dumpy_data(pool).await;
-//
-//     let res = jc
-//         .select_one(json!({
-//             "collection": "todo",
-//             "links": { "relation": { "category": {} } }
-//         }))
-//         .await
-//         .unwrap();
-//
-//     pretty_assertions::assert_eq!(
-//         res,
-//         json!({
-//             "id": 1,
-//             "attr": {
-//                 "title": "todo_1",
-//                 "done": true,
-//                 "description": null
-//             },
-//             "links": {
-//                 "relation": {
-//                     "category": { "id": 3, "attr": {"title": "category_3"}}
-//                 }
-//             }
-//         }),
-//     );
-// }
+async fn _workflow_dynamic() {
+    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+
+    let schema = {
+        BuilderPattern::default()
+            .build_component(to_json_client(pool.clone()))
+            .build_component(to_migrate(Sqlite))
+            .start()
+            .add_collection(category)
+            .add_collection(tag)
+            .add_collection(todo)
+            .add_link(Relation {
+                from: todo,
+                to: tag,
+            })
+            .add_link(Relation {
+                from: todo,
+                to: category,
+            })
+            .finish()
+    };
+
+    let jc = schema.0;
+    schema.1.migrate(pool.clone()).await;
+    dumpy_data(pool).await;
+
+    let res = jc
+        .select_one(json!({
+            "collection": "todo",
+            "links": { "relation": { "category": {} } }
+        }))
+        .await
+        .unwrap();
+
+    pretty_assertions::assert_eq!(
+        res,
+        json!({
+            "id": 1,
+            "attr": {
+                "title": "todo_1",
+                "done": true,
+                "description": null
+            },
+            "links": {
+                "relation": {
+                    "category": { "id": 3, "attr": {"title": "category_3"}}
+                }
+            }
+        }),
+    );
+}

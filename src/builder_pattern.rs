@@ -2,6 +2,22 @@ use std::marker::PhantomData;
 
 use crate::build_tuple::BuildTuple;
 
+// builder_trait! {
+//     components = ["link", "collection"];
+//     level = mut;
+//     rename mod_name = handler;
+//     type Setting = ();
+//     type ImplDefaultSetting = ();
+//     
+// }
+//
+// struct Builder;
+//
+// builder_impl! {
+//     impl handler for Builder {
+//     }
+// }
+
 pub trait InitializeContext {
     type Context;
     fn initialize_context(self) -> Self::Context;
@@ -69,6 +85,7 @@ where
 }
 
 impl<Components, Ctx> BuilderPattern<PhantomData<Components>, Ctx> {
+    #[track_caller]
     pub fn add_collection<Cnext>(
         self,
         collection: Cnext,
@@ -83,6 +100,7 @@ impl<Components, Ctx> BuilderPattern<PhantomData<Components>, Ctx> {
             __context: ctx,
         }
     }
+    #[track_caller]
     pub fn add_link<Lnext>(
         self,
         link: Lnext,
@@ -98,6 +116,7 @@ impl<Components, Ctx> BuilderPattern<PhantomData<Components>, Ctx> {
         }
     }
 
+    #[track_caller]
     pub fn finish(self) -> Components::Result
     where
         Components: Finish<Context = Ctx>,
@@ -131,6 +150,7 @@ impl<Next,$($ty),* > AddLink<Next> for ($($ty,)*)
     type NextContext = (
         $($ty::NextContext,)*
     );
+    #[track_caller]
     fn build_component(next: &Next, ctx: Self::Context) -> Self::NextContext {
         ($($ty::build_component(next, paste::paste!(ctx.$part)),)*)
     }
@@ -148,6 +168,7 @@ impl<Next, $($ty),* > AddCollection<Next> for ($($ty,)*)
     type NextContext = (
         $($ty::NextContext,)*
     );
+    #[track_caller]
     fn build_component(next: &Next, ctx: Self::Context) -> Self::NextContext {
         ($($ty::build_component(next, paste::paste!(ctx.$part)),)*)
     }
@@ -160,6 +181,7 @@ impl<$($ty,)*> Finish for ($($ty,)*)
     type Context = (
         $($ty::Context,)*
     );
+    #[track_caller]
     fn build_component(ctx: Self::Context) -> Self::Result {
         ($(paste::paste!($ty::build_component(ctx.$part)),)*)
     }
