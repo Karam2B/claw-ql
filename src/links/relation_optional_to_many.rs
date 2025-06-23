@@ -1,5 +1,6 @@
 use crate::Accept;
 use crate::execute::Execute;
+use crate::links::relation::DynamicLinkForRelation;
 use crate::operations::CollectionOutput;
 use crate::operations::delete_one_op::DeleteOneFragment;
 use crate::prelude::join::left_join;
@@ -29,7 +30,6 @@ pub struct OptionalToManyInverse<F, T> {
     pub to: T,
 }
 
-// todo add generic implementaion
 impl<From, To> OnMigrate<Sqlite> for OptionalToMany<From, To>
 where
     From: Collection<Sqlite>,
@@ -151,6 +151,65 @@ where
 
     fn take(self, data: Self::Inner) -> Self::Output {
         data
+    }
+}
+
+mod dynamic_client {
+    use serde::Serialize;
+    use sqlx::{ColumnIndex, Decode, prelude::Type};
+
+    use crate::{
+        QueryBuilder,
+        collections::Collection,
+        json_client::RuntimeResult,
+        links::relation::{DynamicLinkForRelation, RelationEntry, RelationType, empty_object},
+        prelude::macro_relation::OptionalToMany,
+    };
+
+    impl<S, F, T> DynamicLinkForRelation<S> for OptionalToMany<F, T>
+    where
+        S: QueryBuilder,
+        F: Collection<S, Data: Send + Sync> + Clone + 'static,
+        T: Collection<S, Data: Send + Sync + Serialize> + Clone + 'static,
+        for<'c> &'c str: ColumnIndex<S::Row>,
+        for<'q> i64: Decode<'q, S>,
+        i64: Type<S>,
+    {
+        fn make_entry(&self) -> RelationEntry {
+            struct OptionalToManyIdent;
+            static OPTIONAL_TO_MANY: OptionalToManyIdent = OptionalToManyIdent;
+            impl RelationType for OptionalToManyIdent {
+                fn inspect(self: &'static Self) -> &'static str {
+                    "optional_to_many"
+                }
+            }
+
+            RelationEntry {
+                from: self.from.table_name().to_owned(),
+                to: self.to.table_name().to_owned(),
+                ty: &OPTIONAL_TO_MANY,
+            }
+        }
+
+        type SelectOneInput = empty_object;
+
+        type SelectOne = (OptionalToMany<F, T>, Option<(i64, T::Data)>);
+
+        fn on_select_one_fr(
+            &self,
+            base_col: String,
+            input: empty_object,
+        ) -> RuntimeResult<Self::SelectOne> {
+            if base_col != self.from.table_name() {
+                return RuntimeResult::RuntimeError(format!(
+                    "relation {}->{} is not available",
+                    base_col,
+                    self.to.table_name(),
+                ));
+            }
+
+            return RuntimeResult::Ok((self.clone(), Default::default()));
+        }
     }
 }
 

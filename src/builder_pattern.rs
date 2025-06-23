@@ -2,22 +2,6 @@ use std::marker::PhantomData;
 
 use crate::build_tuple::BuildTuple;
 
-// builder_trait! {
-//     components = ["link", "collection"];
-//     level = mut;
-//     rename mod_name = handler;
-//     type Setting = ();
-//     type ImplDefaultSetting = ();
-//     
-// }
-//
-// struct Builder;
-//
-// builder_impl! {
-//     impl handler for Builder {
-//     }
-// }
-
 pub trait InitializeContext {
     type Context;
     fn initialize_context(self) -> Self::Context;

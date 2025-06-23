@@ -17,6 +17,9 @@ const _: () = {
     use ::claw_ql::prelude::macro_derive_collection::*;
     impl CollectionBasic for todo {
         type LinkedData = Todo;
+        fn table_name_lower_case(&self) -> &'static str {
+            "todo"
+        }
         fn table_name(&self) -> &'static str {
             "Todo"
         }

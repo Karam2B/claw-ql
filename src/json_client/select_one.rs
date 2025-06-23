@@ -1,6 +1,10 @@
 use super::JsonClient;
 use crate::{
-    execute::Execute, json_client::{from_map, map_is_empty, RuntimeResult}, operations::{select_one_op::SelectOneFragment, LinkedOutput}, prelude::{col, stmt::SelectSt}, QueryBuilder
+    QueryBuilder,
+    execute::Execute,
+    json_client::{RuntimeResult, from_map, map_is_empty},
+    operations::{CollectionOutput, LinkedOutput, select_one_op::SelectOneFragment},
+    prelude::{col, stmt::SelectSt},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -48,7 +52,7 @@ where
                 .filter_map(|e| {
                     let name = e.1.json_entry();
                     let input = from_map(&mut input.links, e.0)?;
-                    let s = e.1.on_select_one(c.table_name().to_string(), input, &());
+                    let s = e.1.on_select_one(c.table_name().to_string(), input);
 
                     match s {
                         RuntimeResult::Ok(s) => Some((name, s)),
@@ -64,6 +68,7 @@ where
             if link_errors.is_empty().not() {
                 return Err(format!("{link_errors:?}"));
             }
+            // panic!("input should be empty {:?}", input.links);
             if map_is_empty(&mut input.links).not() {
                 return Err("unused input")?;
             }
@@ -92,11 +97,7 @@ where
                     link.1.from_row(&r);
                 }
 
-                Ok(LinkedOutput {
-                    id,
-                    attr,
-                    links: HashMap::new(),
-                })
+                Ok(CollectionOutput { id, attr })
             })
             .await;
 
@@ -110,7 +111,32 @@ where
             link.1.sub_op(self.db.clone()).await;
         }
 
-        res.links = links.into_iter().map(|e| (e.0, e.1.take())).collect();
+        fn build_back_as_map(input: HashMap<Vec<&'static str>, ()>) {}
+
+        let links = {
+            let mut map = HashMap::new();
+            for (mut keys, value) in links.into_iter().map(|e| (e.0, e.1.take())) {
+                let last = keys.pop().unwrap();
+                let mut reff = None;
+                keys.reverse();
+                while let Some(next) = keys.pop() {
+                    map.insert(next.to_string(), Value::Object(Default::default()));
+                    let s = map.get_mut(next).unwrap().as_object_mut().unwrap();
+                    reff = Some(s)
+                }
+                if let Some(reff) = reff {
+                    reff.insert(last.to_string(), value);
+                } else {
+                    map.insert(last.to_string(), value);
+                }
+            }
+            map
+        };
+        let res = LinkedOutput {
+            id: res.id,
+            attr: res.attr,
+            links,
+        };
 
         Ok(serde_json::to_value(res).unwrap())
     }

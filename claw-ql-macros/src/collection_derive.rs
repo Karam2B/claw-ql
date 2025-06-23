@@ -93,6 +93,9 @@ pub fn main(input: DeriveInput) -> TokenStream {
                     #(String::from(stringify!(#member_name)),)*
                 ]
             }
+            fn table_name_lower_case(&self) -> &'static str {
+                stringify!(#table_name_lower_case_ident)
+            }
             fn table_name(&self) -> &'static str {
                 stringify!(#table_name_camel_case)
             }

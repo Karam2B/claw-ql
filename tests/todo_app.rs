@@ -14,7 +14,6 @@ use claw_ql::{
 use claw_ql_macros::{Collection, relation};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-// use serde_json::json;
 use sqlx::{Pool, Sqlite, SqlitePool};
 
 #[derive(Collection, Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -199,8 +198,8 @@ async fn _workflow_generic() {
     );
 }
 
-// #[tokio::test]
-async fn _workflow_dynamic() {
+#[tokio::test]
+async fn workflow_dynamic() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
     let schema = {
@@ -211,10 +210,10 @@ async fn _workflow_dynamic() {
             .add_collection(category)
             .add_collection(tag)
             .add_collection(todo)
-            .add_link(Relation {
-                from: todo,
-                to: tag,
-            })
+            // .add_link(Relation {
+            //     from: todo,
+            //     to: tag,
+            // })
             .add_link(Relation {
                 from: todo,
                 to: category,
@@ -222,7 +221,7 @@ async fn _workflow_dynamic() {
             .finish()
     };
 
-    let jc = schema.0;
+    let jc = schema.0.unwrap();
     schema.1.migrate(pool.clone()).await;
     dumpy_data(pool).await;
 

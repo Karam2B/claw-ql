@@ -8,6 +8,7 @@ use crate::{
 
 pub trait CollectionBasic {
     fn table_name(&self) -> &'static str;
+    fn table_name_lower_case(&self) -> &'static str;
     fn members(&self) -> Vec<String>;
     type LinkedData;
 }

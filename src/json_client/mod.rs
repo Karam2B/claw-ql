@@ -129,28 +129,6 @@ where
 }
 
 // === Other Requirement ===
-// pub struct BuildTimeCtx(pub Vec<Box<dyn Any>>);
-//
-// pub trait JsonClientBuilder {
-//     type BuildEntry: Any;
-//     fn init(&self) -> Self::BuildEntry;
-//     type RuntimeEntry: Any;
-//     fn finish(&self, build_ctx: &Vec<Box<dyn Any>>) -> Result<Self::RuntimeEntry, String>;
-// }
-//
-// pub trait JsonClientBuilderDyn {
-//     fn finish(&self, build_ctx: &Vec<Box<dyn Any>>) -> Result<Box<dyn Any>, String>;
-// }
-//
-// impl<T> JsonClientBuilderDyn for T
-// where
-//     T: JsonClientBuilder,
-// {
-//     fn finish(&self, build_ctx: &Vec<Box<dyn Any>>) -> Result<Box<dyn Any>, String> {
-//         Ok(Box::new(JsonClientBuilder::finish(self, build_ctx)?))
-//     }
-// }
-
 pub enum RuntimeResult<T> {
     Skip,
     RuntimeError(String),
@@ -162,23 +140,25 @@ impl<T> RuntimeResult<T> {
     where
         F: FnOnce(T) -> O,
     {
-        let output = match self {
+        match self {
             RuntimeResult::Ok(output) => RuntimeResult::Ok(f(output)),
             RuntimeResult::Skip => RuntimeResult::Skip,
             RuntimeResult::RuntimeError(str) => RuntimeResult::RuntimeError(str),
-        };
-
-        todo!()
+        }
     }
 }
 
 pub trait DynamicLink<S>
 where
-    Self: Send + Sync,
+    Self: Send + Sync + 'static,
     S: QueryBuilder,
 {
     type RuntimeEntry: Send + Sync + 'static;
     fn json_entry(&self) -> Vec<&'static str>;
+    fn buildtime(&self) -> Vec<Box<dyn Any>> {
+        vec![]
+    }
+    fn finish_building(ctx: &Vec<Box<dyn Any>>) -> Result<Self::RuntimeEntry, String>;
     type SelectOneInput: DeserializeOwned;
     type SelectOne: SelectOneJsonFragment<S>;
     fn on_select_one(
@@ -214,7 +194,35 @@ where
 }
 
 // a version of DynamicLink used during build_pattern
-pub trait DynamicLinkBT<S> {}
+pub trait DynamicLinkBT<S> {
+    fn buildtime_extend(&self, ctx: &mut Vec<Box<dyn Any>>);
+
+    fn json_entry(&self) -> Vec<&'static str>;
+    fn finish(
+        self: Box<Self>,
+        ctx: &Vec<Box<dyn Any>>,
+    ) -> Result<Arc<dyn DynamicLinkRT<S>>, String>;
+}
+
+impl<S, T> DynamicLinkBT<S> for T
+where
+    S: QueryBuilder,
+    T: DynamicLink<S>,
+{
+    fn json_entry(&self) -> Vec<&'static str> {
+        self.json_entry()
+    }
+    fn buildtime_extend(&self, ctx: &mut Vec<Box<dyn Any>>) {
+        ctx.extend(self.buildtime());
+    }
+    fn finish(
+        self: Box<Self>,
+        ctx: &Vec<Box<dyn Any>>,
+    ) -> Result<Arc<dyn DynamicLinkRT<S>>, String> {
+        let rt = T::finish_building(ctx)?;
+        Ok(Arc::new((*self, rt)) as Arc<dyn DynamicLinkRT<S>>)
+    }
+}
 
 // a version of DynamicLink that is trait-object compatible
 pub trait DynamicLinkRT<S>: Send + Sync {
@@ -223,7 +231,6 @@ pub trait DynamicLinkRT<S>: Send + Sync {
         &self,
         _base_col: String,
         input: Value,
-        ctx: &dyn Any,
     ) -> RuntimeResult<Box<dyn SelectOneJsonFragment<S>>>;
     // fn on_update_one(
     //     &self,
@@ -257,7 +264,6 @@ where
         &self,
         base_col: String,
         input: Value,
-        entry: &dyn Any,
     ) -> RuntimeResult<Box<dyn SelectOneJsonFragment<S>>> {
         let input = from_value::<T::SelectOneInput>(input);
         let input = match input {
@@ -265,14 +271,8 @@ where
             Err(err) => return RuntimeResult::RuntimeError(err.to_string()),
         };
 
-        DynamicLink::on_select_one(
-            &self.0,
-            base_col,
-            input,
-            entry.downcast_ref::<T::RuntimeEntry>().unwrap(),
-        )
-        .map(|e| Box::new(e) as Box<dyn SelectOneJsonFragment<S>>)
-
+        DynamicLink::on_select_one(&self.0, base_col, input, &self.1)
+            .map(|e| Box::new(e) as Box<dyn SelectOneJsonFragment<S>>)
     }
     //
     // fn on_update_one(
@@ -432,5 +432,19 @@ pub fn map_is_empty(map: &mut Map<String, Value>) -> bool {
                 false
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::json_client::map_is_empty;
+
+    #[test]
+    fn map_is_empty_1() {
+        let mut input = json!({});
+        let input = input.as_object_mut().unwrap();
+        assert!(map_is_empty(input));
     }
 }
