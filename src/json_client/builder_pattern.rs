@@ -2,7 +2,7 @@ use super::DynamicLinkRT;
 use super::{JsonClient, JsonCollection};
 use crate::QueryBuilder;
 use crate::builder_pattern::{AddCollection, AddLink, Finish, InitializeContext};
-use crate::json_client::{DynamicLinkBT, DynamicLinkBTDyn};
+use crate::json_client::{DynamicLinkBT, DynamicLinkBTDyn, JsonSelector};
 use convert_case::{Case, Casing};
 use sqlx::{Database, Pool};
 use std::any::Any;
@@ -61,22 +61,24 @@ where
     }
 }
 
-fn is_first_a_subset_of_second(entry: &Vec<&'static str>, key: &Vec<&'static str>) -> bool {
-    let s = &key[..entry.len()];
-    if entry == s { true } else { false }
+fn is_first_a_subset_of_second(entry: &JsonSelector, key: &JsonSelector) -> bool {
+    if entry.collection != key.collection {
+        return false;
+    }
+    let s = &key.body[..entry.body.len()];
+    if entry.body == s { true } else { false }
 }
 
 impl<N, S> AddLink<N> for to_json_client<S>
 where
     S: QueryBuilder,
-    N: DynamicLinkBT<S> + Clone,
+    N: DynamicLinkBT<S> + Clone + 'static,
 {
     type This = to_json_client<S>;
     type Context = ThisContext<S>;
     type NextContext = ThisContext<S>;
     #[track_caller]
     fn build_component(next: &N, mut ctx: Self::Context) -> Self::NextContext {
-        todo!();
         let next = next.clone();
 
         let buildtime_meta = next.buildtime_meta();
@@ -96,25 +98,7 @@ where
 
         ctx.links.push(Box::new(next));
 
-        // let next = next.clone();
-        // next.buildtime_extend(&mut ctx.flex_ctx);
-        // let entry = next.json_entry();
-        //
-        // for key in ctx.links.keys() {
-        //     if is_first_a_subset_of_second(&entry, key) {
-        //         panic!("{:?} is a subset of {:?}", entry, key);
-        //     }
-        // }
-        //
-        // let exist = ctx.links.insert(entry, Box::new(next));
-        // if exist.is_some() {
-        //     panic!(
-        //         "internal bug in '{}:{}': should not exist if the subsetting is sound",
-        //         file!(),
-        //         line!(),
-        //     )
-        // }
-        // ctx
+        ctx
     }
 }
 
@@ -124,18 +108,36 @@ where
 {
     type Context = ThisContext<S>;
     type Result = Result<JsonClient<S>, String>;
-    #[track_caller]
     fn build_component(ctx: Self::Context) -> Self::Result {
-        todo!()
-        // let mut vecc = HashMap::new();
-        // for (key, e) in ctx.links {
-        //     let new = e.finish(&ctx.flex_ctx)?;
-        //     vecc.insert(key, new);
-        // }
-        // Ok(JsonClient {
-        //     collections: ctx.collections,
-        //     links: vecc,
-        //     db: ctx.db,
-        // })
+        let mut links = HashMap::new();
+        let mut all_json_selector = Vec::new();
+        for dynlink_bt_dyn in ctx.links {
+            let dynlink_rt = dynlink_bt_dyn.finish_building(&ctx.flex_ctx)?;
+            let json_selector = dynlink_rt.json_selector();
+            for json_selector2 in all_json_selector.iter() {
+                if is_first_a_subset_of_second(&json_selector, json_selector2) {
+                    return Err(format!(
+                        "{:?} is a subset of {:?}",
+                        json_selector, json_selector2
+                    ));
+                }
+            }
+
+            all_json_selector.push(json_selector.clone());
+
+            let out = links.insert(json_selector, dynlink_rt);
+
+            if out.is_some() {
+                panic!(
+                    "internal bug: should not exist if the subsetting is sound",
+                )
+            }
+        }
+
+        Ok(JsonClient {
+            collections: ctx.collections,
+            db: ctx.db,
+            links,
+        })
     }
 }

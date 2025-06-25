@@ -10,6 +10,7 @@ use crate::{
     operations::select_one_op::SelectOneFragment,
 };
 use core::fmt;
+use convert_case::{Case, Casing};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::Executor;
 use std::{any::Any, ops::Not};
@@ -166,15 +167,19 @@ where
         &self,
         base_col: String,
         input: serde_json::Value,
-    ) -> RuntimeResult<Box<dyn SelectOneJsonFragment<S>>> {
+    ) -> Result<Box<dyn SelectOneJsonFragment<S>>, String> {
         if let Err(err) = serde_json::from_value::<empty_object>(input) {
-            return RuntimeResult::RuntimeError(err.to_string());
+            return Err(err.to_string());
         }
 
-        if base_col != self.from.table_name_lower_case() {
-            return RuntimeResult::Skip;
+        if base_col.to_case(Case::Snake) != self.from.table_name_lower_case() {
+            return Err(format!(
+                "{} is not related to {}",
+                base_col,
+                self.from.table_name_lower_case()
+            ));
         }
 
-        RuntimeResult::Ok(Box::new((self.into_spec(), Default::default())))
+        Ok(Box::new((self.into_spec(), Default::default())))
     }
 }

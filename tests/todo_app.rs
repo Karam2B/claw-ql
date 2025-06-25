@@ -191,8 +191,8 @@ async fn _workflow_generic() {
     );
 }
 
-// #[tokio::test]
-async fn _workflow_dynamic() {
+#[tokio::test]
+async fn workflow_dynamic() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
     let schema = {

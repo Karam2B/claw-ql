@@ -36,110 +36,110 @@ where
             serde_json::from_value(input).map_err(|e| format!("invalid input: {e:?}"))?;
         self.select_one_serialized(input).await
     }
+
     pub async fn select_one_serialized(&self, mut input: SelectOneInput) -> Result<Value, String> {
         let c = self
             .collections
             .get(&input.collection)
             .ok_or(format!("collection {} was not found", input.collection))?;
 
-        // let mut st = SelectSt::init(c.table_name());
+        let mut st = SelectSt::init(c.table_name());
 
-        todo!()
-        // let mut links = {
-        //     let mut link_errors = Vec::default();
-        //     let links = self
-        //         .links
-        //         .iter()
-        //         .filter_map(|e| {
-        //             let name = e.1.json_entry();
-        //             let input = from_map(&mut input.links, e.0)?;
-        //             let s = e.1.on_select_one(c.table_name().to_string(), input);
-        //
-        //             match s {
-        //                 RuntimeResult::Ok(s) => Some((name, s)),
-        //                 RuntimeResult::Skip => None,
-        //                 RuntimeResult::RuntimeError(e) => {
-        //                     link_errors.push(e);
-        //                     None
-        //                 }
-        //             }
-        //         })
-        //         .collect::<Vec<_>>();
-        //
-        //     if link_errors.is_empty().not() {
-        //         return Err(format!("{link_errors:?}"));
-        //     }
-        //     // panic!("input should be empty {:?}", input.links);
-        //     if map_is_empty(&mut input.links).not() {
-        //         return Err("unused input")?;
-        //     }
-        //     links
-        // };
-        //
-        // #[rustfmt::skip]
-        // st.select(
-        //     col("id").
-        //     table(c.table_name()).
-        //     alias("local_id")
-        // );
-        //
-        // c.on_select(&mut st);
-        // for link in links.iter_mut() {
-        //     link.1.on_select(&mut st);
-        // }
-        //
-        // let res = st
-        //     .fetch_one(&self.db, |r| {
-        //         use sqlx::Row;
-        //         let id: i64 = r.get("local_id");
-        //         let attr = c.from_row_scoped(&r);
-        //
-        //         for link in links.iter_mut() {
-        //             link.1.from_row(&r);
-        //         }
-        //
-        //         Ok(CollectionOutput { id, attr })
-        //     })
-        //     .await;
-        //
-        // let mut res = match res {
-        //     Err(sqlx::Error::RowNotFound) => return Ok(serde_json::Value::Null),
-        //     Err(err) => panic!("bug: {err}"),
-        //     Ok(ok) => ok,
-        // };
-        //
-        // for link in links.iter_mut() {
-        //     link.1.sub_op(self.db.clone()).await;
-        // }
-        //
-        // fn build_back_as_map(input: HashMap<Vec<&'static str>, ()>) {}
-        //
-        // let links = {
-        //     let mut map = HashMap::new();
-        //     for (mut keys, value) in links.into_iter().map(|e| (e.0, e.1.take())) {
-        //         let last = keys.pop().unwrap();
-        //         let mut reff = None;
-        //         keys.reverse();
-        //         while let Some(next) = keys.pop() {
-        //             map.insert(next.to_string(), Value::Object(Default::default()));
-        //             let s = map.get_mut(next).unwrap().as_object_mut().unwrap();
-        //             reff = Some(s)
-        //         }
-        //         if let Some(reff) = reff {
-        //             reff.insert(last.to_string(), value);
-        //         } else {
-        //             map.insert(last.to_string(), value);
-        //         }
-        //     }
-        //     map
-        // };
-        // let res = LinkedOutput {
-        //     id: res.id,
-        //     attr: res.attr,
-        //     links,
-        // };
-        //
-        // Ok(serde_json::to_value(res).unwrap())
+        let mut links = {
+            let mut link_errors = Vec::default();
+            let links = self
+                .links
+                .iter()
+                .filter_map(|e| {
+                    let name = e.1.json_selector();
+                    let input = from_map(&mut input.links, &e.0.body)?;
+                    let s = e.1.on_select_one(c.table_name().to_string(), input);
+
+                    match s {
+                        Ok(s) => Some((name, s)),
+                        Err(e) => {
+                            link_errors.push(e);
+                            None
+                        }
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            if link_errors.is_empty().not() {
+                return Err(format!("{link_errors:?}"));
+            }
+
+            if map_is_empty(&mut input.links).not() {
+                return Err("unused input")?;
+            }
+            links
+        };
+
+        #[rustfmt::skip]
+        st.select(
+            col("id").
+            table(c.table_name()).
+            alias("local_id")
+        );
+
+        c.on_select(&mut st);
+
+        for link in links.iter_mut() {
+            link.1.on_select(&mut st);
+        }
+
+        let res = st
+            .fetch_one(&self.db, |r| {
+                use sqlx::Row;
+                let id: i64 = r.get("local_id");
+                let attr = c.from_row_scoped(&r);
+
+                for link in links.iter_mut() {
+                    link.1.from_row(&r);
+                }
+
+                Ok(CollectionOutput { id, attr })
+            })
+            .await;
+
+        let mut res = match res {
+            Err(sqlx::Error::RowNotFound) => return Ok(serde_json::Value::Null),
+            Err(err) => panic!("bug: {err}"),
+            Ok(ok) => ok,
+        };
+
+        for link in links.iter_mut() {
+            link.1.sub_op(self.db.clone()).await;
+        }
+
+        fn build_back_as_map(input: HashMap<Vec<&'static str>, ()>) {}
+
+        let links = {
+            let mut map = HashMap::new();
+            for (mut keys, value) in links.into_iter().map(|e| (e.0, e.1.take())) {
+                let last = keys.body.pop().unwrap();
+                let mut reff = None;
+                keys.body.reverse();
+                while let Some(next) = keys.body.pop() {
+                    map.insert(next.to_string(), Value::Object(Default::default()));
+                    let s = map.get_mut(next).unwrap().as_object_mut().unwrap();
+                    reff = Some(s)
+                }
+                if let Some(reff) = reff {
+                    reff.insert(last.to_string(), value);
+                } else {
+                    map.insert(last.to_string(), value);
+                }
+            }
+            map
+        };
+        let res = LinkedOutput {
+            id: res.id,
+            attr: res.attr,
+            links,
+        };
+
+        Ok(serde_json::to_value(res).unwrap())
     }
 }
 
