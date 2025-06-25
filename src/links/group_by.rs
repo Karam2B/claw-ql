@@ -31,7 +31,7 @@ impl<From, To> CountingSupportedIn for OptionalToMany<From, To> {}
 
 impl<From, To> LinkData<From> for count<To>
 where
-    From: CollectionBasic,
+    From: CollectionBasic ,
     To: CollectionBasic,
     Relation<From, To>: LinkData<From, Spec: CountingSupportedIn>,
 {

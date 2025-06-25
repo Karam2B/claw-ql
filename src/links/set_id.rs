@@ -6,7 +6,8 @@ use super::{
     relation_optional_to_many::{OptionalToMany, OptionalToManyInverse},
 };
 use crate::{
-    QueryBuilder, operations::insert_one_op::InsertOneFragment, prelude::stmt::InsertOneSt,
+    QueryBuilder, collections::CollectionBasic, operations::insert_one_op::InsertOneFragment,
+    prelude::stmt::InsertOneSt,
 };
 use sqlx::{ColumnIndex, Decode, Encode, prelude::Type};
 use sqlx::{IntoArguments, Row};
@@ -28,8 +29,8 @@ pub struct SetIdSpec<Relation, Input> {
 
 impl<C, To> LinkData<C> for SetId<To, i64>
 where
-    C: Clone,
-    To: Clone,
+    C: CollectionBasic,
+    To: CollectionBasic,
     Relation<C, To>: LinkData<C, Spec: SetIdTrait<C, To, Input = i64>>,
 {
     type Spec = SetIdSpec<<Relation<C, To> as LinkData<C>>::Spec, i64>;
@@ -51,8 +52,8 @@ where
 }
 impl<C, To> LinkData<C> for SetId<To, Vec<i64>>
 where
-    C: Clone,
-    To: Clone,
+    C: CollectionBasic,
+    To: CollectionBasic,
     Relation<C, To>: LinkData<C, Spec: SetIdTrait<C, To, Input = Vec<i64>>>,
 {
     type Spec = SetIdSpec<<Relation<C, To> as LinkData<C>>::Spec, Vec<i64>>;

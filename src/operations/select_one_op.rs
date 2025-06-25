@@ -2,6 +2,7 @@ use super::LinkedOutput;
 use crate::{
     QueryBuilder,
     build_tuple::BuildTuple,
+    collections::CollectionBasic,
     operations::collections::{Collection, Filter},
     prelude::stmt,
     statements::select_st::SelectSt,
@@ -45,7 +46,7 @@ pub struct SelectOne<S, C, L, F> {
 
 impl<S, Base, L, F> SelectOne<S, Base, L, F>
 where
-    Base: Clone,
+    Base: CollectionBasic,
     S: QueryBuilder,
     L: BuildTuple,
     F: BuildTuple,

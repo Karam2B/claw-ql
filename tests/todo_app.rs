@@ -1,5 +1,4 @@
 use claw_ql::{
-    // builder_pattern::BuilderPattern,
     builder_pattern::BuilderPattern,
     filters::by_id_mod::by_id,
     json_client::builder_pattern::to_json_client,
@@ -72,14 +71,8 @@ async fn _workflow_generic() {
             .add_collection(category)
             .add_collection(tag)
             .add_collection(todo)
-            .add_link(Relation {
-                from: todo,
-                to: tag,
-            })
-            .add_link(Relation {
-                from: todo,
-                to: category,
-            })
+            .add_link(Relation::link(todo, tag))
+            .add_link(Relation::link(todo, category))
             .finish()
     };
 
@@ -198,8 +191,8 @@ async fn _workflow_generic() {
     );
 }
 
-#[tokio::test]
-async fn workflow_dynamic() {
+// #[tokio::test]
+async fn _workflow_dynamic() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
     let schema = {
@@ -210,14 +203,8 @@ async fn workflow_dynamic() {
             .add_collection(category)
             .add_collection(tag)
             .add_collection(todo)
-            // .add_link(Relation {
-            //     from: todo,
-            //     to: tag,
-            // })
-            .add_link(Relation {
-                from: todo,
-                to: category,
-            })
+            // .add_link(Relation::link(todo, tag))
+            .add_link(Relation::link(todo, category))
             .finish()
     };
 

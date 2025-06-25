@@ -1,14 +1,18 @@
-use core::fmt;
-use std::{any::Any, ops::Not};
-
 use super::LinkData;
 use crate::{
     QueryBuilder,
     collections::{CollectionBasic, OnMigrate},
-    json_client::{DynamicLink, RuntimeResult, SelectOneJsonFragment},
+    json_client::{
+        DynamicLinkBT, DynamicLinkRT, FromParameter, JsonSelector, RuntimeResult,
+        SelectOneJsonFragment,
+    },
+    links::set_id::SetId,
+    operations::select_one_op::SelectOneFragment,
 };
+use core::fmt;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::Executor;
+use std::{any::Any, ops::Not};
 
 #[derive(Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
@@ -20,31 +24,62 @@ pub struct Relation<From, To> {
     pub to: To,
 }
 
+impl<F: CollectionBasic, T: CollectionBasic> Relation<F, T> {
+    #[inline]
+    pub fn into_spec(&self) -> <Relation<F, T> as LinkData<F>>::Spec
+    where
+        Relation<F, T>: LinkData<F>,
+    {
+        self.clone().spec(self.from.clone())
+    }
+}
+
+impl<F, T> Relation<F, T> {
+    pub fn link(from: F, to: T) -> DynamicRelation<F, T> {
+        DynamicRelation { from, to }
+    }
+}
+
 impl<S, F, T> OnMigrate<S> for Relation<F, T>
 where
     Relation<F, T>: LinkData<F, Spec: OnMigrate<S>>,
-    Relation<F, T>: Clone,
-    F: Clone,
+    F: CollectionBasic,
+    T: CollectionBasic,
 {
     async fn custom_migration<'e>(&self, exec: impl for<'q> Executor<'q, Database = S> + Clone)
     where
         S: QueryBuilder,
     {
-        let relation = self.clone();
-        let spec = relation.spec(self.from.clone());
-        spec.custom_migration(exec).await;
+        self.into_spec().custom_migration(exec).await
     }
 }
 
-// todo: add meta information here!!
+impl<S, F, T> OnMigrate<S> for DynamicRelation<F, T>
+where
+    Relation<F, T>: LinkData<F, Spec: OnMigrate<S>>,
+    F: CollectionBasic,
+    T: CollectionBasic,
+{
+    async fn custom_migration<'e>(&self, exec: impl for<'q> Executor<'q, Database = S> + Clone)
+    where
+        S: QueryBuilder,
+    {
+        self.into_spec().custom_migration(exec).await
+    }
+}
+
+pub trait DynamicLinkForRelation {
+    fn metadata(&self) -> RelationEntry;
+}
+
 #[derive(Debug, Clone)]
 pub struct RelationEntry {
     pub from: String,
     pub to: String,
-    /// like 'many_to_many<..>', 'one_to_many<..>', etc. there is no way to have this unique for now.
     pub ty: &'static dyn RelationType,
 }
 
+// meant to identify each relation uniquely accross json_client
 pub trait RelationType: 'static + Send + Sync {
     fn inspect(self: &'static Self) -> &'static str;
 }
@@ -55,87 +90,91 @@ impl fmt::Debug for &'static dyn RelationType {
     }
 }
 
-#[allow(non_camel_case_types)]
-struct many_to_many;
-static MANY_TO_MANY: many_to_many = many_to_many;
-impl RelationType for many_to_many {
-    fn inspect(self: &'static Self) -> &'static str {
-        "many_to_many"
-    }
+// similar to Relation, but includes opinionated behavior to how
+// json_client should handles relations, this exists to avoid an
+// opinionated implementations for Relation
+#[derive(Clone)]
+pub struct DynamicRelation<From, To> {
+    pub from: From,
+    pub to: To,
 }
 
-pub struct RelationEntries {
-    pub entries: Vec<RelationEntry>,
-    #[allow(unused)]
-    private_to_construct_hack: (),
-}
-
-pub trait DynamicLinkForRelation<S: QueryBuilder> {
-    fn make_entry(&self) -> RelationEntry;
-    type SelectOneInput: DeserializeOwned;
-    type SelectOne: SelectOneJsonFragment<S>;
-    fn on_select_one_fr(
-        &self,
-        base_col: String,
-        input: Self::SelectOneInput,
-    ) -> RuntimeResult<Self::SelectOne>;
-}
-
-impl<F, T, S> DynamicLink<S> for Relation<F, T>
-where
-    Relation<F, T>: LinkData<F, Spec: DynamicLinkForRelation<S>>,
-    F: Send + Sync + 'static + Clone,
-    T: Send + Sync + 'static + Clone + CollectionBasic,
-    S: QueryBuilder,
-{
-    type RuntimeEntry = RelationEntries;
-    fn buildtime(&self) -> Vec<Box<dyn Any>> {
-        let entry = self.clone().spec(self.from.clone()).make_entry();
-        vec![Box::new(entry)]
-    }
-
-    fn json_entry(&self) -> Vec<&'static str> {
-        vec!["relation", self.to.table_name_lower_case()]
-    }
-
-    fn finish_building(ctx: &Vec<Box<dyn std::any::Any>>) -> Result<Self::RuntimeEntry, String> {
-        let entries: Vec<RelationEntry> = ctx
-            .into_iter()
-            .filter_map(|e| (**e).downcast_ref::<RelationEntry>())
-            .map(|e| e.clone())
-            .collect();
-
-        let mut set = std::collections::HashSet::new();
-        for entry in entries.iter() {
-            let false_if_existed = set.insert((entry.ty.inspect(), entry.ty.type_id()));
-            if false_if_existed.not() {
-                panic!(
-                    "type {} defines duplicate {}",
-                    std::any::type_name_of_val(entry.ty),
-                    entry.ty.inspect()
-                )
-            }
+impl<F: CollectionBasic, T: CollectionBasic> DynamicRelation<F, T> {
+    #[inline]
+    pub fn into_spec(&self) -> <Relation<F, T> as LinkData<F>>::Spec
+    where
+        Relation<F, T>: LinkData<F>,
+    {
+        Relation {
+            from: self.from.clone(),
+            to: self.to.clone(),
         }
+        .spec(self.from.clone())
+    }
+}
 
-        Ok(RelationEntries {
-            private_to_construct_hack: (),
-            entries,
-        })
+impl<F: CollectionBasic, T: CollectionBasic, S> DynamicLinkBT<S> for DynamicRelation<F, T>
+where
+    S: QueryBuilder,
+    Relation<F, T>: LinkData<F, Spec: DynamicLinkForRelation>,
+    // // inverses should always exist for Relations, but I wonder if I should specify another
+    // type !!
+    // DynamicRelationInverse<T, F>: DynamicLinkBT<S>,
+    Self: DynamicLinkRT<S>,
+{
+    type BuildtimeMeta = RelationEntry;
+
+    fn buildtime_meta(&self) -> Self::BuildtimeMeta {
+        self.into_spec().metadata()
     }
 
-    type SelectOneInput = <<Self as LinkData<F>>::Spec as DynamicLinkForRelation<S>>::SelectOneInput;
+    type RuntimeSpec = Self;
 
-    type SelectOne = <<Self as LinkData<F>>::Spec as DynamicLinkForRelation<S>>::SelectOne;
+    fn finish_building(
+        self,
+        buildtime_meta: &Vec<Box<dyn Any>>,
+    ) -> Result<DynamicRelation<F, T>, std::string::String> {
+        Ok(self)
+    }
+
+    fn push_more(&self) -> Option<Box<dyn crate::json_client::DynamicLinkBTDyn<S>>> {
+        None
+        // Some(Box::new(DynamicRelation {
+        //     from: self.to.clone(),
+        //     to: self.from.clone(),
+        // }))
+    }
+}
+
+impl<F: CollectionBasic, T: CollectionBasic, S> DynamicLinkRT<S> for DynamicRelation<F, T>
+where
+    S: QueryBuilder,
+    Relation<F, T>: LinkData<F, Spec: SelectOneFragment<S, Output: Serialize>>,
+    // relation should have set_id relation, but this may not be true for inverse relation!!
+    // SetId<T, i64>: LinkData<F, Spec: 'static>,
+{
+    #[inline]
+    fn json_selector(&self) -> JsonSelector {
+        JsonSelector {
+            collection: FromParameter::Specific(self.from.table_name_lower_case().to_owned()),
+            body: vec!["relation", self.to.table_name_lower_case()],
+        }
+    }
 
     #[inline]
     fn on_select_one(
         &self,
         base_col: String,
-        input: Self::SelectOneInput,
-        entry: &Self::RuntimeEntry,
-    ) -> crate::json_client::RuntimeResult<Self::SelectOne> {
-        self.clone()
-            .spec(self.from.clone())
-            .on_select_one_fr(base_col, input)
+        input: serde_json::Value,
+    ) -> RuntimeResult<Box<dyn SelectOneJsonFragment<S>>> {
+        if let Err(err) = serde_json::from_value::<empty_object>(input) {
+            return RuntimeResult::RuntimeError(err.to_string());
+        }
+
+        if base_col != self.from.table_name_lower_case() {
+            return RuntimeResult::Skip;
+        }
+
+        RuntimeResult::Ok(Box::new((self.into_spec(), Default::default())))
     }
 }

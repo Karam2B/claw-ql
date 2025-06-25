@@ -26,8 +26,7 @@ pub struct SetNewSpec<Relation, Input> {
 #[rustfmt::skip]
 impl<C, To: HasHandler> LinkData<C> for SetNew<To>
 where
-    C: Clone,
-    To::Handler: Clone,
+    C: CollectionBasic,
     Relation<C, To::Handler>: 
         LinkData<
             C, 
@@ -54,8 +53,7 @@ where
 
 impl<C, To: HasHandler> LinkData<C> for SetNew<Vec<To>>
 where
-    C: Clone,
-    To::Handler: Clone,
+    C: CollectionBasic,
     Relation<C, To::Handler>: LinkData<C, Spec: SetNewTrait<C, To::Handler, Input = Vec<To>>>,
 {
     type Spec = SetNewSpec<<Relation<C, To::Handler> as LinkData<C>>::Spec, Vec<To>>;

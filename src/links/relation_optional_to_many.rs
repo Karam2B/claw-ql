@@ -1,6 +1,5 @@
 use crate::Accept;
 use crate::execute::Execute;
-use crate::links::relation::DynamicLinkForRelation;
 use crate::operations::CollectionOutput;
 use crate::operations::delete_one_op::DeleteOneFragment;
 use crate::prelude::join::left_join;
@@ -154,28 +153,46 @@ where
     }
 }
 
+#[cfg(feature = "serde")]
 mod dynamic_client {
     use serde::Serialize;
     use sqlx::{ColumnIndex, Decode, prelude::Type};
 
     use crate::{
         QueryBuilder,
-        collections::Collection,
+        collections::{Collection, CollectionBasic},
         json_client::RuntimeResult,
-        links::relation::{DynamicLinkForRelation, RelationEntry, RelationType, empty_object},
-        prelude::macro_relation::OptionalToMany,
+        links::relation::{DynamicLinkForRelation, RelationEntry, RelationType},
+        prelude::macro_relation::{OptionalToMany, OptionalToManyInverse},
     };
 
-    impl<S, F, T> DynamicLinkForRelation<S> for OptionalToMany<F, T>
+    impl<F, T> DynamicLinkForRelation for OptionalToManyInverse<F, T>
     where
-        S: QueryBuilder,
-        F: Collection<S, Data: Send + Sync> + Clone + 'static,
-        T: Collection<S, Data: Send + Sync + Serialize> + Clone + 'static,
-        for<'c> &'c str: ColumnIndex<S::Row>,
-        for<'q> i64: Decode<'q, S>,
-        i64: Type<S>,
+        F: CollectionBasic,
+        T: CollectionBasic,
     {
-        fn make_entry(&self) -> RelationEntry {
+        fn metadata(&self) -> crate::links::relation::RelationEntry {
+            struct OptionalToManyInverseIdent;
+            static OPTIONAL_TO_MANY_INVERSE: OptionalToManyInverseIdent = OptionalToManyInverseIdent;
+            impl RelationType for OptionalToManyInverseIdent {
+                fn inspect(self: &'static Self) -> &'static str {
+                    "optional_to_many_inverse"
+                }
+            }
+
+            RelationEntry {
+                from: self.from.table_name().to_owned(),
+                to: self.to.table_name().to_owned(),
+                ty: &OPTIONAL_TO_MANY_INVERSE,
+            }
+        }
+    }
+    impl<F, T> DynamicLinkForRelation for OptionalToMany<F, T>
+    where
+        F: CollectionBasic,
+        T: CollectionBasic,
+    {
+        fn metadata(&self) -> crate::links::relation::RelationEntry {
             struct OptionalToManyIdent;
             static OPTIONAL_TO_MANY: OptionalToManyIdent = OptionalToManyIdent;
             impl RelationType for OptionalToManyIdent {
@@ -190,49 +207,5 @@ mod dynamic_client {
                 ty: &OPTIONAL_TO_MANY,
             }
         }
-
-        type SelectOneInput = empty_object;
-
-        type SelectOne = (OptionalToMany<F, T>, Option<(i64, T::Data)>);
-
-        fn on_select_one_fr(
-            &self,
-            base_col: String,
-            input: empty_object,
-        ) -> RuntimeResult<Self::SelectOne> {
-            if base_col != self.from.table_name() {
-                return RuntimeResult::RuntimeError(format!(
-                    "relation {}->{} is not available",
-                    base_col,
-                    self.to.table_name(),
-                ));
-            }
-
-            return RuntimeResult::Ok((self.clone(), Default::default()));
-        }
     }
 }
-
-// impl<S, F, T> DynamicLinkForRelation<S> for OptionalToMany<F, T>
-// where
-//     F: 'static,
-//     T: 'static,
-//     Self: Clone,
-//     Self: SelectOneFragment<S, Output: Serialize, Inner: 'static>,
-//     S: QueryBuilder,
-// {
-//     fn global_ident(&self) -> &'static str {
-//         "optional_to_many"
-//     }
-//     fn on_each_select_one_request(
-//         &self,
-//         input: serde_json::Value,
-//     ) -> Result<Box<dyn SelectOneJsonFragment<S>>, String> {
-//         if input.is_object().not() {
-//             return Err("many_to_many relation is only input is {}".to_string());
-//         }
-//         let this = self.clone();
-//
-//         Ok(Box::new((this, Default::default())))
-//     }
-// }

@@ -6,7 +6,7 @@ use crate::{
     statements::{delete_st::DeleteSt, select_st::SelectSt, update_st::UpdateSt},
 };
 
-pub trait CollectionBasic {
+pub trait CollectionBasic: Sized + Send + Sync + Default + Clone + 'static {
     fn table_name(&self) -> &'static str;
     fn table_name_lower_case(&self) -> &'static str;
     fn members(&self) -> Vec<String>;
@@ -14,7 +14,7 @@ pub trait CollectionBasic {
 }
 
 pub trait HasHandler {
-    type Handler: Default;
+    type Handler: CollectionBasic;
 }
 
 pub trait Collection<S>: Sized + Send + Sync + CollectionBasic<LinkedData = Self::Data> {
