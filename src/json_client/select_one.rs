@@ -34,10 +34,13 @@ where
     pub async fn select_one(&self, input: Value) -> Result<Value, String> {
         let input: SelectOneInput =
             serde_json::from_value(input).map_err(|e| format!("invalid input: {e:?}"))?;
-        self.select_one_serialized(input).await
+        Ok(serde_json::to_value(self.select_one_serialized(input).await?).unwrap())
     }
 
-    pub async fn select_one_serialized(&self, mut input: SelectOneInput) -> Result<Value, String> {
+    pub async fn select_one_serialized(
+        &self,
+        mut input: SelectOneInput,
+    ) -> Result<LinkedOutput<Value, Map<String, Value>>, String> {
         let c = self
             .collections
             .get(&input.collection)
@@ -103,7 +106,7 @@ where
             .await;
 
         let mut res = match res {
-            Err(sqlx::Error::RowNotFound) => return Ok(serde_json::Value::Null),
+            Err(sqlx::Error::RowNotFound) => return Err("nothing found".to_string()),
             Err(err) => panic!("bug: {err}"),
             Ok(ok) => ok,
         };
@@ -115,7 +118,7 @@ where
         fn build_back_as_map(input: HashMap<Vec<&'static str>, ()>) {}
 
         let links = {
-            let mut map = HashMap::new();
+            let mut map = Map::new();
             for (mut keys, value) in links.into_iter().map(|e| (e.0, e.1.take())) {
                 let last = keys.body.pop().unwrap();
                 let mut reff = None;
@@ -139,7 +142,7 @@ where
             links,
         };
 
-        Ok(serde_json::to_value(res).unwrap())
+        Ok(res)
     }
 }
 

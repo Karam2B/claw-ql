@@ -4,6 +4,8 @@ use std::marker::PhantomData;
 
 use sqlx::{Database, Pool, Sqlite, SqlitePool};
 
+#[cfg(feature = "http")]
+pub mod http;
 pub mod build_tuple;
 pub mod builder_pattern;
 pub mod collections;

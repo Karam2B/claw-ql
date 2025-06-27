@@ -23,14 +23,14 @@ pub use select_one::SelectOneJsonFragment;
 // pub use insert_one::InsertOneJsonFragment;
 
 pub struct JsonClient<S: Database> {
-    pub(crate) collections: HashMap<String, Arc<dyn JsonCollection<S>>>,
-    pub(crate) links: HashMap<JsonSelector, Arc<dyn DynamicLinkRT<S>>>,
-    pub(crate) db: Pool<S>,
+    pub collections: HashMap<String, Arc<dyn JsonCollection<S>>>,
+    pub links: HashMap<JsonSelector, Arc<dyn DynamicLinkRT<S>>>,
+    pub db: Pool<S>,
 }
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct JsonSelector {
-    /// mimics how rust infer LinkData<D> trait
+    /// mimics how rust infer `D` in `LinkData<D>` trait
     pub collection: FromParameter,
     /// mimics how what follows the token `for` in impl block
     /// but this is limited to how json read json maps
@@ -188,7 +188,7 @@ pub trait DynamicLinkBT<S> {
     }
 }
 
-pub trait DynamicLinkRT<S>: 'static {
+pub trait DynamicLinkRT<S>: 'static + Send + Sync {
     fn json_selector(&self) -> JsonSelector;
     fn on_select_one(
         &self,
@@ -308,9 +308,9 @@ pub fn map_is_empty(map: &mut Map<String, Value>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Not;
-    use serde_json::json;
     use crate::json_client::map_is_empty;
+    use serde_json::json;
+    use std::ops::Not;
 
     #[test]
     fn map_is_empty_1() {

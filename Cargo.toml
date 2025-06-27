@@ -13,6 +13,9 @@ tracing = { version = "0.1.40", optional = true }
 serde_json = { version = "1.0.117", optional = true }
 serde = { version = "1.0.203", optional = true }
 convert_case = "0.8.0"
+tower-service = { version = "0.3.3", optional = true }
+hyper = { version = "1.6.0", optional = true }
+axum = { version = "0.8.4", optional = true }
 
 [dev-dependencies]
 tracing-subscriber = "0.3.18"
@@ -20,12 +23,16 @@ tracing = "0.1.40"
 tokio = { version = "1.37.0", features = ["full"] }
 pretty_assertions = "1"
 sqlx = { version = "0.8.5", features = ["runtime-tokio"] }
-# tracing-test-macro = { path = "../tracing-test/tracing-test-macro" }
+axum = { version = "0.8.4" }
+futures = "0.3.31"
+tower-service = { version = "0.3.3" }
+tower = { version = "0.5.2" }
+hyper = { version = "1.6.0" }
 
 [features]
-default = ["sqlite", "serde", "beta", "trace"]
+default = ["sqlite", "trace", "http"]
 waiting_min_specialization = []
-beta = []
+http = ["serde", "dep:tower-service", "dep:hyper", "dep:axum"]
 serde = ["dep:serde_json", "dep:serde"]
 trace = ["dep:tracing"]
 sqlite = ["sqlx/sqlite"]
