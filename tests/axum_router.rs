@@ -33,7 +33,7 @@ async fn axum_router() {
 
     // axum works
     let router: Router<()> = Router::new()
-        .route("/hi", get(|| async { "dsf" }))
+        .route("/hi", get(|| async { Json(json!(2)) }))
         .nest("/api", schema.1.unwrap().as_router());
 
     let req = Request::builder()
@@ -58,7 +58,7 @@ async fn axum_router() {
     )
     .unwrap();
 
-    let tobe = json!("sdf").to_string();
+    let tobe = json!(2).to_string();
 
     assert_eq!(res, tobe);
 }

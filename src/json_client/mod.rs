@@ -7,7 +7,8 @@ use crate::{QueryBuilder, collections::Collection, prelude::stmt::SelectSt};
 use builder_pattern::to_json_client;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, from_value};
-use sqlx::{Database, Pool};
+use sqlx::sqlite::SqliteRow;
+use sqlx::{Database, Pool, Sqlite};
 use std::any::Any;
 use std::marker::PhantomData;
 use std::{collections::HashMap, pin::Pin, sync::Arc};
@@ -21,6 +22,54 @@ pub use select_one::SelectOneJsonFragment;
 // pub use delete_one::DeleteOneJsonFragment;
 // pub mod insert_one;
 // pub use insert_one::InsertOneJsonFragment;
+
+mod abstract_over_json_client {
+    use std::sync::Arc;
+
+    use sqlx::{Database, Sqlite, sqlite::SqliteRow};
+
+    use crate::QueryBuilder;
+
+    pub trait DatabaseForJC: Sized + Database + QueryBuilder {
+        fn this_as_jc_actions() -> Arc<dyn JsonClientActions<Self>>;
+    }
+
+    /// this trait is to eliminate all the where predicate by doing things
+    /// more dynamicly, this is often come at performance cost at the expence
+    /// of "cleaner" code, but I think that abstracting over JsonClient is
+    /// rare enough to justify this cost
+    pub trait JsonClientActions<S>: Send + Sync + 'static {
+        fn i64_decode(&self, row: &S::Row, name: &str) -> i64
+        where
+            S: Database;
+        // this method is to remvoe two where predicate, but is it worth creating new heap allocation? in theory that is a shortcumming of Rust, and a cost whoever want to abstract over JsonClient has to pay!
+        //
+        // fn select_one_op(
+        //     &self,
+        //     st: SelectSt<S>,
+        //     c: &dyn JsonCollection<S>,
+        //     links: &mut Vec<(JsonSelector, Box<dyn SelectOneJsonFragment<S>>)>,
+        //     pool: Pool<S>,
+        // ) -> Box<dyn Future<Output = Result<(), ()>>>
+        // where
+        //     S: Database + QueryBuilder;
+    }
+
+    impl DatabaseForJC for Sqlite {
+        fn this_as_jc_actions() -> Arc<dyn JsonClientActions<Self>> {
+            Arc::new(Sqlite)
+        }
+    }
+
+    impl JsonClientActions<Sqlite> for Sqlite {
+        #[inline]
+        #[track_caller]
+        fn i64_decode(&self, row: &SqliteRow, name: &str) -> i64 {
+            use sqlx::Row;
+            row.get(name)
+        }
+    }
+}
 
 pub struct JsonClient<S: Database> {
     pub collections: HashMap<String, Arc<dyn JsonCollection<S>>>,
@@ -47,7 +96,7 @@ pub enum FromParameter {
 
 impl<S> JsonClient<S>
 where
-    S: Database,
+    S: QueryBuilder,
 {
     pub fn init(
         db: Pool<S>,

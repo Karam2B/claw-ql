@@ -11,7 +11,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 #[allow(non_camel_case_types)]
-pub struct to_json_client<S: Database>(pub Pool<S>);
+pub struct to_json_client<S: QueryBuilder>(pub Pool<S>);
 
 type ThisContext<S> = JsonClientBuilding<S>;
 
@@ -24,7 +24,7 @@ pub struct JsonClientBuilding<S: Database> {
 
 impl<S> InitializeContext for to_json_client<S>
 where
-    S: Database,
+    S: QueryBuilder,
 {
     type Context = JsonClientBuilding<S>;
     fn initialize_context(self) -> Self::Context {
@@ -39,7 +39,7 @@ where
 
 impl<N, S> AddCollection<N> for to_json_client<S>
 where
-    S: Database + QueryBuilder,
+    S: QueryBuilder,
     N: JsonCollection<S> + Clone,
 {
     type This = to_json_client<S>;
@@ -128,9 +128,7 @@ where
             let out = links.insert(json_selector, dynlink_rt);
 
             if out.is_some() {
-                panic!(
-                    "internal bug: should not exist if the subsetting is sound",
-                )
+                panic!("internal bug: should not exist if the subsetting is sound",)
             }
         }
 
