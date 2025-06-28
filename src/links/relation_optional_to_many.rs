@@ -5,10 +5,8 @@ use crate::operations::delete_one_op::DeleteOneFragment;
 use crate::prelude::join::left_join;
 use crate::{
     QueryBuilder,
-    operations::{
-        collections::{Collection, OnMigrate},
-        select_one_op::SelectOneFragment,
-    },
+    migration::OnMigrate,
+    operations::{collections::Collection, select_one_op::SelectOneFragment},
     prelude::{col, join, stmt::SelectSt},
 };
 use convert_case::{Case, Casing};
@@ -173,7 +171,8 @@ mod dynamic_client {
     {
         fn metadata(&self) -> crate::links::relation::RelationEntry {
             struct OptionalToManyInverseIdent;
-            static OPTIONAL_TO_MANY_INVERSE: OptionalToManyInverseIdent = OptionalToManyInverseIdent;
+            static OPTIONAL_TO_MANY_INVERSE: OptionalToManyInverseIdent =
+                OptionalToManyInverseIdent;
             impl RelationType for OptionalToManyInverseIdent {
                 fn inspect(self: &'static Self) -> &'static str {
                     "optional_to_many_inverse"

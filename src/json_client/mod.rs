@@ -336,7 +336,7 @@ pub fn from_map(map: &mut Map<String, Value>, from: &Vec<&'static str>) -> Optio
         );
     } else {
         panic!(
-            "accessor more that 3 should be supported via recursive function but need unit testing to make sure it is valid"
+            "accessor of more that 3 \"{from:?}\" can be supported via recursive function but need unit testing to make sure it is valid"
         );
     }
 }

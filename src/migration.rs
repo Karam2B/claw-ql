@@ -1,7 +1,16 @@
+use crate::QueryBuilder;
 use crate::builder_pattern::{AddCollection, AddLink, Finish, InitializeContext};
-use crate::{QueryBuilder, collections::OnMigrate};
-use sqlx::{Database, Pool, Sqlite};
+use sqlx::{Database, Executor, Pool, Sqlite};
 use std::{marker::PhantomData, pin::Pin};
+
+pub trait OnMigrate<S> {
+    fn custom_migration<'e>(
+        &self,
+        exec: impl for<'q> Executor<'q, Database = S> + Clone,
+    ) -> impl Future<Output = ()>
+    where
+        S: QueryBuilder;
+}
 
 #[allow(non_camel_case_types)]
 pub struct to_migrate<S>(pub S);

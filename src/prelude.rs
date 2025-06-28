@@ -18,7 +18,7 @@ pub mod macro_derive_collection {
     pub use crate::QueryBuilder;
     pub use crate::collections::CollectionBasic;
     pub use crate::collections::HasHandler;
-    pub use crate::collections::OnMigrate;
+    pub use crate::migration::OnMigrate;
     pub use crate::execute::Execute;
     pub use crate::expressions::exports::col_type_check_if_null;
     pub use crate::expressions::exports::primary_key;

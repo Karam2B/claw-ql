@@ -1,16 +1,17 @@
 use super::LinkData;
 use crate::{
     QueryBuilder,
-    collections::{CollectionBasic, OnMigrate},
+    collections::CollectionBasic,
     json_client::{
         DynamicLinkBT, DynamicLinkRT, FromParameter, JsonSelector, RuntimeResult,
         SelectOneJsonFragment,
     },
     links::set_id::SetId,
+    migration::OnMigrate,
     operations::select_one_op::SelectOneFragment,
 };
-use core::fmt;
 use convert_case::{Case, Casing};
+use core::fmt;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::Executor;
 use std::{any::Any, ops::Not};

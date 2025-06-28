@@ -2,7 +2,8 @@ use super::LinkData;
 use super::relation::Relation;
 use super::relation_many_to_many::ManyToMany;
 use crate::QueryBuilder;
-use crate::collections::{Collection, OnMigrate};
+use crate::collections::Collection;
+use crate::migration::OnMigrate;
 use crate::prelude::col;
 use crate::prelude::macro_relation::OptionalToMany;
 use crate::{
@@ -31,7 +32,7 @@ impl<From, To> CountingSupportedIn for OptionalToMany<From, To> {}
 
 impl<From, To> LinkData<From> for count<To>
 where
-    From: CollectionBasic ,
+    From: CollectionBasic,
     To: CollectionBasic,
     Relation<From, To>: LinkData<From, Spec: CountingSupportedIn>,
 {

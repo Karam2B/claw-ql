@@ -6,51 +6,143 @@ use crate::{
     statements::{delete_st::DeleteSt, select_st::SelectSt, update_st::UpdateSt},
 };
 
-pub trait CollectionBasic: Sized + Send + Sync + Default + Clone + 'static {
-    fn table_name(&self) -> &'static str;
-    fn table_name_lower_case(&self) -> &'static str;
-    fn members(&self) -> Vec<String>;
-    type LinkedData;
+#[cfg(feature = "experimental_id_trait")]
+pub use id::*;
+#[cfg(not(feature = "experimental_id_trait"))]
+pub use no_id::*;
+
+mod id {
+    use std::marker::PhantomData;
+
+    use sqlx::{Database, Decode, Encode, Executor, Sqlite, prelude::Type};
+
+    use crate::{
+        QueryBuilder,
+        prelude::stmt::InsertOneSt,
+        statements::{delete_st::DeleteSt, select_st::SelectSt, update_st::UpdateSt},
+    };
+    pub trait CollectionBasic: Sized + Send + Sync + Default + Clone + 'static {
+        fn table_name(&self) -> &'static str;
+        fn table_name_lower_case(&self) -> &'static str;
+        fn members(&self) -> Vec<String>;
+        type LinkedData;
+    }
+
+    pub trait HasHandler {
+        type Handler: CollectionBasic;
+    }
+
+    pub trait Id<S> {
+        type Data;
+
+        fn on_migrate() -> &'static str;
+
+        fn ident() -> &'static str;
+    }
+
+    pub struct SingleIncremintalInt;
+
+    impl Id<Sqlite> for SingleIncremintalInt {
+        type Data = i64;
+
+        fn on_migrate() -> &'static str {
+            "PRIMARY KEY AUTOINCREMENT"
+        }
+
+        fn ident() -> &'static str {
+            "id"
+        }
+    }
+
+    pub trait Collection<S>:
+        Sized + Send + Sync + CollectionBasic<LinkedData = Self::Data>
+    {
+        type Partial;
+        type Data;
+
+        // a simplification would be
+        // IdData: Id<S> + ...
+        //
+        // but that will force
+        // impl Id<Sqlite> for i32
+        //
+        // this is restriction because sometime I want to
+        // have different id implementaion for the same i32
+        type IdData: Type<S> + for<'c> Decode<'c, S> + for<'c> Encode<'c, S>
+        where
+            S: Database;
+        type Id: Id<S, Data = Self::IdData>
+        where
+            S: Database;
+        // where
+        //     <Self::Id as Id>::Data: Type<S> + for<'c> Decode<'c, S> + for<'c> Encode<'c, S>;
+        fn on_select(&self, stmt: &mut SelectSt<S>)
+        where
+            S: QueryBuilder;
+
+        fn on_insert(&self, this: Self::Data, stmt: &mut InsertOneSt<S>)
+        where
+            S: sqlx::Database;
+        fn on_update(&self, this: Self::Partial, stmt: &mut UpdateSt<S>)
+        where
+            S: QueryBuilder;
+
+        fn from_row_noscope(&self, row: &S::Row) -> Self::Data
+        where
+            S: Database;
+        fn from_row_scoped(&self, row: &S::Row) -> Self::Data
+        where
+            S: Database;
+    }
 }
 
-pub trait HasHandler {
-    type Handler: CollectionBasic;
-}
+mod no_id {
+    use sqlx::{Database, Executor};
 
-pub trait Collection<S>: Sized + Send + Sync + CollectionBasic<LinkedData = Self::Data> {
-    type Partial;
-    type Data;
-    fn on_select(&self, stmt: &mut SelectSt<S>)
-    where
-        S: QueryBuilder;
+    use crate::{
+        QueryBuilder,
+        prelude::stmt::InsertOneSt,
+        statements::{delete_st::DeleteSt, select_st::SelectSt, update_st::UpdateSt},
+    };
+    pub trait CollectionBasic: Sized + Send + Sync + Default + Clone + 'static {
+        fn table_name(&self) -> &'static str;
+        fn table_name_lower_case(&self) -> &'static str;
+        fn members(&self) -> Vec<String>;
+        type LinkedData;
+    }
 
-    fn on_insert(&self, this: Self::Data, stmt: &mut InsertOneSt<S>)
-    where
-        S: sqlx::Database;
-    fn on_update(&self, this: Self::Partial, stmt: &mut UpdateSt<S>)
-    where
-        S: QueryBuilder;
+    pub trait HasHandler {
+        type Handler: CollectionBasic;
+    }
 
-    fn from_row_noscope(&self, row: &S::Row) -> Self::Data
-    where
-        S: Database;
-    fn from_row_scoped(&self, row: &S::Row) -> Self::Data
-    where
-        S: Database;
-}
+    pub trait Collection<S>:
+        Sized + Send + Sync + CollectionBasic<LinkedData = Self::Data>
+    {
+        type Partial;
+        type Data;
+        fn on_select(&self, stmt: &mut SelectSt<S>)
+        where
+            S: QueryBuilder;
 
-pub trait OnMigrate<S> {
-    fn custom_migration<'e>(
-        &self,
-        exec: impl for<'q> Executor<'q, Database = S> + Clone,
-    ) -> impl Future<Output = ()>
-    where
-        S: QueryBuilder;
+        fn on_insert(&self, this: Self::Data, stmt: &mut InsertOneSt<S>)
+        where
+            S: sqlx::Database;
+        fn on_update(&self, this: Self::Partial, stmt: &mut UpdateSt<S>)
+        where
+            S: QueryBuilder;
+
+        fn from_row_noscope(&self, row: &S::Row) -> Self::Data
+        where
+            S: Database;
+        fn from_row_scoped(&self, row: &S::Row) -> Self::Data
+        where
+            S: Database;
+    }
 }
 
 mod on_migrate_tuple_impls {
-    use super::OnMigrate;
     use crate::QueryBuilder;
+    use crate::migration::OnMigrate;
     use paste::paste;
     use sqlx::{Database, Executor};
 

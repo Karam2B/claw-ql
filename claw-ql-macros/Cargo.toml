@@ -19,3 +19,8 @@ convert_case = "0.8.0"
 proc-macro2 = "1.0.33"
 quote = "1.0.33"
 syn = { version = "2.0.29", features = ["full", "visit", "visit-mut", "extra-traits"] }
+
+[features]
+default = []
+experimental_id_trait  = []
+

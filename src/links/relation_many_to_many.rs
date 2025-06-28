@@ -2,7 +2,7 @@ use crate::QueryBuilder;
 use crate::collections::Collection;
 use crate::operations::CollectionOutput;
 use crate::{
-    collections::OnMigrate, operations::select_one_op::SelectOneFragment, prelude::stmt::SelectSt,
+    migration::OnMigrate, operations::select_one_op::SelectOneFragment, prelude::stmt::SelectSt,
 };
 use sqlx::{Sqlite, sqlite::SqliteRow};
 
