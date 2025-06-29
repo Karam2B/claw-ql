@@ -1,25 +1,21 @@
-use sqlx::{Database, Executor};
-
 use crate::{
     QueryBuilder,
-    prelude::stmt::InsertOneSt,
     statements::{delete_st::DeleteSt, select_st::SelectSt, update_st::UpdateSt},
 };
 
-#[cfg(feature = "experimental_id_trait")]
+#[cfg(feature = "unstable_id_trait")]
 pub use id::*;
-#[cfg(not(feature = "experimental_id_trait"))]
+#[cfg(not(feature = "unstable_id_trait"))]
 pub use no_id::*;
 
 mod id {
-    use std::marker::PhantomData;
 
-    use sqlx::{Database, Decode, Encode, Executor, Sqlite, prelude::Type};
+    use sqlx::{Database, Decode, Encode, Sqlite, prelude::Type};
 
     use crate::{
         QueryBuilder,
         prelude::stmt::InsertOneSt,
-        statements::{delete_st::DeleteSt, select_st::SelectSt, update_st::UpdateSt},
+        statements::{select_st::SelectSt, update_st::UpdateSt},
     };
     pub trait CollectionBasic: Sized + Send + Sync + Default + Clone + 'static {
         fn table_name(&self) -> &'static str;
@@ -96,13 +92,13 @@ mod id {
     }
 }
 
-mod no_id {
-    use sqlx::{Database, Executor};
+pub mod no_id {
+    use sqlx::Database;
 
     use crate::{
         QueryBuilder,
         prelude::stmt::InsertOneSt,
-        statements::{delete_st::DeleteSt, select_st::SelectSt, update_st::UpdateSt},
+        statements::{select_st::SelectSt, update_st::UpdateSt},
     };
     pub trait CollectionBasic: Sized + Send + Sync + Default + Clone + 'static {
         fn table_name(&self) -> &'static str;

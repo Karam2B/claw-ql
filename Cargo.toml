@@ -30,9 +30,9 @@ tower = { version = "0.5.2" }
 hyper = { version = "1.6.0" }
 
 [features]
-default = ["sqlite", "trace", "http", "experimental_id_trait"]
+default = ["sqlite", "trace", "http", "unstable_id_trait"]
 waiting_min_specialization = []
-experimental_id_trait = ["claw-ql-macros/experimental_id_trait"]
+unstable_id_trait = ["claw-ql-macros/experimental_id_trait"]
 http = ["serde", "dep:tower-service", "dep:hyper", "dep:axum"]
 serde = ["dep:serde_json", "dep:serde"]
 trace = ["dep:tracing"]
@@ -40,4 +40,4 @@ sqlite = ["sqlx/sqlite"]
 
 [[example]]
 name= "id_concept"
-required-features = ["experimental_id_trait"]
+required-features = ["unstable_id_trait"]
