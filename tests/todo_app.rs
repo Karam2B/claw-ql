@@ -1,12 +1,11 @@
 use claw_ql::{
     builder_pattern::BuilderPattern,
     filters::by_id_mod::by_id,
-    json_client::builder_pattern::to_json_client,
+    json_client::{builder_pattern::to_json_client, JsonClient},
     links::{relation::Relation, set_id::SetId, set_new::SetNew},
     migration::to_migrate,
     operations::{
-        CollectionOutput, LinkedOutput, delete_one_op::delete_one, insert_one_op::insert_one,
-        select_one_op::select_one, update_one_op::update_one,
+        delete_one_op::delete_one, insert_one_op::insert_one, select_one_op::select_one, update_one_op::update_one, CollectionOutput, LinkedOutput
     },
     update_mod::update,
 };
@@ -195,6 +194,7 @@ async fn _workflow_generic() {
 async fn workflow_dynamic() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
+    // JsonClient::collect_from_inventory().finish();
     let schema = {
         BuilderPattern::default()
             .build_component(to_json_client(pool.clone()))

@@ -30,7 +30,7 @@ tower = { version = "0.5.2" }
 hyper = { version = "1.6.0" }
 
 [features]
-default = ["sqlite", "trace", "http", "unstable_id_trait"]
+default = ["sqlite", "trace", "http"]
 waiting_min_specialization = []
 unstable_id_trait = ["claw-ql-macros/experimental_id_trait"]
 http = ["serde", "dep:tower-service", "dep:hyper", "dep:axum"]

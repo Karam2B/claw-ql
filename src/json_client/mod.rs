@@ -97,9 +97,19 @@ impl<S> JsonClient<S>
 where
     S: QueryBuilder,
 {
-    pub fn init(
+    pub fn new(
         db: Pool<S>,
     ) -> BuilderPattern<PhantomData<(to_json_client<S>,)>, (JsonClientBuilding<S>,)> {
+        BuilderPattern::default()
+            .build_component(to_json_client(db))
+            .start()
+    }
+}
+impl JsonClient<sqlx::Any> {
+    pub fn new_from_inventory(
+        db: Pool<sqlx::Any>,
+    ) -> BuilderPattern<PhantomData<(to_json_client<sqlx::Any>,)>, (JsonClientBuilding<sqlx::Any>,)>
+    {
         BuilderPattern::default()
             .build_component(to_json_client(db))
             .start()
