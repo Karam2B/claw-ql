@@ -2,7 +2,7 @@
 #![deny(unused_must_use)]
 use std::marker::PhantomData;
 
-use sqlx::{Database, Pool, Sqlite, SqlitePool};
+use sqlx::{AnyPool, Database, Pool, Sqlite, SqlitePool};
 
 pub mod build_tuple;
 pub mod builder_pattern;
@@ -13,6 +13,8 @@ pub mod filters;
 #[cfg(feature = "http")]
 pub mod http;
 mod identity_management;
+#[cfg(feature = "inventory")]
+pub mod inventory;
 pub mod json_client;
 pub mod links;
 pub mod migration;
@@ -85,6 +87,11 @@ pub trait ConnectInMemory: Database {
     fn connect_in_memory() -> impl Future<Output = Pool<Self>>;
 }
 
+impl ConnectInMemory for sqlx::Any {
+    fn connect_in_memory() -> impl Future<Output = Pool<Self>> {
+        async { AnyPool::connect("sqlite::memory:").await.unwrap() }
+    }
+}
 impl ConnectInMemory for Sqlite {
     fn connect_in_memory() -> impl Future<Output = Pool<Self>> {
         async { SqlitePool::connect("sqlite::memory:").await.unwrap() }

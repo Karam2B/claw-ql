@@ -18,11 +18,11 @@ pub mod macro_derive_collection {
     pub use crate::QueryBuilder;
     pub use crate::collections::CollectionBasic;
     pub use crate::collections::HasHandler;
-    pub use crate::migration::OnMigrate;
     pub use crate::execute::Execute;
     pub use crate::expressions::exports::col_type_check_if_null;
     pub use crate::expressions::exports::primary_key;
     pub use crate::expressions::primary_key::DatabaseDefaultPrimaryKey;
+    pub use crate::migration::OnMigrate;
     pub use crate::operations::collections::Collection;
     pub use crate::prelude::col;
     pub use crate::statements::create_table_st::CreateTableSt;
@@ -55,4 +55,12 @@ pub mod macro_relation {
     // supported relations
     pub use crate::links::relation_many_to_many::*;
     pub use crate::links::relation_optional_to_many::*;
+}
+
+#[cfg(feature = "inventory")]
+pub mod inventory {
+    pub use crate::inventory::*;
+    pub use crate::links::relation::Relation;
+    pub use inventory::submit;
+    pub use std::sync::Arc;
 }

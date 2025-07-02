@@ -1,7 +1,7 @@
 use claw_ql::{
     builder_pattern::BuilderPattern,
     filters::by_id_mod::by_id,
-    json_client::{builder_pattern::to_json_client, JsonClient},
+    json_client::{builder_pattern::to_json_client},
     links::{relation::Relation, set_id::SetId, set_new::SetNew},
     migration::to_migrate,
     operations::{
@@ -194,7 +194,6 @@ async fn _workflow_generic() {
 async fn workflow_dynamic() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
-    // JsonClient::collect_from_inventory().finish();
     let schema = {
         BuilderPattern::default()
             .build_component(to_json_client(pool.clone()))

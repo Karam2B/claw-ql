@@ -36,6 +36,7 @@ impl Parse for TwoIdent {
 }
 
 pub fn many_to_many(rest: TwoIdent) -> TokenStream {
+    let mut q = quote::quote!();
     let to_lower_case = Ident::new(
         rest.to.to_string().to_case(Case::Snake).as_str(),
         rest.to.span(),
@@ -45,6 +46,20 @@ pub fn many_to_many(rest: TwoIdent) -> TokenStream {
         rest.from.to_string().to_case(Case::Snake).as_str(),
         rest.from.span(),
     );
+
+    if cfg!(feature = "inventory") {
+        q = quote::quote!(
+            const _: () = {
+                use ::claw_ql::prelude::inventory::*;
+
+                submit!(Migration { obj: || Box::new(Relation(from: #from_lower_case, to: #to_lower_case)) });
+                submit!(Migration { obj: || Box::new(Relation(to: #to_lower_case, from: #from_lower_case)) });
+                submit!(Link { obj: || Box::new(Relation(from: #from_lower_case, to: #to_lower_case)) });
+                submit!(Link { obj: || Box::new(Relation(to: #to_lower_case, from: #from_lower_case)) });
+            };
+        );
+    }
+
     quote! {
         const _: () = {
             use ::claw_ql::prelude::macro_relation::*;
@@ -83,6 +98,8 @@ pub fn many_to_many(rest: TwoIdent) -> TokenStream {
                 }
             }
         };
+
+        #q
     }
 }
 

@@ -180,7 +180,6 @@ mod tests {
 
         assert_eq!(bind_order, vec!["1".to_string(), "2".to_string()]);
 
-
         // even when we call offset before where,
         // PositionalQuery should know to reorder them
         BIND_ORDER.lock().unwrap().drain(..);

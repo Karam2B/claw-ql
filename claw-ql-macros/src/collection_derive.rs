@@ -206,6 +206,17 @@ for<'s> &'s str: sqlx_::ColumnIndex<<S as Database>::Row>,
 }
     };));
 
+    if cfg!(feature = "inventory") {
+        ts.extend(quote::quote!(
+            const _: () = {
+                use ::claw_ql::prelude::inventory::*;
+
+                submit!(Migration { obj: || Box::new(#table_name_lower_case_ident) });
+                submit!(Collection { obj: || Box::new(#table_name_lower_case_ident) });
+            };
+        ));
+    }
+
     return ts;
 }
 

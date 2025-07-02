@@ -28,8 +28,8 @@ pub trait Finish {
 }
 
 pub struct BuilderPattern<Components, Context> {
-    __components: Components,
-    __context: Context,
+    pub(crate) __components: Components,
+    pub(crate) __context: Context,
 }
 
 impl Default for BuilderPattern<(), ()> {

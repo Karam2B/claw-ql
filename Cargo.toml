@@ -7,15 +7,18 @@ edition = "2024"
 claw-ql-macros = { path = "./claw-ql-macros", version = "0.1.0" }
 sqlx = { version = "0.8.5" }
 paste = "1.0.15"
+convert_case = "0.8.0"
 # feature trace
 tracing = { version = "0.1.40", optional = true }
 # feature serde
-serde_json = { version = "1.0.117", optional = true }
 serde = { version = "1.0.203", optional = true }
-convert_case = "0.8.0"
+# feature http
+serde_json = { version = "1.0.117", optional = true }
 tower-service = { version = "0.3.3", optional = true }
 hyper = { version = "1.6.0", optional = true }
 axum = { version = "0.8.4", optional = true }
+# feature inventory
+inventory = { version = "0.3.20", optional = true }
 
 [dev-dependencies]
 tracing-subscriber = "0.3.18"
@@ -28,10 +31,12 @@ futures = "0.3.31"
 tower-service = { version = "0.3.3" }
 tower = { version = "0.5.2" }
 hyper = { version = "1.6.0" }
+inventory = { version = "0.3.20" }
 
 [features]
 default = ["sqlite", "trace", "http"]
 waiting_min_specialization = []
+inventory = ["dep:inventory", "claw-ql-macros/inventory"]
 unstable_id_trait = ["claw-ql-macros/experimental_id_trait"]
 http = ["serde", "dep:tower-service", "dep:hyper", "dep:axum"]
 serde = ["dep:serde_json", "dep:serde"]

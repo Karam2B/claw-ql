@@ -15,6 +15,8 @@ pub trait OnMigrate<S> {
 #[allow(non_camel_case_types)]
 pub struct to_migrate<S>(pub S);
 
+
+
 impl Clone for to_migrate<Sqlite> {
     fn clone(&self) -> Self {
         to_migrate(Sqlite)
@@ -67,7 +69,7 @@ impl<S> Finish for to_migrate<S> {
     fn build_component(ctx: Self::Context) -> Self::Result {
         MigrateResult {
             pd: PhantomData,
-            collections: ctx,
+            migrations: ctx,
         }
     }
 }
@@ -97,8 +99,27 @@ where
 
 #[must_use]
 pub struct MigrateResult<S> {
-    collections: Vec<Box<dyn OnMigrateDyn<S>>>,
+    migrations: Vec<Box<dyn OnMigrateDyn<S>>>,
     pd: PhantomData<S>,
+}
+
+#[cfg(feature = "inventory")]
+impl MigrateResult<sqlx::Any> {
+    pub fn new_from_inventory() -> MigrateResult<sqlx::Any> {
+        use crate::inventory::Migration;
+        use inventory::iter;
+
+        let mut migrations = vec![];
+
+        for each in inventory::iter::<Migration> {
+            migrations.push((each.obj)());
+        }
+
+        MigrateResult {
+            migrations,
+            pd: PhantomData,
+        }
+    }
 }
 
 impl<S> MigrateResult<S>
@@ -110,8 +131,9 @@ where
     where
         S: crate::QueryBuilder,
     {
-        for each in self.collections.iter() {
+        for each in self.migrations.iter() {
             each.custom_migration(exec.clone()).await;
         }
     }
 }
+
