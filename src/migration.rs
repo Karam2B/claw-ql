@@ -15,8 +15,6 @@ pub trait OnMigrate<S> {
 #[allow(non_camel_case_types)]
 pub struct to_migrate<S>(pub S);
 
-
-
 impl Clone for to_migrate<Sqlite> {
     fn clone(&self) -> Self {
         to_migrate(Sqlite)
@@ -137,3 +135,13 @@ where
     }
 }
 
+// mod migrations {
+//     use claw_ql_macros::flat_struct;
+//     use serde_json::json;
+//
+//
+//
+//     fn schema() {
+//         let s = json!({});
+//     }
+// }

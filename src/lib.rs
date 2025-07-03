@@ -1,7 +1,6 @@
 #![allow(unused)]
 #![deny(unused_must_use)]
 use std::marker::PhantomData;
-
 use sqlx::{AnyPool, Database, Pool, Sqlite, SqlitePool};
 
 pub mod build_tuple;

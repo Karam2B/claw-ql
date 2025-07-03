@@ -2,6 +2,7 @@ use proc_macro::TokenStream;
 use proc_macro_error::proc_macro_error;
 
 mod collection_derive;
+mod flat_struct;
 mod pdev;
 mod relation;
 #[cfg(test)]
@@ -80,6 +81,19 @@ pub fn pdev(attr: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     pdev::main(input, mod_name).into()
+}
+
+#[proc_macro_attribute]
+#[proc_macro_error]
+pub fn flat_struct(_attr: TokenStream, input: TokenStream) -> TokenStream {
+    let result = match syn::parse::<flat_struct::ItemNestedStruct>(input) {
+        Ok(data) => data,
+        Err(err) => {
+            return err.to_compile_error().into();
+        }
+    };
+
+    result.into()
 }
 
 // // TODO
