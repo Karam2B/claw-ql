@@ -1,7 +1,7 @@
 use axum::{Json, Router, body::Bytes, extract::Request, response::IntoResponse, routing::get};
 use claw_ql::{
-    ConnectInMemory, builder_pattern::BuilderPattern, json_client::builder_pattern::to_json_client,
-    migration::to_migrate,
+    ConnectInMemory, builder_pattern::BuilderPattern, json_client::JsonClient,
+    migration::MigratorBuilder,
 };
 use claw_ql_macros::Collection;
 use futures::TryStreamExt;
@@ -22,12 +22,14 @@ pub struct Todo {
 async fn axum_router() {
     let pool = Sqlite::connect_in_memory().await;
 
-    let schema = BuilderPattern::default()
-        .build_component(to_migrate(Sqlite))
-        .build_component(to_json_client(pool.clone()))
-        .start()
-        .add_collection(todo)
-        .finish();
+    let mut schema = BuilderPattern::default()
+        .build_component(MigratorBuilder::default())
+        .build_component(JsonClient::builder(pool.clone()))
+        .start_mut();
+
+    schema.add_collection(&todo);
+
+    let schema = schema.finish();
 
     schema.0.migrate(pool.clone()).await;
 

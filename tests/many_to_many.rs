@@ -4,12 +4,12 @@ use claw_ql::links::LinkData;
 use claw_ql::links::group_by::{CountResult, count};
 use claw_ql::links::relation::Relation;
 use claw_ql::links::relation_many_to_many::ManyToMany;
-use claw_ql::migration::to_migrate;
+use claw_ql::migration::MigratorBuilder;
 use claw_ql::operations::select_one_op::select_one;
 use claw_ql::operations::{CollectionOutput, LinkedOutput};
 use claw_ql_macros::Collection;
 use serde::{Deserialize, Serialize};
-use sqlx::{Sqlite, SqlitePool};
+use sqlx::SqlitePool;
 
 #[derive(Collection, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Student {
@@ -72,18 +72,20 @@ async fn _group_by() {
         .with_max_level(tracing::Level::DEBUG)
         .init();
 
-    let schema = BuilderPattern::default()
-        .build_component(to_migrate(Sqlite))
-        .start()
-        .add_collection(student)
-        .add_collection(course)
-        .add_link(Relation {
-            from: student,
-            to: course,
-        })
-        .finish();
+    let mut schema = BuilderPattern::default()
+        .build_component(MigratorBuilder::default())
+        .start_mut();
 
-    schema.0.migrate(pool.clone()).await;
+    schema.add_collection(&student);
+    schema.add_collection(&course);
+    schema.add_link(&Relation {
+        from: student,
+        to: course,
+    });
+
+    let schema = schema.finish().0;
+
+    schema.migrate(pool.clone()).await;
 
     sqlx::query(
         "

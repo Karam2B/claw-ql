@@ -1,11 +1,12 @@
 use claw_ql::{
     builder_pattern::BuilderPattern,
     filters::by_id_mod::by_id,
-    json_client::{builder_pattern::to_json_client},
+    json_client::JsonClient,
     links::{relation::Relation, set_id::SetId, set_new::SetNew},
-    migration::to_migrate,
+    migration::MigratorBuilder,
     operations::{
-        delete_one_op::delete_one, insert_one_op::insert_one, select_one_op::select_one, update_one_op::update_one, CollectionOutput, LinkedOutput
+        CollectionOutput, LinkedOutput, delete_one_op::delete_one, insert_one_op::insert_one,
+        select_one_op::select_one, update_one_op::update_one,
     },
     update_mod::update,
 };
@@ -63,19 +64,19 @@ async fn _workflow_generic() {
 
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
-    let schema = {
-        BuilderPattern::default()
-            .build_component(to_migrate(Sqlite))
-            .start()
-            .add_collection(category)
-            .add_collection(tag)
-            .add_collection(todo)
-            .add_link(Relation::link(todo, tag))
-            .add_link(Relation::link(todo, category))
-            .finish()
-    };
+    let mut schema = BuilderPattern::default()
+        .build_component(MigratorBuilder::default())
+        .start_mut();
 
-    schema.0.migrate(pool.clone()).await;
+    schema.add_collection(&category);
+    schema.add_collection(&tag);
+    schema.add_collection(&todo);
+    schema.add_link(&Relation::link(todo, tag));
+    schema.add_link(&Relation::link(todo, category));
+
+    let schema = schema.finish().0;
+
+    schema.migrate(pool.clone()).await;
 
     dumpy_data(pool.clone()).await;
 
@@ -194,18 +195,17 @@ async fn _workflow_generic() {
 async fn workflow_dynamic() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
-    let schema = {
-        BuilderPattern::default()
-            .build_component(to_json_client(pool.clone()))
-            .build_component(to_migrate(Sqlite))
-            .start()
-            .add_collection(category)
-            .add_collection(tag)
-            .add_collection(todo)
-            // .add_link(Relation::link(todo, tag))
-            .add_link(Relation::link(todo, category))
-            .finish()
-    };
+    let mut schema = BuilderPattern::default()
+        .build_component(JsonClient::builder(pool.clone()))
+        .build_component(MigratorBuilder::default())
+        .start_mut();
+
+    schema.add_collection(&category);
+    schema.add_collection(&tag);
+    schema.add_collection(&todo);
+    schema.add_link(&Relation::link(todo, category));
+
+    let schema = schema.finish();
 
     let jc = schema.0.unwrap();
     schema.1.migrate(pool.clone()).await;

@@ -4,10 +4,7 @@ use proc_macro::Span;
 use quote::ToTokens;
 use std::{borrow::Cow, ops::Not};
 use syn::{
-    Attribute, Field, FieldsNamed, Generics, ItemEnum, ItemStruct, Token, Type, Visibility,
-    parse::{Parse, ParseStream},
-    parse_quote,
-    punctuated::Punctuated,
+    parse::{Parse, ParseBuffer, ParseStream}, parse_quote, punctuated::Punctuated, token::Brace, Attribute, Field, FieldsNamed, Generics, ItemEnum, ItemStruct, Token, Type, Visibility
 };
 use syn::{Item as SynItem, parenthesized};
 
@@ -64,9 +61,16 @@ fn parse_struct(
         ));
     }
     // TODO: hanle Fields::Unit!!
-    let p = syn::__private::parse_braces(&input)?;
-    let brace_token = p.token;
-    let input = p.content;
+    fn parse_braces(input: ParseBuffer) -> Result<(Brace, ParseBuffer), syn::Error> {
+        let p = syn::__private::parse_braces(&input)?;
+        // let brace_token = p.token;
+        // let input = p.content;
+        Ok((p.token, p.content))
+    }
+
+        let p = syn::__private::parse_braces(&input)?;
+        let brace_token = p.token;
+        let input = p.content;
     let mut named = Punctuated::default();
     while input.is_empty().not() {
         let vis: Visibility = input.parse()?;

@@ -3,6 +3,16 @@ use sqlx::Database;
 pub mod any;
 pub mod sqlite;
 
+pub trait SqlxExtention: Database {
+    fn phantom() -> Self;
+}
+
+impl SqlxExtention for sqlx::Sqlite {
+    fn phantom() -> Self {
+        sqlx::Sqlite
+    }
+}
+
 pub trait QueryBuilder: Database {
     type Fragment;
     type Context1: Default + 'static;

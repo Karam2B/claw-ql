@@ -1,10 +1,10 @@
 use super::builder_pattern::BuilderPattern;
+use crate::builder_pattern::AsOwn;
 use crate::collections::CollectionBasic;
 use crate::json_client::builder_pattern::JsonClientBuilding;
 use crate::prelude::stmt::InsertOneSt;
 use crate::statements::update_st::UpdateSt;
 use crate::{QueryBuilder, collections::Collection, prelude::stmt::SelectSt};
-use builder_pattern::to_json_client;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, from_value};
 use sqlx::{Database, Pool};
@@ -76,6 +76,17 @@ pub struct JsonClient<S: Database> {
     pub db: Pool<S>,
 }
 
+impl<S: QueryBuilder> JsonClient<S> {
+    pub fn builder(pool: Pool<S>) -> JsonClientBuilding<S> {
+        JsonClientBuilding {
+            collections: Default::default(),
+            links: Default::default(),
+            flex_ctx: Default::default(),
+            db: pool,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub struct JsonSelector {
     /// mimics how rust infer `D` in `LinkData<D>` trait
@@ -99,12 +110,13 @@ where
 {
     pub fn new(
         db: Pool<S>,
-    ) -> BuilderPattern<PhantomData<(to_json_client<S>,)>, (JsonClientBuilding<S>,)> {
+    ) -> BuilderPattern<AsOwn<(JsonClientBuilding<S>,)>> {
         BuilderPattern::default()
-            .build_component(to_json_client(db))
-            .start()
+            .build_component(JsonClient::builder(db))
+            .start_own()
     }
 }
+
 #[cfg(feature = "inventory")]
 impl JsonClient<sqlx::Any> {
     pub fn new_from_inventory(

@@ -1,176 +1,129 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, path::Components};
 
 use crate::build_tuple::BuildTuple;
 
-pub trait InitializeContext {
-    type Context;
-    fn initialize_context(self) -> Self::Context;
+pub trait BuildStep<'s, Ident, Step> {
+    type NextSelf;
+    fn build_step(self, step: &'s Step) -> Self::NextSelf;
 }
 
-pub trait AddCollection<Collection> {
-    type This;
-    type Context;
-    type NextContext;
-    fn build_component(collection: &Collection, ctx: Self::Context) -> Self::NextContext;
+pub trait BuildMutStep<Ident, Step> {
+    fn build_step(&mut self, step: &Step);
 }
 
-pub trait AddLink<Link> {
-    type This;
-    type Context;
-    type NextContext;
-    fn build_component(link: &Link, ctx: Self::Context) -> Self::NextContext;
+pub struct Preparing<T>(T);
+pub struct AsOwn<T>(T);
+pub struct AsMut<T>(T);
+
+pub struct BuilderPattern<Components> {
+    pub(crate) components: Components,
 }
 
-pub trait Finish {
-    type Context;
-    type Result;
-    fn build_component(ctx: Self::Context) -> Self::Result;
-}
-
-pub struct BuilderPattern<Components, Context> {
-    pub(crate) __components: Components,
-    pub(crate) __context: Context,
-}
-
-impl Default for BuilderPattern<(), ()> {
+impl Default for BuilderPattern<Preparing<()>> {
     fn default() -> Self {
         BuilderPattern {
-            __components: (),
-            __context: (),
+            components: Preparing(()),
         }
     }
 }
 
-impl<B> BuilderPattern<B, ()>
-where
-    B: InitializeContext,
-{
+impl<B> BuilderPattern<Preparing<B>> {
     pub fn build_component<BuildComponent>(
         self,
         build_component: BuildComponent,
-    ) -> BuilderPattern<B::Bigger<BuildComponent>, ()>
+    ) -> BuilderPattern<Preparing<B::Bigger<BuildComponent>>>
     where
         B: BuildTuple,
-        B::Context: BuildTuple,
-        B::Bigger<BuildComponent>: InitializeContext,
     {
-        let build_mode = self.__components.into_bigger(build_component);
+        let build_mode = self.components.0.into_bigger(build_component);
         BuilderPattern {
-            __context: (),
-            __components: build_mode,
+            components: Preparing(build_mode),
         }
     }
-    pub fn start(self) -> BuilderPattern<PhantomData<B>, B::Context> {
+    pub fn start_mut(self) -> BuilderPattern<AsMut<B>> {
         BuilderPattern {
-            __components: PhantomData,
-            __context: self.__components.initialize_context(),
+            components: AsMut(self.components.0),
+        }
+    }
+    pub fn start_own(self) -> BuilderPattern<AsOwn<B>> {
+        BuilderPattern {
+            components: AsOwn(self.components.0),
         }
     }
 }
 
-impl<Components, Ctx> BuilderPattern<PhantomData<Components>, Ctx> {
-    #[track_caller]
-    pub fn add_collection<Cnext>(
-        self,
-        collection: Cnext,
-    ) -> BuilderPattern<PhantomData<Components::This>, Components::NextContext>
-    where
-        Components: AddCollection<Cnext, Context = Ctx>,
-    {
-        let ctx = Components::build_component(&collection, self.__context);
+#[allow(non_camel_case_types)]
+pub struct collection;
+#[allow(non_camel_case_types)]
+pub struct link;
 
+impl<Components> BuilderPattern<AsOwn<Components>> {
+    #[track_caller]
+    pub fn add_collection<'a, Next>(
+        self,
+        step: &'a Next,
+    ) -> BuilderPattern<AsOwn<Components::NextSelf>>
+    where
+        Components: BuildStep<'a, collection, Next>,
+    {
         BuilderPattern {
-            __components: PhantomData,
-            __context: ctx,
+            components: AsOwn(self.components.0.build_step(&step)),
         }
     }
     #[track_caller]
-    pub fn add_link<Lnext>(
-        self,
-        link: Lnext,
-    ) -> BuilderPattern<PhantomData<Components::This>, Components::NextContext>
+    pub fn add_link<'a, Next>(self, step: &'a Next) -> BuilderPattern<AsOwn<Components::NextSelf>>
     where
-        Components: AddLink<Lnext, Context = Ctx>,
+        Components: BuildStep<'a, link, Next>,
     {
-        let ctx = Components::build_component(&link, self.__context);
-
         BuilderPattern {
-            __components: PhantomData,
-            __context: ctx,
+            components: AsOwn(self.components.0.build_step(&step)),
         }
     }
+    pub fn finish(self) -> Components {
+        self.components.0
+    }
+}
 
+impl<Components> BuilderPattern<AsMut<Components>> {
     #[track_caller]
-    pub fn finish(self) -> Components::Result
+    pub fn add_collection<Next>(&mut self, step: &Next)
     where
-        Components: Finish<Context = Ctx>,
+        Components: BuildMutStep<collection, Next>,
     {
-        Components::build_component(self.__context)
+        self.components.0.build_step(step);
+    }
+    #[track_caller]
+    pub fn add_link<Next>(&mut self, step: &Next)
+    where
+        Components: BuildMutStep<link, Next>,
+    {
+        self.components.0.build_step(step);
+    }
+    pub fn finish(self) -> Components {
+        self.components.0
     }
 }
 
 macro_rules! it {
     ($([$ty:ident, $part:literal]),*) => {
 
-impl<$($ty,)*> InitializeContext for ($($ty,)*)
-    where $($ty: InitializeContext,)*
+impl<Ident, Next,$($ty),* > BuildMutStep<Ident, Next> for ($($ty,)*)
+    where $($ty:  BuildMutStep<Ident, Next>,)*
 {
-    type Context = ( $($ty::Context,)*);
-    fn initialize_context(self) -> Self::Context {
-        ($(paste::paste!(self.$part.initialize_context()),)*)
+    fn build_step(&mut self, step: &Next) {
+        $(paste::paste!(self.$part.build_step(step));)*
     }
 }
-
-impl<Next,$($ty),* > AddLink<Next> for ($($ty,)*)
-    where $($ty:  AddLink<Next>,)*
+impl<'a, Ident, Next,$($ty),* > BuildStep<'a, Ident, Next> for ($($ty,)*)
+    where $($ty:  BuildStep<'a, Ident, Next>,)*
 {
-
-    type This = (
-        $($ty::This,)*
+    type NextSelf = (
+        $($ty::NextSelf,)*
     );
-    type Context = (
-        $($ty::Context,)*
-    );
-    type NextContext = (
-        $($ty::NextContext,)*
-    );
-    #[track_caller]
-    fn build_component(next: &Next, ctx: Self::Context) -> Self::NextContext {
-        ($($ty::build_component(next, paste::paste!(ctx.$part)),)*)
+    fn build_step(self, step: &'a Next) -> Self::NextSelf{
+        ($(paste::paste!(self.$part.build_step(step)),)*)
     }
 }
-
-impl<Next, $($ty),* > AddCollection<Next> for ($($ty,)*)
-    where $($ty: AddCollection<Next>,)*
-{
-    type This = (
-        $($ty::This,)*
-    );
-    type Context = (
-        $($ty::Context,)*
-    );
-    type NextContext = (
-        $($ty::NextContext,)*
-    );
-    #[track_caller]
-    fn build_component(next: &Next, ctx: Self::Context) -> Self::NextContext {
-        ($($ty::build_component(next, paste::paste!(ctx.$part)),)*)
-    }
-}
-
-impl<$($ty,)*> Finish for ($($ty,)*)
-    where $($ty: Finish,)*
-{
-    type Result = ($($ty::Result,)*);
-    type Context = (
-        $($ty::Context,)*
-    );
-    #[track_caller]
-    fn build_component(ctx: Self::Context) -> Self::Result {
-        ($(paste::paste!($ty::build_component(ctx.$part)),)*)
-    }
-}
-
     }}
 
 #[rustfmt::skip]
