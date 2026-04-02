@@ -3,6 +3,8 @@
 use sqlx::{AnyPool, Database, Pool, Sqlite, SqlitePool};
 use std::marker::PhantomData;
 
+#[cfg(feature="serde")]
+pub mod json_query;
 pub mod build_tuple;
 pub mod builder_pattern;
 pub mod collections;

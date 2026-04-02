@@ -130,161 +130,180 @@ where
 //     }
 // }
 //
-// pub mod migrations {
-//     use serde::{Serialize, de::DeserializeOwned};
-//
-//     use sqlx::{Database, Pool};
-//
-//     use crate::{
-//         SqlxExtention,
-//         builder_pattern::{
-//             AddCollection, BuilderPattern, Finish, NewContext,
-//             extend_builder_patter::{AddCollectionMut, MutHasContext},
-//         },
-//         collections::CollectionBasic,
-//     };
-//     use std::{
-//         collections::{HashMap, HashSet},
-//         fmt::Display,
-//     };
-//
-//     use std::any::Any;
-//
-//     pub trait SerializableTypeId: 'static {
-//         fn hopefully_unique_str(&self) -> &'static str;
-//         #[cfg(feature = "serde")]
-//         fn to_json(&self) -> serde_json::Value;
-//         #[cfg(feature = "serde")]
-//         fn from_value() -> Box<dyn SerializableTypeId>
-//         where
-//             Self: Sized + SerializableTypeId2;
-//     }
-//
-//     pub trait SerializableTypeId2 {
-//         fn from_value() -> Box<dyn SerializableTypeId>;
-//     }
-//
-//     #[rustfmt::skip]
-//     pub enum Issue {
-//         ColumnExist { table: String, col: String, ty: Box<dyn SerializableTypeId> },
-//         ColumnNeedCreating { table: String, col: String, ty: Box<dyn SerializableTypeId> },
-//         TableHasConstraint { table: String, ident: Option<String> , ty: Box<dyn SerializableTypeId> },
-//         TableNeedConstraint { table: String, ident: Option<String>, ty: Box<dyn SerializableTypeId> }
-//     }
-//
-//     pub struct Migrator2<S> {
-//         pub s: S,
-//         pub steps: Vec<Box<dyn MigrationStep<S>>>,
-//         pub issues: Vec<Issue>,
-//     }
-//
-//     impl<S> MutHasContext for Migrator2<S> {
-//         type Context = Self;
-//         type Result = Self;
-//         fn new_context(self) -> Self::Context {
-//             self
-//         }
-//         fn finish(ctx: Self::Context) -> Self::Result {
-//             ctx
-//         }
-//     }
-//
-//     impl<S, E: CollectionBasic> AddCollectionMut<E> for Migrator2<S> {
-//         fn build_component(collection: &E, ctx: &mut Self::Context) {
-//             // ctx.steps.push
-//             // ctx.steps.push(collection.clone())
-//         }
-//     }
-//
-//     impl<S: SqlxExtention> Default for Migrator2<S> {
-//         fn default() -> Self {
-//             Migrator2 {
-//                 s: S::phantom(),
-//                 steps: Default::default(),
-//                 issues: Default::default(),
-//             }
-//         }
-//     }
-//
-//     impl<S> Migrator2<S>
-//     where
-//         S: Database,
-//     {
-//         pub async fn migrate(self, pool: Pool<S>) -> Result<(), Vec<Issue>> {
-//             Ok(())
-//         }
-//     }
-//
-//     // pub struct Ctx;
-//
-//     // #[must_use]
-//     // pub struct Migrator<S>(S);
-//
-//     // impl<S: SqlxExtention> MigratorManager<S> {
-//     //     pub fn builder() -> MigratorManager<S> {
-//     //         MigratorManager {  s: S::phantom() }
-//     //     }
-//     // }
-//
-//     // // impl MResult
-//     //
-//     // impl NewContext for MigrationM {
-//     //     type Context = Ctx;
-//     //     fn new_context(self) -> Self::Context {
-//     //         Ctx
-//     //     }
-//     // }
-//     // impl MutHasContext for MigrationM {
-//     //     type Context = Ctx;
-//     //     fn new_context(self) -> Self::Context {
-//     //         Ctx
-//     //     }
-//     //     type Result = Migrator;
-//     //     fn finish(ctx: Self::Context) -> Self::Result {
-//     //         Migrator
-//     //     }
-//     // }
-//     //
-//     // impl<E> AddCollectionMut<E> for MigrationM {
-//     //     fn build_component(collection: &E, ctx: &mut Self::Context) {}
-//     // }
-//
-//     // enum Components {
-//     //     Table { fields: HashSet<String> },
-//     //     Index,
-//     // }
-//     //
-//     // struct Table {
-//     //     name: String,
-//     // }
-//     //
-//     // struct Schema {
-//     //     tables: HashSet<Table>,
-//     // }
-//
-//     // fn create_schema(stpl T) -> Schema {
-//     //     todo!()
-//     // }
-//
-//     fn checkout_issues(schema: HashMap<String, Vec<String>>) -> Vec<Issue> {
-//         vec![]
-//     }
-//
-//     // ## `fn up` and `fn down`, but `fn change` might be enough
-//     //
-//     // ## handle data migration (gracefully!)
-//     //
-//     // fn data_migration(from: String) -> bool {
-//     //     from == "" || from.starts_with("delete").not()
-//     // }
-//     //
-//     // `impl Collection`s might be not enough!
-//     //
-//     // fn migrate(from: impl Collections, to: impl Collections)
-//     // migrate(from_empty, s.col(todo).col(tag))
-//     // migrate((s.col(todo_old).col(tag_old), track), s.col(todo).col(tag))
-//
-//     pub trait MigrationStep<S> {
-//         fn clone(&self) -> Box<dyn MigrationStep<S>>;
-//     }
-// }
+pub mod v1 {
+    use serde::{Serialize, de::DeserializeOwned};
+
+    use sqlx::{Database, Pool};
+
+    use crate::{
+        SqlxExtention,
+        builder_pattern::{BuildMutStep, BuildStep, collection},
+        collections::CollectionBasic,
+    };
+    use std::{
+        collections::{HashMap, HashSet},
+        fmt::Display,
+    };
+
+    use std::any::Any;
+
+    pub trait SerializableTypeId: 'static {
+        fn hopefully_unique_str(&self) -> &'static str;
+        #[cfg(feature = "serde")]
+        fn to_json(&self) -> serde_json::Value;
+        #[cfg(feature = "serde")]
+        fn from_value() -> Box<dyn SerializableTypeId>
+        where
+            Self: Sized + SerializableTypeId2;
+    }
+
+    pub trait SerializableTypeId2 {
+        fn from_value() -> Box<dyn SerializableTypeId>;
+    }
+
+    #[rustfmt::skip]
+    pub enum Issue {
+        ColumnExist { table: String, col: String, ty: Box<dyn SerializableTypeId> },
+        ColumnNeedCreating { table: String, col: String, ty: Box<dyn SerializableTypeId> },
+        TableHasConstraint { table: String, ident: Option<String> , ty: Box<dyn SerializableTypeId> },
+        TableNeedConstraint { table: String, ident: Option<String>, ty: Box<dyn SerializableTypeId> }
+    }
+
+    pub struct Migrator2<S> {
+        pub s: S,
+        pub steps: Vec<Box<dyn MigrationStep<S>>>,
+        pub issues: Vec<Issue>,
+    }
+
+    // impl<S> MutHasContext for Migrator2<S> {
+    //     type Context = Self;
+    //     type Result = Self;
+    //     fn new_context(self) -> Self::Context {
+    //         self
+    //     }
+    //     fn finish(ctx: Self::Context) -> Self::Result {
+    //         ctx
+    //     }
+    // }
+
+    impl<S, E: MigrationStep<S>> BuildMutStep<collection, E> for Migrator2<S> {
+        fn build_step(&mut self, step: &E) {
+            // fn build_component(collection: &E, ctx: &mut Self::Context) {
+            //     // ctx.steps.push
+            self.steps.push(step.clone())
+        }
+    }
+
+    impl<S: SqlxExtention> Default for Migrator2<S> {
+        fn default() -> Self {
+            Migrator2 {
+                s: S::phantom(),
+                steps: Default::default(),
+                issues: Default::default(),
+            }
+        }
+    }
+
+    impl<S> Migrator2<S>
+    where
+        S: Database,
+    {
+        pub async fn migrate(self, pool: Pool<S>) -> Result<(), Vec<Issue>> {
+            Ok(())
+        }
+    }
+
+    // pub struct Ctx;
+
+    // #[must_use]
+    // pub struct Migrator<S>(S);
+
+    // impl<S: SqlxExtention> MigratorManager<S> {
+    //     pub fn builder() -> MigratorManager<S> {
+    //         MigratorManager {  s: S::phantom() }
+    //     }
+    // }
+
+    // // impl MResult
+    //
+    // impl NewContext for MigrationM {
+    //     type Context = Ctx;
+    //     fn new_context(self) -> Self::Context {
+    //         Ctx
+    //     }
+    // }
+    // impl MutHasContext for MigrationM {
+    //     type Context = Ctx;
+    //     fn new_context(self) -> Self::Context {
+    //         Ctx
+    //     }
+    //     type Result = Migrator;
+    //     fn finish(ctx: Self::Context) -> Self::Result {
+    //         Migrator
+    //     }
+    // }
+    //
+    // impl<E> AddCollectionMut<E> for MigrationM {
+    //     fn build_component(collection: &E, ctx: &mut Self::Context) {}
+    // }
+
+    // enum Components {
+    //     Table { fields: HashSet<String> },
+    //     Index,
+    // }
+    //
+    // struct Table {
+    //     name: String,
+    // }
+    //
+    // struct Schema {
+    //     tables: HashSet<Table>,
+    // }
+
+    // fn create_schema(stpl T) -> Schema {
+    //     todo!()
+    // }
+
+    fn checkout_issues(schema: HashMap<String, Vec<String>>) -> Vec<Issue> {
+        vec![]
+    }
+
+    // ## `fn up` and `fn down`, but `fn change` might be enough
+    //
+    // ## handle data migration (gracefully!)
+    //
+    // fn data_migration(from: String) -> bool {
+    //     from == "" || from.starts_with("delete").not()
+    // }
+    //
+    // `impl Collection`s might be not enough!
+    //
+    // fn migrate(from: impl Collections, to: impl Collections)
+    // migrate(from_empty, s.col(todo).col(tag))
+    // migrate((s.col(todo_old).col(tag_old), track), s.col(todo).col(tag))
+
+    pub trait MigrationStep<S> {
+        fn clone(&self) -> Box<dyn MigrationStep<S>>;
+    }
+}
+
+mod v2 {
+pub struct Todo {
+    pub title: String,
+    pub done: bool,
+    pub description: Option<String>,
+}
+
+pub struct Category {
+    pub title: String,
+}
+
+pub struct Tag {
+    pub title: String,
+}
+
+// relation!(optional_to_many Todo Category);
+// relation!(many_to_many Todo Tag);
+    async fn check() {
+    }
+}
