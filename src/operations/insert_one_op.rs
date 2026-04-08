@@ -3,7 +3,7 @@ use sqlx::{ColumnIndex, Database, Decode, Executor, Type};
 use std::marker::PhantomData;
 
 use crate::{
-    QueryBuilder, build_tuple::BuildTuple, execute::Execute, links::LinkData,
+    QueryBuilder, build_tuple::BuildTuple, execute::Execute, links::Link,
     operations::CollectionOutput, prelude::stmt, statements::insert_one_st::InsertOneSt,
 };
 
@@ -41,7 +41,7 @@ pub struct InsertOne<S, C: Collection<S>, L> {
 
 pub fn insert_one<S, C: HasHandler>(collection: C) -> InsertOne<S, C::Handler, ()>
 where
-    C: HasHandler<Handler: Collection<S, Data = C>>,
+    C: HasHandler<Handler: Default + Collection<S, Data = C>>,
 {
     InsertOne {
         _pd: PhantomData,
@@ -59,9 +59,9 @@ where
     pub fn link<D>(self, ty: D) -> InsertOne<S, H, L::Bigger<D::Spec>>
     where
         H: Clone,
-        D: LinkData<H, Spec: InsertOneFragment<S> + Send>,
+        D: Link<H, Spec: InsertOneFragment<S> + Send>,
     {
-        let spec = ty.spec(self.handler.clone());
+        let spec = ty.spec(&self.handler);
         InsertOne {
             links: self.links.into_bigger(spec),
             data: self.data,

@@ -3,10 +3,7 @@
 use sqlx::{AnyPool, Database, Pool, Sqlite, SqlitePool};
 use std::marker::PhantomData;
 
-#[cfg(feature="serde")]
-pub mod json_query;
 pub mod build_tuple;
-pub mod builder_pattern;
 pub mod collections;
 pub mod execute;
 pub mod expressions;
@@ -17,6 +14,9 @@ mod identity_management;
 #[cfg(feature = "inventory")]
 pub mod inventory;
 pub mod json_client;
+#[cfg(feature = "serde")]
+pub mod json_query;
+pub mod json_value_cmp;
 pub mod links;
 pub mod migration;
 pub mod operations;
@@ -30,9 +30,14 @@ pub mod macros {
 }
 
 pub use query_builder::*;
+pub use serde_json::Value as JsonValue;
 use std::any::Any;
 
-
+#[derive(Debug, Clone)]
+pub struct Schema<C, L> {
+    pub collections: C,
+    pub links: L,
+}
 
 pub trait IntoInferFromPhantom<I> {
     fn into_pd(self, _: PhantomData<I>) -> I;
@@ -103,67 +108,64 @@ impl ConnectInMemory for Sqlite {
 }
 
 pub mod ident {
-    use core::hash;
-    use std::{
-        collections::{HashMap, HashSet},
-        hash::Hash,
-    };
+    // use core::hash;
+    // use std::{
+    //     collections::{HashMap, HashSet},
+    //     hash::Hash,
+    // };
 
+    // use crate::collections::CollectionBasic;
 
+    // #[derive(Eq, PartialEq, Clone, Hash)]
+    // pub enum TypeIdent {
+    //     Leaf(&'static str),
+    //     Branch(&'static str, Vec<TypeIdent>),
+    // }
 
-    use crate::{collections::CollectionBasic, links::relation::Relation};
+    // impl TypeIdent {
+    //     pub fn leaf(name: &'static str) -> TypeIdent {
+    //         TypeIdent::Leaf(name)
+    //     }
+    //     pub fn branch(name: &'static str, to: Vec<TypeIdent>) -> Result<TypeIdent, ()> {
+    //         let mut ve = vec![];
+    //         let mut set = HashSet::new();
+    //         for each in to {
+    //             let name = match each {
+    //                 TypeIdent::Leaf(s) => s,
+    //                 TypeIdent::Branch(s, _) => s,
+    //             };
+    //             let false_if_already_exist = set.insert(name);
+    //             if false_if_already_exist == false {
+    //                 return Err(());
+    //             }
+    //             ve.push(each.clone());
+    //         }
+    //         Ok(TypeIdent::Branch(name, ve))
+    //     }
+    // }
 
-    #[derive(Eq, PartialEq, Clone, Hash)]
-    pub enum TypeIdent {
-        Leaf(&'static str),
-        Branch(&'static str, Vec<TypeIdent>),
-    }
+    // pub struct Singlton {
+    //     _priv: (),
+    // }
 
-    impl TypeIdent {
-        pub fn leaf(name: &'static str) -> TypeIdent {
-            TypeIdent::Leaf(name)
-        }
-        pub fn branch(name: &'static str, to: Vec<TypeIdent>) -> Result<TypeIdent, ()> {
-            let mut ve = vec![];
-            let mut set = HashSet::new();
-            for each in to {
-                let name = match each {
-                    TypeIdent::Leaf(s) => s,
-                    TypeIdent::Branch(s, _) => s,
-                };
-                let false_if_already_exist = set.insert(name);
-                if false_if_already_exist == false {
-                    return Err(());
-                }
-                ve.push(each.clone());
-            }
-            Ok(TypeIdent::Branch(name, ve))
-        }
-    }
+    // static SINGLTON: Singlton = Singlton { _priv: () };
 
-    pub struct Singlton {
-        _priv: (),
-    }
+    // pub trait AnyS<R> {
+    //     fn type_id(&self, reg: &'static R) -> TypeIdent;
+    // }
 
-    static SINGLTON: Singlton = Singlton { _priv: () };
-
-    pub trait AnyS<R> {
-        fn type_id(&self, reg: &'static R) -> TypeIdent;
-    }
-
-    impl<F: CollectionBasic, T: CollectionBasic> AnyS<Singlton> for Relation<F, T> {
-        fn type_id(&self, reg: &'static Singlton) -> TypeIdent {
-            TypeIdent::branch(
-                "relation",
-                [
-                    TypeIdent::leaf(self.from.table_name()),
-                    TypeIdent::leaf(self.to.table_name()),
-                ]
-                .into_iter()
-                .collect(),
-            )
-            .unwrap()
-
-        }
-    }
+    // impl<F: CollectionBasic, T: CollectionBasic> AnyS<Singlton> for Relation<F, T> {
+    //     fn type_id(&self, reg: &'static Singlton) -> TypeIdent {
+    //         TypeIdent::branch(
+    //             "relation",
+    //             [
+    //                 TypeIdent::leaf(self.from.table_name()),
+    //                 TypeIdent::leaf(self.to.table_name()),
+    //             ]
+    //             .into_iter()
+    //             .collect(),
+    //         )
+    //         .unwrap()
+    //     }
+    // }
 }

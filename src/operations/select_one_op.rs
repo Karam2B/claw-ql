@@ -1,17 +1,13 @@
 use super::LinkedOutput;
 use crate::{
-    QueryBuilder,
+    Buildable, QueryBuilder,
     build_tuple::BuildTuple,
-    collections::CollectionBasic,
+    collections::CollectionHandler,
     operations::collections::{Collection, Filter},
     prelude::stmt,
     statements::select_st::SelectSt,
 };
-use crate::{
-    execute::Execute,
-    links::{LinkData, relation::Relation},
-    prelude::col,
-};
+use crate::{execute::Execute, links::Link, prelude::col};
 use sqlx::{ColumnIndex, Decode, Encode, Pool, Row, Type};
 use std::marker::PhantomData;
 
@@ -38,45 +34,45 @@ pub fn select_one<S, Base>(collection: Base) -> SelectOne<S, Base, (), ()> {
 }
 
 pub struct SelectOne<S, C, L, F> {
-    collection: C,
-    links: L,
-    filters: F,
-    _pd: PhantomData<(S,)>,
+    pub collection: C,
+    pub links: L,
+    pub filters: F,
+    pub _pd: PhantomData<(S,)>,
 }
 
 impl<S, Base, L, F> SelectOne<S, Base, L, F>
 where
-    Base: CollectionBasic,
+    Base: CollectionHandler,
     S: QueryBuilder,
     L: BuildTuple,
     F: BuildTuple,
 {
-    pub fn relation<To>(
-        self,
-        to: To,
-    ) -> SelectOne<S, Base, L::Bigger<<Relation<Base, To> as LinkData<Base>>::Spec>, F>
-    where
-        Relation<Base, To>: LinkData<Base, Spec: SelectOneFragment<S> + Send>,
-    {
-        // let spec = <Relation<Base, To> as LinkData<Base>>::init_spec(self.collection.clone());
-        SelectOne {
-            links: self.links.into_bigger(
-                Relation {
-                    from: self.collection.clone(),
-                    to,
-                }
-                .spec(self.collection.clone()),
-            ),
-            filters: self.filters,
-            collection: self.collection,
-            _pd: PhantomData,
-        }
-    }
+    // pub fn relation<To>(
+    //     self,
+    //     to: To,
+    // ) -> SelectOne<S, Base, L::Bigger<<Relation<Base, To> as Link<Base>>::Spec>, F>
+    // where
+    //     Relation<Base, To>: LinkData<Base, Spec: SelectOneFragment<S> + Send>,
+    // {
+    //     // let spec = <Relation<Base, To> as LinkData<Base>>::init_spec(self.collection.clone());
+    //     SelectOne {
+    //         links: self.links.into_bigger(
+    //             Relation {
+    //                 from: self.collection.clone(),
+    //                 to,
+    //             }
+    //             .spec(self.collection.clone()),
+    //         ),
+    //         filters: self.filters,
+    //         collection: self.collection,
+    //         _pd: PhantomData,
+    //     }
+    // }
     pub fn link<D>(self, ty: D) -> SelectOne<S, Base, L::Bigger<D::Spec>, F>
     where
-        D: LinkData<Base, Spec: SelectOneFragment<S> + Send>,
+        D: Link<Base, Spec: SelectOneFragment<S> + Send>,
     {
-        let spec = ty.spec(self.collection.clone());
+        let spec = ty.spec(&self.collection);
         SelectOne {
             links: self.links.into_bigger(spec),
             filters: self.filters,
@@ -207,6 +203,8 @@ where
         let mut worker_data = L::Inner::default();
 
         self.links.on_select(&mut worker_data, &mut st);
+
+        // let build = Buildable::build(st);
 
         let res = st
             .fetch_optional(&db, |r| {

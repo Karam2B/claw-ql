@@ -1,10 +1,10 @@
-use claw_ql::builder_pattern::BuilderPattern;
-use claw_ql::collections::CollectionBasic;
+use claw_ql::Schema;
+use claw_ql::collections::CollectionHandler;
 use claw_ql::links::LinkData;
 use claw_ql::links::group_by::{CountResult, count};
 use claw_ql::links::relation::Relation;
 use claw_ql::links::relation_many_to_many::ManyToMany;
-use claw_ql::migration::MigratorBuilder;
+use claw_ql::migration::migrate_on_empty_database;
 use claw_ql::operations::select_one_op::select_one;
 use claw_ql::operations::{CollectionOutput, LinkedOutput};
 use claw_ql_macros::Collection;
@@ -72,20 +72,15 @@ async fn _group_by() {
         .with_max_level(tracing::Level::DEBUG)
         .init();
 
-    let mut schema = BuilderPattern::default()
-        .build_component(MigratorBuilder::default())
-        .start_mut();
+    let schema = Schema {
+        collections: (student, course),
+        links: (Relation {
+            from: student,
+            to: course,
+        },),
+    };
 
-    schema.add_collection(&student);
-    schema.add_collection(&course);
-    schema.add_link(&Relation {
-        from: student,
-        to: course,
-    });
-
-    let schema = schema.finish().0;
-
-    schema.migrate(pool.clone()).await;
+    migrate_on_empty_database(&schema, &pool).await;
 
     sqlx::query(
         "

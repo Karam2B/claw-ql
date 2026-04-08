@@ -1,10 +1,9 @@
 use super::LinkedOutput;
 use super::collections::Collection;
 use crate::Accept;
-use crate::links::relation::Relation;
 use crate::operations::CollectionOutput;
 use crate::statements::delete_st::DeleteSt;
-use crate::{QueryBuilder, build_tuple::BuildTuple, links::LinkData};
+use crate::{QueryBuilder, build_tuple::BuildTuple, links::Link};
 use sqlx::{ColumnIndex, Decode, Executor, Type};
 use std::marker::PhantomData;
 
@@ -46,33 +45,33 @@ where
     S: QueryBuilder,
     L: BuildTuple,
 {
-    pub fn relation<D>(
-        self,
-        ty: D,
-    ) -> DeleteOne<S, H, L::Bigger<<Relation<H, D> as LinkData<H>>::Spec>>
-    where
-        H: Clone,
-        Relation<H, D>: LinkData<H, Spec: DeleteOneFragment<S>>,
-    {
-        let spec = Relation {
-            from: self.handler.clone(),
-            to: ty,
-        }
-        .spec(self.handler.clone());
+    // pub fn relation<D>(
+    //     self,
+    //     ty: D,
+    // ) -> DeleteOne<S, H, L::Bigger<<Relation<H, D> as LinkData<H>>::Spec>>
+    // where
+    //     H: Clone,
+    //     Relation<H, D>: LinkData<H, Spec: DeleteOneFragment<S>>,
+    // {
+    //     let spec = Relation {
+    //         from: self.handler.clone(),
+    //         to: ty,
+    //     }
+    //     .spec(self.handler.clone());
 
-        DeleteOne {
-            links: self.links.into_bigger(spec),
-            handler: self.handler,
-            _pd: PhantomData,
-            id: self.id,
-        }
-    }
+    //     DeleteOne {
+    //         links: self.links.into_bigger(spec),
+    //         handler: self.handler,
+    //         _pd: PhantomData,
+    //         id: self.id,
+    //     }
+    // }
     pub fn link<D>(self, ty: D) -> DeleteOne<S, H, L::Bigger<D::Spec>>
     where
         H: Clone,
-        D: LinkData<H, Spec: DeleteOneFragment<S>>,
+        D: Link<H, Spec: DeleteOneFragment<S>>,
     {
-        let spec = ty.spec(self.handler.clone());
+        let spec = ty.spec(&self.handler);
         DeleteOne {
             links: self.links.into_bigger(spec),
             handler: self.handler,

@@ -1,3 +1,5 @@
+use claw_ql::collections::id::SingleIncremintalInt;
+
 pub struct Todo {
     pub title: String,
     pub done: bool,
@@ -16,8 +18,13 @@ pub struct todo;
 
 const _: () = {
     use ::claw_ql::prelude::macro_derive_collection::*;
-    impl CollectionHandler for todo {
-        type LinkedData = Todo;
+
+    use ::claw_ql::collections::id::Collection;
+    use ::claw_ql::collections::id::CollectionBasic;
+    use ::claw_ql::collections::id::CollectionHandler;
+    use ::claw_ql::collections::id::HasHandler;
+
+    impl CollectionBasic for todo {
         fn table_name_lower_case(&self) -> &'static str {
             "todo"
         }
@@ -31,6 +38,9 @@ const _: () = {
                 String::from("description"),
             ]
         }
+    }
+    impl CollectionHandler for todo {
+        type LinkedData = Todo;
     }
 
     impl HasHandler for TodoPartial {
@@ -56,6 +66,8 @@ const _: () = {
     {
         type Partial = TodoPartial;
         type Data = Todo;
+        type Id = SingleIncremintalInt;
+
         fn on_select(&self, stmt: &mut SelectSt<S>) {
             stmt.select(col("title").table("Todo").alias("todo_title"));
             stmt.select(col("done").table("Todo").alias("todo_done"));
@@ -114,13 +126,18 @@ const _: () = {
         Option<String>: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
     {
         fn custom_migrate_statements(&self) -> Vec<String> {
-            use claw_ql::query_builder::Buildable;
+            let mut mig = SingleIncremintalInt::custom_migrate_statements(&SingleIncremintalInt);
+            // use claw_ql::query_builder::Buildable;
             let mut stmt = CreateTableSt::init(header::create, self.table_name());
-            stmt.column_def("id", primary_key::<S>());
-            stmt.column_def("title", col_type_check_if_null::<String>());
-            stmt.column_def("done", col_type_check_if_null::<bool>());
-            stmt.column_def("description", col_type_check_if_null::<Option<String>>());
-            vec![Buildable::build(stmt).0]
+            // stmt.column_def("id", primary_key::<S>());
+            // stmt.column_def("title", col_type_check_if_null::<String>());
+            // stmt.column_def("done", col_type_check_if_null::<bool>());
+            // stmt.column_def("description", col_type_check_if_null::<Option<String>>());
+
+            #[allow(unreachable_code)]
+            mig.push(todo!("alter table"));
+
+            mig
         }
     }
 };

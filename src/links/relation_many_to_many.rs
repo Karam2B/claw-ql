@@ -1,5 +1,6 @@
 use crate::QueryBuilder;
 use crate::collections::Collection;
+use crate::links::LinkedViaIds;
 use crate::operations::CollectionOutput;
 use crate::{
     migration::OnMigrate, operations::select_one_op::SelectOneFragment, prelude::stmt::SelectSt,
@@ -15,43 +16,28 @@ pub struct ManyToMany<T1, T2> {
     pub id_2: String,
 }
 
+impl<F, T> LinkedViaIds for ManyToMany<F, T> {}
+
 impl<T1, T2> OnMigrate<Sqlite> for ManyToMany<T1, T2>
 where
     T1: Collection<Sqlite>,
     T2: Collection<Sqlite>,
 {
-    fn custom_migration<'e>(
-        &self,
-        exec: impl for<'q> sqlx::Executor<'q, Database = Sqlite> + Clone,
-    ) -> impl Future<Output = ()>
-    where
-        Sqlite: QueryBuilder,
-    {
-        async {
-            let ManyToMany {
-                junction,
-                table_1,
-                id_1,
-                table_2,
-                id_2,
-            }: &ManyToMany<T1, T2> = self;
-
-            sqlx::query(&format!(
-                "
-            CREATE TABLE {junction} (
+    fn custom_migrate_statements(&self) -> Vec<String> {
+        vec![format!(
+            "CREATE TABLE {junction} (
                 {id_1} INTEGER NOT NULL, 
                 {id_2} INTEGER NOT NULL,
                 PRIMARY KEY ({id_1}, {id_2}),
                 FOREIGN KEY ({id_1}) REFERENCES {table_1}(id) ON DELETE CASCADE,
                 FOREIGN KEY ({id_2}) REFERENCES {table_2}(id) ON DELETE CASCADE
             )",
-                table_1 = table_1.table_name(),
-                table_2 = table_2.table_name()
-            ))
-            .execute(exec)
-            .await
-            .unwrap();
-        }
+            junction = self.junction,
+            id_1 = self.id_1,
+            id_2 = self.id_2,
+            table_1 = self.table_1.table_name(),
+            table_2 = self.table_2.table_name(),
+        )]
     }
 }
 

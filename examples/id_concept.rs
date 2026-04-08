@@ -27,7 +27,7 @@ pub struct TodoPartial {
 #[derive(Clone, Default)]
 pub struct todo;
 
-impl CollectionBasic for todo {
+impl CollectionHandler for todo {
     type LinkedData = Todo;
     fn table_name_lower_case(&self) -> &'static str {
         "todo"

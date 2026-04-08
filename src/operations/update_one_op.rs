@@ -1,6 +1,6 @@
 use crate::{
     QueryBuilder, build_tuple::BuildTuple, execute::Execute, filters::by_id_mod::by_id,
-    links::LinkData, operations::CollectionOutput, statements::update_st::UpdateSt,
+    links::Link, operations::CollectionOutput, statements::update_st::UpdateSt,
 };
 use sqlx::{ColumnIndex, Decode, Executor, prelude::Type};
 use std::marker::PhantomData;
@@ -43,7 +43,7 @@ pub struct UpdateOne<S, C: Collection<S>, L, F> {
 
 pub fn update_one_no_id<S, C: HasHandler>(partial_collection: C) -> UpdateOne<S, C::Handler, (), ()>
 where
-    C: HasHandler<Handler: Collection<S, Partial = C>>,
+    C: HasHandler<Handler: Default + Collection<S, Partial = C>>,
 {
     UpdateOne {
         _pd: PhantomData,
@@ -58,7 +58,7 @@ pub fn update_one<S, C: HasHandler>(
     partial_collection: C,
 ) -> UpdateOne<S, C::Handler, (), (by_id,)>
 where
-    C: HasHandler<Handler: Collection<S, Partial = C>>,
+    C: HasHandler<Handler: Default + Collection<S, Partial = C>>,
 {
     UpdateOne {
         _pd: PhantomData,
@@ -91,9 +91,9 @@ where
     pub fn link<D>(self, ty: D) -> UpdateOne<S, H, L::Bigger<D::Spec>, F>
     where
         H: Clone,
-        D: LinkData<H, Spec: UpdateOneFragment<S> + Send>,
+        D: Link<H, Spec: UpdateOneFragment<S> + Send>,
     {
-        let spec = ty.spec(self.handler.clone());
+        let spec = ty.spec(&self.handler);
         UpdateOne {
             links: self.links.into_bigger(spec),
             data: self.data,

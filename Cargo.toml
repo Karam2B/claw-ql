@@ -16,7 +16,8 @@ serde = { version = "1.0.203", optional = true }
 serde_json = { version = "1.0.117", optional = true }
 tower-service = { version = "0.3.3", optional = true }
 hyper = { version = "1.6.0", optional = true }
-axum = { version = "0.8.4", optional = true }
+axum = { version = "0.8.4",features = ["macros"], optional = true }
+tokio = { version = "1.37.0", features = ["full"], optional = true }
 # feature inventory
 inventory = { version = "0.3.20", optional = true }
 
@@ -35,13 +36,14 @@ inventory = { version = "0.3.20" }
 
 [features]
 default = ["sqlite", "trace", "http"]
-waiting_min_specialization = []
+nightly_rust = []
 inventory = ["dep:inventory", "claw-ql-macros/inventory"]
 unstable_id_trait = ["claw-ql-macros/experimental_id_trait"]
-http = ["serde", "dep:tower-service", "dep:hyper", "dep:axum"]
-serde = ["dep:serde_json", "dep:serde"]
+http = ["serde", "dep:tower-service", "dep:hyper", "dep:axum", "tokio/full"]
+serde = ["dep:serde_json", "dep:serde", "claw-ql-macros/serde"]
 trace = ["dep:tracing"]
 sqlite = ["sqlx/sqlite"]
+unstable = []
 
 [[example]]
 name= "id_concept"

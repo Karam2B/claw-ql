@@ -71,12 +71,18 @@ pub fn main(input: DeriveInput) -> TokenStream {
         .map(|m| m.name_scoped.clone())
         .collect::<Vec<_>>();
 
+    let serde_derive_extra_attr = if cfg!(feature = "serde") {
+        Some(quote!(,::claw_ql::prelude::macro_derive_collection::Deserialize))
+    } else {
+        None
+    };
+
     ts.extend(quote!(
-        #[cfg_attr(feature = "serde", derive(::claw_ql::prelude::macro_derive_collection::Deserialize))]
-        #[derive(Default, Debug)]
+        #[derive(Default, Debug #serde_derive_extra_attr)]
         pub struct #partial_ident {
             #(pub #member_name: ::claw_ql::prelude::macro_derive_collection::update<#member_ty>,)*
         }
+
         #[derive(Clone, Default)]
         #[allow(non_camel_case_types)]
         pub struct #table_name_lower_case_ident;
@@ -111,6 +117,18 @@ where
         #member_ty: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
     )*
 {
+    fn custom_migrate_statements(&self) -> Vec<String> {
+        
+        let mut stmt = CreateTableSt::init(header::create, self.table_name());
+        stmt.column_def("id", primary_key::<S>());
+        #(
+        stmt.column_def(
+            stringify!(#member_name),
+            col_type_check_if_null::<#member_ty>(),
+        );
+        )*
+        vec![Buildable::build(stmt).0]
+    }
     fn custom_migration<'e>(
         &self,
         exec: impl for<'q> Executor<'q, Database = S> + Clone,

@@ -1,0 +1,22 @@
+component(sql)
+component(axum)
+
+[collection]
+data todo (
+    title = string
+    done = boolean
+    description = string, optional
+)
+
+[collection]
+data category (
+    name = string
+)
+
+[collection]
+data tag (
+    name = string
+)
+
+relation(many_to_many, todo, category)
+relation(many_to_many, todo, tag)

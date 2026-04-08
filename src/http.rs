@@ -13,13 +13,14 @@ use axum::{
 use hyper::Request;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use sqlx::{ColumnIndex, Database, Decode, Encode, prelude::Type};
+use sqlx::{ColumnIndex, Database, Decode, Encode, Sqlite, prelude::Type};
 use std::{convert::Infallible, pin::Pin, sync::Arc, task::Poll};
 use tower_service::Service;
 
 impl<S: QueryBuilder> JsonClient<S>
 where
-    S: QueryBuilder<Output = <S as Database>::Arguments<'static>>,
+    S: QueryBuilder<Output = <S as Database>::Arguments<'static>> + Send,
+    S: QueryBuilder<Fragment: Send, Context1: Send>,
     for<'c> &'c mut S::Connection: sqlx::Executor<'c, Database = S>,
     for<'e> i64: Encode<'e, S> + Type<S> + Decode<'e, S>,
     for<'e> &'e str: ColumnIndex<S::Row>,
@@ -38,7 +39,7 @@ where
     pub fn as_router(self) -> Router<()> {
         let router = {
             Router::new()
-                .route("/{collection}/", get(get_one).post(insert_one))
+                .route("/{collection}/", get(get_all::<S>).post(insert_one))
                 .route(
                     "/{collection}/{id}",
                     get(get_one).put(update_one).delete(delete_one),
@@ -60,12 +61,11 @@ struct CollectionAndId {
 #[serde(deny_unknown_fields)]
 pub struct SelectOneInput2 {
     #[serde(default)]
-    pub filters: Map<String, Value>,
+    pub filters: Vec<Value>,
     #[serde(default)]
     pub links: Map<String, Value>,
 }
 
-#[inline]
 async fn get_all<S: Database>(
     jc: State<Arc<JsonClient<S>>>,
     path: Path<String>,
@@ -73,26 +73,33 @@ async fn get_all<S: Database>(
 ) -> Result<Json<LinkedOutput<Value, Map<String, Value>>>, String>
 where
     S: QueryBuilder<Output = <S as Database>::Arguments<'static>>,
+    S: QueryBuilder<Fragment: Send, Context1: Send>,
     for<'c> &'c mut S::Connection: sqlx::Executor<'c, Database = S>,
     for<'e> i64: Encode<'e, S> + Type<S> + Decode<'e, S>,
     for<'e> &'e str: ColumnIndex<S::Row>,
 {
-    Ok(Json(
-        jc.0.select_one_serialized(SelectOneInput {
-            collection: path.0,
-            filters: body.0.filters,
-            links: body.0.links,
-        })
-        .await?,
-    ))
+    todo!()
 }
-async fn get_one<S: Database>(jc: State<Arc<JsonClient<S>>>, path: Path<CollectionAndId>)
-where
+
+async fn get_one<S: Database>(
+    jc: State<Arc<JsonClient<S>>>,
+    path: Path<CollectionAndId>,
+    body: Json<SelectOneInput2>,
+) where
     S: QueryBuilder<Output = <S as Database>::Arguments<'static>>,
     for<'c> &'c mut S::Connection: sqlx::Executor<'c, Database = S>,
     for<'e> i64: Encode<'e, S> + Type<S> + Decode<'e, S>,
     for<'e> &'e str: ColumnIndex<S::Row>,
 {
+    todo!();
+    // Ok(Json(
+    //     jc.0.select_one_serialized(SelectOneInput {
+    //         collection: path.0,
+    //         filters: body.0.filters,
+    //         links: body.0.links,
+    //     })
+    //     .await?,
+    // ))
 }
 async fn insert_one<S: Database>(jc: State<Arc<JsonClient<S>>>, path: Path<String>)
 where

@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use claw_ql::{
-    builder_pattern::BuilderPattern,
+    Schema,
     filters::by_id_mod::by_id,
     json_client::JsonClient,
     links::{relation::Relation, set_id::SetId, set_new::SetNew},
-    migration::MigratorBuilder,
+    migration::migrate_on_empty_database,
     operations::{
         CollectionOutput, LinkedOutput, delete_one_op::delete_one, insert_one_op::insert_one,
         select_one_op::select_one, update_one_op::update_one,
@@ -35,6 +37,77 @@ pub struct Tag {
 relation!(optional_to_many Todo Category);
 relation!(many_to_many Todo Tag);
 
+// mod dddd {
+//     #![allow(non_camel_case_types)]
+
+//     use claw_ql::{
+//         links::LinkData,
+//         prelude::macro_relation::{OptionalToMany, OptionalToManyInverse},
+//     };
+
+//     use crate::{category, tag, todo};
+
+//     pub struct may_have_a_category {
+//         // non-public for reason
+//         foriegn_key: &'static str,
+//     }
+
+//     pub struct have_a_category {
+//         // non-public for reason
+//         foriegn_key: &'static str,
+//     }
+
+//     #[allow(non_camel_case_types)]
+//     pub struct has_many_todos {
+//         // non-public for reason
+//         foriegn_key: &'static str,
+//     }
+
+//     #[allow(non_camel_case_types)]
+//     pub struct todo_has_optional_to_many_tag {
+//         // non-public for reason
+//         foriegn_key: &'static str,
+//     }
+
+//     impl Default for todo_has_optional_to_many_tag {
+//         fn default() -> Self {
+//             todo_has_optional_to_many_tag {
+//                 foriegn_key: "cat_id",
+//             }
+//         }
+//     }
+
+//     impl LinkData<super::todo> for todo_has_optional_to_many_tag {
+//         type Spec = OptionalToMany<todo, tag>;
+
+//         fn spec(self, _from: super::todo) -> Self::Spec
+//         where
+//             Self: Sized,
+//         {
+//             OptionalToMany {
+//                 foriegn_key: self.foriegn_key.to_string(),
+//                 from: todo,
+//                 to: tag,
+//             }
+//         }
+//     }
+
+//     pub trait DefaultRelation {
+//         type Normal;
+//         type Inverse;
+//     }
+
+//     impl DefaultRelation for (todo, category) {
+//         type Normal = may_have_a_category;
+//         type Inverse = has_many_todos;
+//     }
+
+//     impl DefaultRelation for (category, todo) {
+//         type Normal = has_many_todos;
+//         type Inverse = may_have_a_category;
+//     }
+// }
+
 async fn dumpy_data(db: Pool<Sqlite>) {
     sqlx::query(
         r#"
@@ -64,19 +137,12 @@ async fn _workflow_generic() {
 
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
-    let mut schema = BuilderPattern::default()
-        .build_component(MigratorBuilder::default())
-        .start_mut();
+    let schema = Schema {
+        collections: (todo, category, tag),
+        links: (Relation::link(todo, tag), Relation::link(todo, category)),
+    };
 
-    schema.add_collection(&category);
-    schema.add_collection(&tag);
-    schema.add_collection(&todo);
-    schema.add_link(&Relation::link(todo, tag));
-    schema.add_link(&Relation::link(todo, category));
-
-    let schema = schema.finish().0;
-
-    schema.migrate(pool.clone()).await;
+    migrate_on_empty_database(&schema, &pool).await;
 
     dumpy_data(pool.clone()).await;
 
@@ -122,8 +188,7 @@ async fn _workflow_generic() {
         6,
         TodoPartial {
             title: update::set("update title".to_string()),
-            done: update::keep,
-            description: update::keep,
+            ..Default::default()
         },
     )
     .exec_op(&pool)
@@ -195,21 +260,16 @@ async fn _workflow_generic() {
 async fn workflow_dynamic() {
     let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
 
-    let mut schema = BuilderPattern::default()
-        .build_component(JsonClient::builder(pool.clone()))
-        .build_component(MigratorBuilder::default())
-        .start_mut();
+    let schema = Schema {
+        collections: (todo, category, tag),
+        links: (Relation::link(todo, category), Relation::link(todo, tag)),
+    };
 
-    schema.add_collection(&category);
-    schema.add_collection(&tag);
-    schema.add_collection(&todo);
-    schema.add_link(&Relation::link(todo, category));
+    // migrate_on_empty_database(&schema, &pool).await;
 
-    let schema = schema.finish();
+    dumpy_data(pool.clone()).await;
 
-    let jc = schema.0.unwrap();
-    schema.1.migrate(pool.clone()).await;
-    dumpy_data(pool).await;
+    let jc = Arc::new(JsonClient::from_schema(schema, pool));
 
     let res = jc
         .select_one(json!({

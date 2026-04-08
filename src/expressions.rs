@@ -109,15 +109,17 @@ pub mod is_null {
         }
     }
 
-    #[cfg(feature = "waiting_min_specialization")]
+    #[cfg(feature = "nightly_rust")]
     impl<T> IsNull for T {
         default fn is_null() -> bool {
             false
         }
     }
 
-    #[cfg(not(feature = "waiting_min_specialization"))]
+    #[cfg(not(feature = "nightly_rust"))]
     mod impl_is_null_no_spectialization {
+        use std::collections::HashMap;
+
         use super::IsNull;
 
         macro_rules! impl_no_gens {
@@ -131,6 +133,21 @@ pub mod is_null {
         }
 
         impl_no_gens!(i32 i64 bool char String);
+
+        macro_rules! impl_gens {
+            ($ident:ident [$($gens:ident $(:$wheres:tt)?),*]) => {
+                impl<$($gens,)*> IsNull for $ident<$($gens,)*>
+                where $($gens:Sized $(+$wheres)? ),*
+                {
+                    fn is_null() -> bool {
+                        false
+                    }
+                }
+            };
+        }
+
+        impl_gens!(Vec[T]);
+        impl_gens!(HashMap[K,V,S]);
     }
 }
 
