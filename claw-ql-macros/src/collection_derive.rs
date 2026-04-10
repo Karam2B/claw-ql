@@ -4,9 +4,15 @@ use proc_macro2::Ident;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::Visibility;
-use syn::{DeriveInput, spanned::Spanned, visit::Visit};
+use syn::{spanned::Spanned, visit::Visit};
 
-pub fn main(input: DeriveInput) -> TokenStream {
+pub fn main(input: TokenStream) -> TokenStream {
+    let input = match syn::parse2::<syn::DeriveInput>(input) {
+        Ok(data) => data,
+        Err(err) => {
+            return err.to_compile_error().into();
+        }
+    };
     let mut ts = quote!();
     if let Visibility::Public(_) = input.vis.clone() {
     } else {
@@ -51,11 +57,6 @@ pub fn main(input: DeriveInput) -> TokenStream {
     main_derive.visit_derive_input(&input);
     let MainDerive { mem_ty, mem_name } = main_derive;
 
-    // let mem_scope = mem_name
-    //     .iter()
-    //     .map(|m| format!("{}_{}", this_lowercase, m.to_string()))
-    //     .collect::<Vec<_>>();
-
     let serde_derive = if cfg!(feature = "serde") {
         Some(quote!(,::claw_ql::prelude::macro_derive_collection::Deserialize))
     } else {
@@ -72,116 +73,6 @@ pub fn main(input: DeriveInput) -> TokenStream {
         #[allow(non_camel_case_types)]
         pub struct #this_lowercase;
     ));
-
-    // type LinkedData = #table_name_camel_case;
-    // fn members(&self) -> Vec<String>
-    // {
-    //     vec![
-    //         #(String::from(stringify!(#member_name)),)*
-    //     ]
-    // }
-
-    // impl<S> OnMigrate<S> for #table_name_lower_case_ident
-    // where
-    //     S: QueryBuilder<Output = <S as Database>::Arguments<'static>>,
-    //     for<'q> S::Arguments<'q>: IntoArguments<'q, S>,
-    //     S: QueryBuilder + DatabaseDefaultPrimaryKey,
-    //     <S as DatabaseDefaultPrimaryKey>::KeyType: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
-    //     #(
-    //         #member_ty: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
-    //     )*
-    // {
-    //     fn custom_migrate_statements(&self) -> Vec<String> {
-
-    //         let mut stmt = CreateTableSt::init(header::create, self.table_name());
-    //         stmt.column_def("id", primary_key::<S>());
-    //         #(
-    //         stmt.column_def(
-    //             stringify!(#member_name),
-    //             col_type_check_if_null::<#member_ty>(),
-    //         );
-    //         )*
-    //         vec![Buildable::build(stmt).0]
-    //     }
-    //     fn custom_migration<'e>(
-    //         &self,
-    //         exec: impl for<'q> Executor<'q, Database = S> + Clone,
-    //     ) -> impl Future<Output = ()>
-    //     where
-    //     {
-    //         async move {
-    //             let mut stmt = CreateTableSt::init(header::create, self.table_name());
-    //             stmt.column_def("id", primary_key::<S>());
-    //             #(
-    //             stmt.column_def(
-    //                 stringify!(#member_name),
-    //                 col_type_check_if_null::<#member_ty>(),
-    //             );
-    //             )*
-    //             stmt.execute(exec).await.unwrap();
-    //         }
-    //     }
-    // }
-
-    // impl<S> Queries<S> for #table_name_lower_case_ident
-    //     where
-    // S: QueryBuilder + DatabaseDefaultPrimaryKey,
-    // for<'s> &'s str: sqlx_::ColumnIndex<<S as Database>::Row>,
-    // <S as DatabaseDefaultPrimaryKey>::KeyType: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
-    // #(
-    //     S: Accept<#member_ty>,
-    //     #member_ty: Type<S> + for<'c> Decode<'c, S> + for<'e> Encode<'e, S>,
-    // )*
-    // {
-    //     // fn on_insert(&self, this: Self::Data, stmt: &mut InsertOneSt<S>)
-    //     // where
-    //     //     S: sqlx::Database,
-    //     // {
-    //     //     #(stmt.col(
-    //     //         stringify!(#member_name).to_string(),
-    //     //         this.#member_name
-    //     //     );)*
-    //     // }
-
-    //     fn on_select(&self, stmt: &mut SelectSt<S>)
-    //     {
-    //         #(
-    //            stmt.select(col(stringify!(#member_name)).
-    //             table(stringify!(#table_name_camel_case)).
-    //             alias(#member_name_scoped)
-    //            );
-    //         )*
-    //     }
-
-    //     // fn on_update(
-    //     //     &self,
-    //     //     this: Self::Partial,
-    //     //     stmt: &mut UpdateSt<S>,
-    //     // ) where
-    //     //     S: claw_ql::QueryBuilder,
-    //     // {
-    //     //             #(
-    //     //     match this.#member_name {
-    //     //         update::keep => {}
-    //     //         update::set(set) => stmt.set_col(stringify!(#member_name).to_string(), set),
-    //     //     };
-    //     //         )*
-    //     // }
-
-    //     // fn from_row_noscope(&self, row: &<S as Database>::Row) -> Self::Data
-    //     // {
-    //     //     Self::Data { #(
-    //     //         #member_name: row.get(stringify!(#member_name)),
-    //     //     )*}
-    //     // }
-
-    //     // fn from_row_scoped(&self, row: &<S as Database>::Row) -> Self::Data
-    //     // {
-    //     //     Self::Data { #(
-    //     //             #member_name: row.get(#member_name_scoped),
-    //     //     )*}
-    //     // }
-    // }
 
     let members_mod = Ident::new(
         &format!("{}_members", this_lowercase.to_string()),
@@ -225,12 +116,7 @@ pub fn main(input: DeriveInput) -> TokenStream {
         impl Collection for #this_lowercase {
             type Partial = #partial;
             type Data = #this;
-            type Members = (#(#mem_name,)*);
             type Id = SingleIncremintalInt;
-
-            fn members(&self) -> &Self::Members {
-                &(#(#mem_name,)*)
-            }
             fn id(&self) -> &Self::Id {
                 &SingleIncremintalInt
             }
@@ -242,6 +128,15 @@ pub fn main(input: DeriveInput) -> TokenStream {
 
         impl HasHandler for #partial {
             type Handler = #this_lowercase;
+        }
+        
+        impl<S> Members<S> for #this_lowercase
+        {
+            fn members_names(&self) -> Vec<String> {
+                vec![
+                    #(stringify!(#mem_name).to_string(),)*
+                ]
+            }
         }
     };));
 
@@ -260,4 +155,123 @@ pub fn main(input: DeriveInput) -> TokenStream {
 }
 
 #[test]
-fn test_collection_derive() {}
+fn test_collection_derive() {
+    use pretty_assertions::assert_eq;
+    let mut expect = quote! {
+        pub struct Todo {
+            pub title: String,
+            pub done: bool,
+            pub description: Option<String>,
+        }
+    };
+
+    let expect = main(expect);
+
+    let tobe = quote! {
+        #[derive(Default, Debug)]
+        pub struct TodoPartial {
+            pub title: ::claw_ql::prelude::macro_derive_collection::update<String>,
+            pub done: ::claw_ql::prelude::macro_derive_collection::update<bool>,
+            pub description: ::claw_ql::prelude::macro_derive_collection::update<Option<String> >,
+        }
+
+        #[derive(Clone, Default)]
+        #[allow(non_camel_case_types)]
+        pub struct todo;
+
+        #[allow(non_camel_case_types)]
+        pub mod todo_members {
+            use ::claw_ql::prelude::macro_derive_collection::*;
+            use super::todo;
+
+            #[derive(Clone, Default)]
+            pub struct title;
+            impl MemberBasic for title {
+                fn name(&self) -> &str {
+                    stringify!(title)
+                }
+            }
+            impl Member for title {
+                type Collection = todo;
+                type Data = String;
+            }
+            #[derive(Clone, Default)]
+            pub struct done;
+            impl MemberBasic for done {
+                fn name(&self) -> &str {
+                    stringify!(done)
+                }
+            }
+            impl Member for done {
+                type Collection = todo;
+                type Data = bool;
+            }
+            #[derive(Clone, Default)]
+            pub struct description;
+            impl MemberBasic for description {
+                fn name(&self) -> &str {
+                    stringify!(description)
+                }
+            }
+            impl Member for description {
+                type Collection = todo;
+                type Data = Option<String>;
+            }
+        }
+
+        const _: () = {
+            use ::claw_ql::prelude::macro_derive_collection::*;
+            use todo_members::*;
+
+            impl CollectionBasic for todo {
+                fn table_name_lower_case(&self) -> &'static str {
+                    stringify!(todo)
+                }
+                fn table_name(&self) -> &'static str {
+                    stringify!(Todo)
+                }
+            }
+
+            impl Collection for todo {
+                type Partial = TodoPartial;
+                type Data = Todo;
+                type Members = (title, done, description,);
+                type Id = SingleIncremintalInt;
+                fn members(&self) -> &Self::Members {
+                    &(title, done, description,)
+                }
+                fn id(&self) -> &Self::Id {
+                    &SingleIncremintalInt
+                }
+            }
+
+            impl HasHandler for Todo {
+                type Handler = todo;
+            }
+
+            impl HasHandler for TodoPartial {
+                type Handler = todo;
+            }
+
+            impl<S> Members<S> for todo
+            {
+                fn members_names(&self) -> impl Iterator<Item = &str> {
+                    [
+                        stringify!(title),
+                        stringify!(done),
+                        stringify!(description),
+                    ].into_iter()
+                }
+                fn members_as_boxed_expretions<'q>(&self) -> Vec<Box<dyn BoxedExpression<'q, S> + 'q>> {
+                    vec![
+                        Box::new(member_as_expression(title)),
+                        Box::new(member_as_expression(done)),
+                        Box::new(member_as_expression(description)),
+                    ]
+                }
+            }
+        };
+    };
+
+    assert_eq!(expect.to_string(), tobe.to_string());
+}

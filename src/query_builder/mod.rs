@@ -42,6 +42,36 @@ pub trait Expression<'q, Q> {
         Q: QueryBuilder;
 }
 
+pub trait MutExpression<'q, S> {
+    type Rest;
+    fn stage_1(self, bind_ctx: &mut BindBuilder<'q, S>) -> Self::Rest
+    where
+        S: DatabaseExt;
+    fn stage_2(rest: Self::Rest, syntax_ctx: &mut SyntaxBuilder<'q, S>)
+    where
+        S: DatabaseExt;
+}
+
+impl<'q, S, T> MutExpression<'q, S> for T
+where
+    T: Expression<'q, S>,
+{
+    type Rest = RestDefaultImpl;
+    fn stage_1(self, bind_ctx: &mut BindBuilder<'q, S>) -> Self::Rest
+    where
+        S: DatabaseExt,
+    {
+        RestDefaultImpl(self.expression(bind_ctx))
+    }
+
+    fn stage_2(rest: Self::Rest, syntax_ctx: &mut SyntaxBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+        rest.resume(syntax_ctx)
+    }
+}
+
 pub trait ColumPositionConstraint {}
 pub trait WhereItem<Base> {}
 pub trait SelectListItem {}

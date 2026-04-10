@@ -118,19 +118,19 @@ INSERT INTO StudentCourse (student_id, course_id) VALUES
         res,
         Some(LinkedOutput {
             id: 1,
-            attr: Student {
+            attributes: Student {
                 name: "Alice Smith".to_string()
             },
-            links: (vec![
+            link: (vec![
                 CollectionOutput {
                     id: 1,
-                    attr: Course {
+                    attributes: Course {
                         code: "CS101".to_string(),
                     },
                 },
                 CollectionOutput {
                     id: 2,
-                    attr: Course {
+                    attributes: Course {
                         code: "DB200".to_string(),
                     },
                 },
@@ -147,10 +147,10 @@ INSERT INTO StudentCourse (student_id, course_id) VALUES
         res,
         Some(LinkedOutput {
             id: 1,
-            attr: Course {
+            attributes: Course {
                 code: "CS101".to_string()
             },
-            links: (
+            link: (
                 CountResult(2), // there are two students enroled in CS101
             ),
         },)

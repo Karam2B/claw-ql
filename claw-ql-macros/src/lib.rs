@@ -5,23 +5,36 @@ use quote::ToTokens;
 mod collection_derive;
 mod dynamic_fn_mod;
 mod flat_struct;
+mod from_row_alias_derive;
+mod on_migrate_derive;
 mod pdev;
 mod relation;
 mod sql_mod;
 // #[cfg(test)]
 // mod tests;
 
+#[cfg(test)]
+#[track_caller]
+fn expect_to_eq(expect: proc_macro2::TokenStream, to_be: proc_macro2::TokenStream) {
+    pretty_assertions::assert_eq!(expect.to_string(), to_be.to_string())
+}
+
+#[proc_macro_derive(OnMigrate)]
+#[proc_macro_error]
+pub fn on_migrate(input: TokenStream) -> TokenStream {
+    on_migrate_derive::main(input.into()).into()
+}
+
 #[proc_macro_derive(Collection)]
 #[proc_macro_error]
 pub fn collection(input: TokenStream) -> TokenStream {
-    let derive = match syn::parse::<syn::DeriveInput>(input) {
-        Ok(data) => data,
-        Err(err) => {
-            return err.to_compile_error().into();
-        }
-    };
+    collection_derive::main(input.into()).into()
+}
 
-    collection_derive::main(derive).into()
+#[proc_macro_derive(FromRowAlias)]
+#[proc_macro_error]
+pub fn from_row_alias(input: TokenStream) -> TokenStream {
+    from_row_alias_derive::main(input.into()).into()
 }
 
 #[proc_macro]
@@ -89,27 +102,58 @@ mod simple_enum_mod {
             }
         };
 
-        struct variants(Vec<syn::Ident>);
+        #[derive(Default)]
+        struct variants {
+            units: Vec<syn::Ident>,
+            zeros: Vec<syn::Ident>,
+            ones: Vec<(syn::Ident, syn::Type)>,
+        };
         impl VisitMut for variants {
             fn visit_variant_mut(&mut self, i: &mut syn::Variant) {
-                match i.fields {
+                let ident = i.ident.clone();
+                match &i.fields {
                     syn::Fields::Unit => {
-                        let ident = i.ident.clone();
                         let f: Field = parse_quote!(#ident);
                         i.fields = syn::Fields::Unnamed(syn::FieldsUnnamed {
                             paren_token: Default::default(),
                             unnamed: Punctuated::from_iter([f]),
                         });
-                        self.0.push(ident);
+                        self.units.push(ident);
                     }
-                    _ => abort!(i.fields, "remove these for simple enums!"),
+                    syn::Fields::Named(fields_named) => {
+                        abort!(
+                            fields_named.span(),
+                            "nammed fields cannot be supported for simple enums!"
+                        );
+                    }
+                    syn::Fields::Unnamed(fields_unnamed) if fields_unnamed.unnamed.len() == 0 => {
+                        self.zeros.push(ident);
+                    }
+                    syn::Fields::Unnamed(fields_unnamed) if fields_unnamed.unnamed.len() == 1 => {
+                        let ty = fields_unnamed.unnamed.first().unwrap().ty.clone();
+                        self.ones.push((ident, ty));
+                    }
+                    syn::Fields::Unnamed(fields_unnamed) => {
+                        abort!(
+                            fields_unnamed.span(),
+                            "unnamed fields has to be either one or zero"
+                        );
+                    }
                 }
+
+                // _ => ,
             }
         }
 
-        let mut v = variants(Default::default());
+        let mut v = variants::default();
         v.visit_item_enum_mut(&mut input);
-        let variants_ = v.0;
+        let units = v.units;
+        if v.zeros.is_empty().not() {
+            todo!("contains zeros")
+        }
+        if v.ones.is_empty().not() {
+            todo!("contains ones")
+        }
         let this = &input.ident;
 
         let mut ret = quote! {
@@ -131,7 +175,7 @@ mod simple_enum_mod {
                 macro_rules! #macro_name {
                     ($this:expr, $method:ident) => {
                         match $this {
-                            #(#this::#variants_(v) => v.$method()),*
+                            #(#this::#units(v) => v.$method()),*
                         }
                     };
                 }
@@ -156,7 +200,7 @@ mod simple_enum_mod {
                         impl From<#this> for $of {
                             fn from(value: #this) -> Self {
                                 match value {
-                                    #(#this::#variants_(v) => Self::#variants_(v)),*
+                                    #(#this::#units(v) => Self::#units(v)),*
                                 }
                             }
                         }
@@ -181,7 +225,7 @@ mod simple_enum_mod {
                 macro_rules! #macro_name {
                     ($this:expr, |$new_ident:ident| $method:tt) => {
                         match $this {
-                            #(#this::#variants_(v) => (|$new_ident: #variants_| $method)(v),)*
+                            #(#this::#units(v) => (|$new_ident: #units| $method)(v),)*
                         }
                     };
                 }
@@ -209,7 +253,7 @@ mod simple_enum_mod {
             ));
         }
 
-        for each in variants_ {
+        for each in units {
             ret.extend(quote! {
                 impl From<#each> for #this {
                     fn from(value: #each) -> Self {
@@ -223,7 +267,7 @@ mod simple_enum_mod {
     }
 
     use proc_macro_error::entry_point;
-    use std::panic::AssertUnwindSafe;
+    use std::{ops::Not, panic::AssertUnwindSafe};
 
     #[test]
     pub fn failing() {

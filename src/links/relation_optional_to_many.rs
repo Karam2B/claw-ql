@@ -1,14 +1,262 @@
 #![allow(unexpected_cfgs)]
-use hyper::StatusCode;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Clone)]
 #[allow(non_camel_case_types)]
-pub struct optional_to_many<F, T> {
-    pub foriegn_key: String,
+pub struct optional_to_many<Id, F, T> {
+    pub foriegn_key: Id,
     pub from: F,
     pub to: T,
+}
+
+mod impl_on_migrate {
+    use crate::{
+        collections::{Collection, Id},
+        expressions::{
+            col_def, foriegn_key, id_constraint, on_delete_set_null, sqlx_type, table_as_expression,
+        },
+        links::relation_optional_to_many::optional_to_many,
+        on_migrate::OnMigrate,
+        statements::AddColumn,
+    };
+
+    impl<F: Collection + Clone, T: Collection<Id: Id<SqlIdent: ToString>>> OnMigrate
+        for optional_to_many<String, F, T>
+    {
+        type Statements = AddColumn<
+            table_as_expression<F>,
+            col_def<
+                String,
+                sqlx_type<Option<i64>>,
+                (id_constraint<String, foriegn_key<(on_delete_set_null,)>>,),
+            >,
+        >;
+        fn statments(&self) -> Self::Statements {
+            AddColumn {
+                table: table_as_expression(self.from.clone()),
+                col_def: col_def {
+                    name: self.foriegn_key.to_string(),
+                    ty: sqlx_type::default(),
+                    constraints: (id_constraint(
+                        format!("fk_{}", self.foriegn_key),
+                        foriegn_key {
+                            references_table: self.to.table_name().to_string(),
+                            references_col: self.to.id().ident().to_string(),
+                            ons: (on_delete_set_null,),
+                        },
+                    ),),
+                },
+            }
+        }
+    }
+}
+
+mod impl_fetch_one {
+    use sqlx::{ColumnIndex, Database, Row, Type};
+
+    use crate::{
+        collections::{Collection, SingleIncremintalInt},
+        expressions::{left_join, scoped_column, table},
+        extentions::Members,
+        from_row::{FromRowAlias, pre_alias},
+        links::relation_optional_to_many::optional_to_many,
+        operations::{
+            CollectionOutput, Operation,
+            fetch_one::{LinkFetchOne, SelectStatementExtendableParts},
+        },
+    };
+
+    impl<S, F, T> LinkFetchOne<S> for optional_to_many<String, F, T>
+    where
+        T: Collection<Id = SingleIncremintalInt> + Members<S>,
+        T: for<'r> FromRowAlias<'r, <S as Database>::Row>,
+        F: Collection,
+        S: Database,
+        i64: for<'q> sqlx::Decode<'q, S> + Type<S>,
+        for<'q> &'q str: ColumnIndex<S::Row>,
+    {
+        type Joins = (left_join,);
+
+        type Wheres = ();
+
+        fn extend_select(
+            &self,
+        ) -> SelectStatementExtendableParts<
+            //
+            Vec<scoped_column<String, String>>,
+            Self::Joins,
+            Self::Wheres,
+        > {
+            let mut to_members =
+                vec![table(self.to.table_name().to_string()).col("id".to_string())];
+
+            to_members.extend(
+                Members::members_names(&self.to)
+                    .into_iter()
+                    .map(|e| return table(self.to.table_name().to_string()).col(e.to_string())),
+            );
+
+            SelectStatementExtendableParts {
+                non_aggregating_select_items: to_members,
+                non_duplicating_joins: (left_join {
+                    ft: self.to.table_name().to_string(),
+                    fc: "id".to_string(),
+                    lt: self.from.table_name().to_string(),
+                    lc: self.foriegn_key.clone(),
+                },),
+                wheres: (),
+            }
+        }
+
+        type Inner = CollectionOutput<i64, T::Data>;
+
+        type SubOp = ();
+
+        fn sub_op(&self, row: pre_alias<<S as sqlx::Database>::Row>) -> (Self::SubOp, Self::Inner)
+        where
+            S: sqlx::Database,
+        {
+            (
+                (),
+                CollectionOutput {
+                    id: row.0.get(format!("{}id", row.1).as_str()),
+                    attributes: self.to.pre_alias(row).unwrap(),
+                },
+            )
+        }
+
+        type Output = CollectionOutput<i64, T::Data>;
+
+        fn take(
+            self,
+            _: <Self::SubOp as Operation<S>>::Output,
+            inner: Self::Inner,
+        ) -> Self::Output {
+            inner
+        }
+    }
+}
+
+// #[cfg(test)]
+// mod test {
+//     use crate as claw_ql;
+//     use claw_ql_macros::{Collection, OnMigrate};
+
+//     use crate::on_migrate::OnMigrate;
+//     use crate::query_builder::QueryBuilder;
+
+//     #[derive(OnMigrate, Collection)]
+//     pub struct Todo {
+//         pub title: String,
+//     }
+
+//     fn _assert_stmt_impl() {
+//         let mut b = QueryBuilder::<'_, sqlx::Sqlite>::default;
+
+//         OnMigrate::statments(&optional_to_many {
+//             foriegn_key: (),
+//             from: (),
+//             to: (),
+//         })
+//     }
+// }
+
+#[allow(unused)]
+#[warn(unused_must_use)]
+pub mod impl_dynamic_link {
+    use std::{collections::HashMap, sync::Arc};
+
+    use serde::{Deserialize, Serialize};
+
+    use crate::{
+        collections::CollectionBasic,
+        json_client::json_collection::JsonCollection,
+        links::{
+            dynamic_link::{CollectionsStore, DynamicLink},
+            relation_optional_to_many::optional_to_many,
+        },
+    };
+
+    pub struct OptionalToManyLinks<DynamicBase> {
+        pub all: Vec<optional_to_many<String, DynamicBase, DynamicBase>>,
+    }
+
+    #[derive(Deserialize)]
+    pub struct RelationOnRequest {
+        to: String,
+        #[serde(default = "set_def")]
+        id: String,
+    }
+
+    #[derive(Serialize)]
+    pub struct RelationNotFound {
+        pub expected_id: String,
+        pub expected_from: String,
+        pub expected_to: String,
+    }
+
+    fn set_def() -> String {
+        "default".to_string()
+    }
+
+    impl<
+        DynamicBase: CollectionBasic + Clone + CollectionsStore<Store = HashMap<String, DynamicBase>>,
+        S: 'static,
+    > DynamicLink<DynamicBase, S> for OptionalToManyLinks<DynamicBase>
+    {
+        type OnRequest = optional_to_many<String, DynamicBase, DynamicBase>;
+
+        type OnRequestInput = RelationOnRequest;
+
+        type OnRequestError = RelationNotFound;
+
+        type CreateLinkOk = ();
+
+        type CreateLinkInput = ();
+
+        type CreateLinkError = ();
+
+        type ModifyLinkOk = ();
+
+        type ModifyLinkInput = ();
+
+        type ModifyLinkError = ();
+
+        fn on_request(
+            &self,
+            base: DynamicBase,
+            input: Self::OnRequestInput,
+        ) -> Result<Self::OnRequest, Self::OnRequestError> {
+            self.all
+                .iter()
+                .find(|e| {
+                    e.foriegn_key == input.id
+                        && e.from.table_name_lower_case() == base.table_name_lower_case()
+                        && e.to.table_name_lower_case() == input.to
+                })
+                .cloned()
+                .ok_or_else(|| RelationNotFound {
+                    expected_id: input.id,
+                    expected_from: base.table_name_lower_case().to_string(),
+                    expected_to: input.to,
+                })
+        }
+
+        fn create_link(
+            &self,
+            base: &HashMap<String, DynamicBase>,
+            input: Self::CreateLinkInput,
+        ) -> Result<Self::CreateLinkOk, Self::CreateLinkError> {
+            todo!()
+        }
+
+        fn modify_link(
+            &self,
+            base: &HashMap<String, DynamicBase>,
+            input: Self::ModifyLinkInput,
+        ) -> Result<Self::ModifyLinkOk, Self::ModifyLinkError> {
+            todo!()
+        }
+    }
 }
 
 #[cfg(feature = "skip_without_comment")]

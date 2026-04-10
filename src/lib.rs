@@ -1,13 +1,31 @@
-#![allow(non_camel_case_types)]
-#![allow(unused)]
-#![deny(unused_must_use)]
-use sqlx::{AnyPool, Database, Pool, Sqlite, SqlitePool};
-use std::marker::PhantomData;
+//! todo list
+//!
+//! - [ ] add where clase
+//! - [ ] make sql macro
+//! - [ ] clear out junk out of codebase
+//! - [ ] basic migrate function
+//! - [ ] make readme
+//!
+//!
+//! - [ ] MAJOR REALEASE
+//!
+//! - [ ] figure out nested where op
+//! - [ ] figure out nested links
+//! - [ ] json_client create link
+//! - [ ] json_client modify link
+//! - [ ] add many_to_many link type
+//! - [ ] add one_to_many link type
+//! - [ ] add date link type
+//! - [ ] add fetch many operation
+//! - [ ] add insert operation
+//! - [ ] add update operation
+//! - [ ] add delete operation
+//! - [ ] add more where operations
 
-pub mod build_tuple;
+// pub mod build_tuple;
 pub mod collections;
 pub mod execute;
-pub mod expressions;
+// pub mod expressions;
 // pub mod filters;
 // #[cfg(feature = "http")]
 // pub mod http;
@@ -15,88 +33,42 @@ pub mod expressions;
 // #[cfg(feature = "inventory")]
 // pub mod inventory;
 // pub mod json_client;
+#[path = "./json_client2/mod.rs"]
+pub mod json_client;
 // #[cfg(feature = "serde")]
 // pub mod json_query;
 // pub mod json_value_cmp;
 pub mod links;
 // pub mod migration;
-// pub mod operations;
+pub mod from_row;
 pub mod prelude;
+#[path = "./owned_query_builder/mod.rs"]
 pub mod query_builder;
+pub use query_builder::*;
+// pub mod query_builder;
+#[path = "./operations_2/mod.rs"]
+pub mod operations;
+pub mod update_mod;
+// pub mod operations;
 // pub mod on_migrate;
 // pub mod quick_query;
-pub mod statements;
-pub mod update_mod;
+// mod schema;
+// pub mod statements;
+// pub mod update_mod;
 // pub mod ident;
 // pub mod macros {
 //     pub use claw_ql_macros::*;
 // }
-mod extend_sqlite;
-
-pub use query_builder::*;
+pub mod connect_in_memory;
+pub use connect_in_memory::*;
+pub mod database_extention;
+pub use database_extention::*;
+#[rustfmt::skip]
+pub mod count;
+pub mod extend_sqlite;
 pub use serde_json::Value as JsonValue;
 pub use sqlx;
-use std::any::Any;
-
-#[derive(Debug, Clone)]
-pub struct Schema<C, L> {
-    pub collections: C,
-    pub links: L,
-}
-
-pub trait IntoInferFromPhantom<I> {
-    fn into_pd(self, _: PhantomData<I>) -> I;
-}
-
-impl<F, I> IntoInferFromPhantom<I> for F
-where
-    I: From<F>,
-{
-    #[inline]
-    fn into_pd(self, _: PhantomData<I>) -> I {
-        self.into()
-    }
-}
-
-pub mod any_set {
-    use std::{
-        any::{Any, TypeId},
-        collections::HashMap,
-    };
-
-    #[derive(Default)]
-    pub struct AnySet {
-        inner: HashMap<TypeId, Box<dyn Any>>,
-    }
-
-    pub enum InsertOption<T> {
-        Replaces(T),
-        WasNew,
-    }
-
-    impl AnySet {
-        pub fn set<T: Any>(&mut self, item: T) -> InsertOption<T> {
-            let type_id = item.type_id();
-            match self.inner.insert(type_id, Box::new(item)) {
-                Some(replace) => InsertOption::Replaces(*replace.downcast::<T>().unwrap()),
-                None => InsertOption::WasNew,
-            }
-        }
-        pub fn get_mut<T: Any>(&mut self) -> Option<&mut T> {
-            let type_id = TypeId::of::<T>();
-            let get = self.inner.get_mut(&type_id);
-
-            get.map(|e| e.as_mut().downcast_mut::<T>().unwrap())
-        }
-        pub fn get<T: Any>(&self) -> Option<&T> {
-            let type_id = TypeId::of::<T>();
-            let get = self.inner.get(&type_id);
-
-            get.map(|e| e.as_ref().downcast_ref::<T>().unwrap())
-        }
-    }
-}
-
-pub trait ConnectInMemory: Database {
-    fn connect_in_memory() -> impl Future<Output = Pool<Self>>;
-}
+pub mod extentions;
+#[path = "./on_migrate2.rs"]
+pub mod on_migrate;
+pub mod zero_sized_default;

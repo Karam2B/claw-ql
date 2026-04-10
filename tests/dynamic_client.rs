@@ -285,7 +285,10 @@ async fn select_one(
                 link.from_row(&r);
             }
 
-            Ok(CollectionOutput { id, attr })
+            Ok(CollectionOutput {
+                id,
+                attributes: attr,
+            })
         })
         .await;
 
@@ -304,8 +307,8 @@ async fn select_one(
 
     Ok(LinkedOutput {
         id: res.id,
-        attr: res.attr,
-        links,
+        attributes: res.attr,
+        link: links,
     })
 }
 

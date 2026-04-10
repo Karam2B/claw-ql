@@ -1,20 +1,12 @@
 #![allow(non_camel_case_types)]
-use std::collections::HashMap;
-
-use claw_ql_macros::simple_enum;
-use hyper::StatusCode;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use serde_json::Value as JsonValue;
-use serde_json::from_value;
-
-use crate::QueryBuilder;
-use crate::collections::Collection;
-use crate::collections::CollectionBasic;
-use crate::collections::MemberBasic;
+#![allow(unused)]
+#![warn(unused_must_use)]
 
 // pub mod date_mod;
 // pub mod group_by;
 // pub mod relation_many_to_many;
+pub mod dynamic_link;
+pub mod functional_impls;
 pub mod relation_optional_to_many;
 // pub mod set_id;
 // pub mod set_new;
@@ -24,8 +16,9 @@ pub trait Link<Base> {
     fn spec(self, base: &Base) -> Self::Spec;
 }
 
-pub trait LinkedToCollection {
-    type To;
+/// link back Link::Spec to Base
+pub trait LinkedToBase {
+    type Base;
 }
 
 pub trait LinkedViaId {}
@@ -49,17 +42,14 @@ mod deprecated {
         // use serde::{Deserialize, Serialize, de::DeserializeOwned};
         // use sqlx::Executor;
         // use std::{any::Any, ops::Not, sync::Arc};
-
         // #[derive(Serialize, Deserialize)]
         // #[allow(non_camel_case_types)]
         // pub struct empty_object {}
-
         // #[derive(Clone)]
         // pub struct Relation<From, To> {
         //     pub from: From,
         //     pub to: To,
         // }
-
         // // impl Link<$for> for Relation<$for, $to> { .. }
 
         // impl<F: CollectionBasic, T: CollectionBasic> Relation<F, T> {

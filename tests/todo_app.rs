@@ -167,15 +167,15 @@ async fn _workflow_generic() {
         res,
         LinkedOutput {
             id: 6,
-            attr: Todo {
+            attributes: Todo {
                 title: "new todo".to_string(),
                 done: false,
                 description: None
             },
-            links: (
+            link: (
                 CollectionOutput {
                     id: 4,
-                    attr: Category {
+                    attributes: Category {
                         title: "new category".to_string()
                     }
                 },
@@ -213,14 +213,14 @@ async fn _workflow_generic() {
         res,
         Some(LinkedOutput {
             id: 4,
-            attr: Todo {
+            attributes: Todo {
                 title: "todo_4".to_string(),
                 done: false,
                 description: None
             },
-            links: (Some(CollectionOutput {
+            link: (Some(CollectionOutput {
                 id: 1,
-                attr: Category {
+                attributes: Category {
                     title: "category_1".to_string()
                 }
             }),),
@@ -233,14 +233,14 @@ async fn _workflow_generic() {
         res,
         Some(LinkedOutput {
             id: 4,
-            attr: Todo {
+            attributes: Todo {
                 title: "todo_4".to_string(),
                 done: false,
                 description: None
             },
-            links: (Some(CollectionOutput {
+            link: (Some(CollectionOutput {
                 id: 1,
-                attr: Category {
+                attributes: Category {
                     title: "category_1".to_string()
                 }
             }),),

@@ -6,22 +6,23 @@ pub mod select_one_op;
 pub mod update_one_op;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct LinkedOutput<C, L> {
-    pub id: i64,
+pub struct LinkedOutput<Id, C, L> {
+    pub id: Id,
     pub attr: C,
     pub links: L,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct CollectionOutput<C> {
-    pub id: i64,
+pub struct CollectionOutput<Id, C> {
+    pub id: Id,
     pub attr: C,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct IdOutput {
-    pub id: i64,
+pub struct IdOutput<Id> {
+    pub id: Id,
 }
+
 impl<C, L> From<LinkedOutput<C, L>> for CollectionOutput<C> {
     fn from(value: LinkedOutput<C, L>) -> Self {
         CollectionOutput {
