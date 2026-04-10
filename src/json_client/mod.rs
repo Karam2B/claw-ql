@@ -18,6 +18,8 @@ use std::{collections::HashMap, pin::Pin, sync::Arc};
 
 pub mod add_collection;
 pub mod axum_router_mod;
+pub mod http_error;
+pub mod json_collection;
 pub mod realtime;
 pub mod select_one;
 pub use select_one::SelectOneJsonFragment;
@@ -332,6 +334,34 @@ where
             .expect("data integrity bug indicate the bug is within `claw_ql` code")
     }
 }
+
+// pub trait LiqFilter<Q>: Send + Sync {
+//     fn on_select(
+//         &self,
+//         rest: serde_json::Value,
+//         collection: &dyn JsonCollection<Q>,
+//         st: &mut SelectSt<Q>,
+//     ) -> Result<(), FilterError>
+//     where
+//         Q: QueryBuilder;
+// }
+
+// impl<Q, T> LiqFilter<Q> for PhantomData<T>
+// where
+//     Q: QueryBuilder,
+//     T: Filter<Q, dyn JsonCollection<Q>> + Send + Sync + DeserializeOwned,
+// {
+//     fn on_select(
+//         &self,
+//         rest: serde_json::Value,
+//         handler: &dyn JsonCollection<Q>,
+//         st: &mut SelectSt<Q>,
+//     ) -> Result<(), FilterError> {
+//         let s = serde_json::from_value::<T>(rest).map_err(|e| FailedToParseBody(e.to_string()))?;
+//         s.on_select(handler, st);
+//         Ok(())
+//     }
+// }
 
 // === Other Requirement ===
 pub enum RuntimeResult<T> {

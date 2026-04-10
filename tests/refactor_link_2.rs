@@ -48,6 +48,21 @@ impl LinkedToCollection for may_have_a_category {
     type To = category;
 }
 
+impl Link<todo> for category {
+    type Spec = optional_to_many<todo, category>;
+    fn spec(self, c: &todo) -> Self::Spec {
+        optional_to_many {
+            foriegn_key: "".to_string(),
+            from: todo,
+            to: category,
+        }
+    }
+}
+
+impl LinkedToCollection for category {
+    type To = todo;
+}
+
 impl DatedTrait for todo {}
 
 pub mod link_method {

@@ -1,3 +1,4 @@
+#![allow(non_camel_case_types)]
 #![allow(unused)]
 #![deny(unused_must_use)]
 use sqlx::{AnyPool, Database, Pool, Sqlite, SqlitePool};
@@ -7,30 +8,34 @@ pub mod build_tuple;
 pub mod collections;
 pub mod execute;
 pub mod expressions;
-pub mod filters;
-#[cfg(feature = "http")]
-pub mod http;
-mod identity_management;
-#[cfg(feature = "inventory")]
-pub mod inventory;
-pub mod json_client;
-#[cfg(feature = "serde")]
-pub mod json_query;
-pub mod json_value_cmp;
+// pub mod filters;
+// #[cfg(feature = "http")]
+// pub mod http;
+// mod identity_management;
+// #[cfg(feature = "inventory")]
+// pub mod inventory;
+// pub mod json_client;
+// #[cfg(feature = "serde")]
+// pub mod json_query;
+// pub mod json_value_cmp;
 pub mod links;
-pub mod migration;
-pub mod operations;
+// pub mod migration;
+// pub mod operations;
 pub mod prelude;
 pub mod query_builder;
+// pub mod on_migrate;
 // pub mod quick_query;
 pub mod statements;
 pub mod update_mod;
-pub mod macros {
-    pub use claw_ql_macros::*;
-}
+// pub mod ident;
+// pub mod macros {
+//     pub use claw_ql_macros::*;
+// }
+mod extend_sqlite;
 
 pub use query_builder::*;
 pub use serde_json::Value as JsonValue;
+pub use sqlx;
 use std::any::Any;
 
 #[derive(Debug, Clone)]
@@ -94,78 +99,4 @@ pub mod any_set {
 
 pub trait ConnectInMemory: Database {
     fn connect_in_memory() -> impl Future<Output = Pool<Self>>;
-}
-
-impl ConnectInMemory for sqlx::Any {
-    fn connect_in_memory() -> impl Future<Output = Pool<Self>> {
-        async { AnyPool::connect("sqlite::memory:").await.unwrap() }
-    }
-}
-impl ConnectInMemory for Sqlite {
-    fn connect_in_memory() -> impl Future<Output = Pool<Self>> {
-        async { SqlitePool::connect("sqlite::memory:").await.unwrap() }
-    }
-}
-
-pub mod ident {
-    // use core::hash;
-    // use std::{
-    //     collections::{HashMap, HashSet},
-    //     hash::Hash,
-    // };
-
-    // use crate::collections::CollectionBasic;
-
-    // #[derive(Eq, PartialEq, Clone, Hash)]
-    // pub enum TypeIdent {
-    //     Leaf(&'static str),
-    //     Branch(&'static str, Vec<TypeIdent>),
-    // }
-
-    // impl TypeIdent {
-    //     pub fn leaf(name: &'static str) -> TypeIdent {
-    //         TypeIdent::Leaf(name)
-    //     }
-    //     pub fn branch(name: &'static str, to: Vec<TypeIdent>) -> Result<TypeIdent, ()> {
-    //         let mut ve = vec![];
-    //         let mut set = HashSet::new();
-    //         for each in to {
-    //             let name = match each {
-    //                 TypeIdent::Leaf(s) => s,
-    //                 TypeIdent::Branch(s, _) => s,
-    //             };
-    //             let false_if_already_exist = set.insert(name);
-    //             if false_if_already_exist == false {
-    //                 return Err(());
-    //             }
-    //             ve.push(each.clone());
-    //         }
-    //         Ok(TypeIdent::Branch(name, ve))
-    //     }
-    // }
-
-    // pub struct Singlton {
-    //     _priv: (),
-    // }
-
-    // static SINGLTON: Singlton = Singlton { _priv: () };
-
-    // pub trait AnyS<R> {
-    //     fn type_id(&self, reg: &'static R) -> TypeIdent;
-    // }
-
-    // impl<F: CollectionBasic, T: CollectionBasic> AnyS<Singlton> for Relation<F, T> {
-    //     fn type_id(&self, reg: &'static Singlton) -> TypeIdent {
-    //         TypeIdent::branch(
-    //             "relation",
-    //             [
-    //                 TypeIdent::leaf(self.from.table_name()),
-    //                 TypeIdent::leaf(self.to.table_name()),
-    //             ]
-    //             .into_iter()
-    //             .collect(),
-    //         )
-    //         .unwrap()
-    //     }
-    // }
 }

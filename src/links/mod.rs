@@ -8,20 +8,16 @@ use serde_json::Value as JsonValue;
 use serde_json::from_value;
 
 use crate::QueryBuilder;
-use crate::json_client::axum_router_mod::HttpError;
-use crate::migration::OnMigrate;
-use crate::operations::select_one_op::SelectOneFragment;
-use crate::{
-    collections::{CollectionHandler, FailedToParseBody},
-    json_client::{ErrorReporter, JsonCollection, JsonError, SelectOneJsonFragment},
-};
+use crate::collections::Collection;
+use crate::collections::CollectionBasic;
+use crate::collections::MemberBasic;
 
-pub mod date_mod;
-pub mod group_by;
-pub mod relation_many_to_many;
+// pub mod date_mod;
+// pub mod group_by;
+// pub mod relation_many_to_many;
 pub mod relation_optional_to_many;
-pub mod set_id;
-pub mod set_new;
+// pub mod set_id;
+// pub mod set_new;
 
 pub trait Link<Base> {
     type Spec;
@@ -34,127 +30,6 @@ pub trait LinkedToCollection {
 
 pub trait LinkedViaId {}
 pub trait LinkedViaIds {}
-
-pub struct Change {
-    pub sql: Vec<String>,
-    pub code: (),
-}
-
-pub trait LiqLink<S>: Send + Sync {
-    type This;
-    type CreateLinkInput;
-    type CreateLinkError;
-    type CreateLinkOk;
-    fn create_link(
-        &mut self,
-        collections: &HashMap<String, Box<dyn JsonCollection<S>>>,
-        base: &dyn JsonCollection<S>,
-        input: Self::CreateLinkInput,
-    ) -> Result<(Self::CreateLinkOk, Self::This), Self::CreateLinkError>;
-
-    type OnRequestInput;
-    type OnRequestError;
-    fn on_request(
-        &self,
-        base: &dyn JsonCollection<S>,
-        input: Self::OnRequestInput,
-    ) -> Result<Self::This, Self::OnRequestError>;
-}
-
-pub trait LiqLinkExt<S>: Send + Sync {
-    fn create_link(
-        &mut self,
-        collections: &HashMap<String, Box<dyn JsonCollection<S>>>,
-        base: &dyn JsonCollection<S>,
-        input: serde_json::Value,
-    ) -> Result<(serde_json::Value, Vec<String>), LiqError>;
-
-    fn on_select_one(
-        &self,
-        base: &dyn JsonCollection<S>,
-        input: serde_json::Value,
-    ) -> Result<Box<dyn SelectOneJsonFragment<S>>, LiqError>;
-    // fn on_select
-}
-
-#[derive(Debug)]
-pub struct RegisteredError(StatusCode, JsonValue);
-
-#[derive(Debug)]
-pub struct EntryIsNotFound {
-    pub filters: JsonValue,
-}
-
-impl HttpError for EntryIsNotFound {
-    fn status_code(&self) -> StatusCode {
-        StatusCode::NOT_FOUND
-    }
-}
-impl HttpError for RegisteredError {
-    fn status_code(&self) -> StatusCode {
-        self.0.clone()
-    }
-}
-
-#[simple_enum]
-#[derive(Debug)]
-pub enum LiqError {
-    RegisteredError,
-    FailedToParseBody,
-}
-
-impl<S, T> LiqLinkExt<S> for T
-where
-    T: LiqLink<S>,
-    S: QueryBuilder,
-    T::This: OnMigrate<S>,
-    T::This: SelectOneFragment<S>,
-    (T::This, <T::This as SelectOneFragment<S>>::Inner): SelectOneJsonFragment<S>,
-    T::CreateLinkInput: DeserializeOwned,
-    T::CreateLinkOk: Serialize,
-    T::CreateLinkError: Serialize + HttpError,
-    T::OnRequestInput: DeserializeOwned,
-    T::OnRequestError: Serialize + HttpError,
-{
-    fn create_link(
-        &mut self,
-        collections: &HashMap<String, Box<dyn JsonCollection<S>>>,
-        base: &dyn JsonCollection<S>,
-        input: serde_json::Value,
-    ) -> Result<(JsonValue, Vec<String>), LiqError> {
-        let input = from_value::<T::CreateLinkInput>(input)
-            .map_err(|e| LiqError::FailedToParseBody(FailedToParseBody(e.to_string())))?;
-
-        LiqLink::create_link(self, collections, base, input)
-            .map(|(this, mig)| {
-                (
-                    serde_json::to_value(this).unwrap(),
-                    mig.custom_migrate_statements(),
-                )
-            })
-            .map_err(|e| {
-                LiqError::RegisteredError(RegisteredError(
-                    todo!(),
-                    serde_json::to_value(e).unwrap(),
-                ))
-            })
-    }
-    fn on_select_one(
-        &self,
-        base: &dyn JsonCollection<S>,
-        input: serde_json::Value,
-    ) -> Result<Box<dyn SelectOneJsonFragment<S>>, LiqError> {
-        let input = from_value::<T::OnRequestInput>(input)
-            .map_err(|e| LiqError::FailedToParseBody(FailedToParseBody(e.to_string())))?;
-
-        let re = LiqLink::on_request(self, base, input).map_err(|e| {
-            let s = e.status_code();
-            LiqError::RegisteredError(RegisteredError(s, serde_json::to_value(e).unwrap()))
-        })?;
-
-        Ok(Box::new((re, Default::default())))
-    }
-}
 
 mod deprecated {
     mod relation {

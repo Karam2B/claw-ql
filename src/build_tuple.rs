@@ -12,32 +12,6 @@ pub trait TupleLastItem {
     fn get_mut(&mut self) -> &mut Self::Last;
 }
 
-pub trait ItemToElem<Dynn: ?Sized> {
-    fn into_boxed(self) -> Box<Dynn>;
-}
-
-// impl<D:?Sized> ItemToElem<D> for dyn std::any::Any {}
-
-impl<T: 'static> ItemToElem<dyn std::any::Any> for T {
-    fn into_boxed(self) -> Box<dyn std::any::Any> {
-        Box::new(self)
-    }
-}
-
-pub trait TupleToVec<Dynn: ?Sized> {
-    fn into_boxed_vec(self) -> Vec<Box<Dynn>>;
-}
-
-impl<Dynn: ?Sized, T0, T1> TupleToVec<Dynn> for (T0, T1)
-where
-    T0: ItemToElem<Dynn>,
-{
-    fn into_boxed_vec(self) -> Vec<Box<Dynn>> {
-        let b0 = self.0.into_boxed();
-        vec![]
-    }
-}
-
 impl BuildTuple for () {
     const LEN: usize = 0;
     type Bigger<N> = (N,);

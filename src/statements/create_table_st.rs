@@ -1,7 +1,7 @@
 #![allow(unused)]
 use std::{marker::PhantomData, ops::Not};
 
-use crate::{BindItem, Buildable, ColumPositionConstraint, QueryBuilder};
+use crate::{Buildable, ColumPositionConstraint, Expression, ExpressionToFragment, QueryBuilder};
 
 #[derive(Debug)]
 pub struct CreateTableSt<S: QueryBuilder> {
@@ -10,7 +10,7 @@ pub struct CreateTableSt<S: QueryBuilder> {
     pub(crate) columns: Vec<(String, S::Fragment)>,
     pub(crate) constraints: Vec<S::Fragment>,
     pub(crate) verbatim: Vec<String>,
-    pub(crate) ctx: S::Context1,
+    pub(crate) ctx: S,
     pub(crate) _sqlx: PhantomData<S>,
 }
 
@@ -23,10 +23,10 @@ pub mod header {
 }
 
 impl<S: QueryBuilder> Buildable for CreateTableSt<S> {
-    type Database = S;
+    type QueryBuilder = S;
 
     fn build(self) -> (String, S::Output) {
-        S::build_query(self.ctx, |ctx| {
+        S::to_output(self.ctx, |ctx| {
             let mut str = String::from(&self.header);
             str.push(' ');
 
@@ -40,7 +40,7 @@ impl<S: QueryBuilder> Buildable for CreateTableSt<S> {
 
             let mut clauses = Vec::new();
             for (mut col, constrain) in self.columns {
-                let constrain = S::build_sql_part_back(ctx, constrain);
+                let constrain = S::fragment_to_string(ctx, constrain);
                 // constrain can be () which build back to ""
                 if constrain.is_empty().not() {
                     col.push_str(&format!(" {}", constrain))
@@ -48,7 +48,7 @@ impl<S: QueryBuilder> Buildable for CreateTableSt<S> {
                 clauses.push(col);
             }
             for constraint in self.constraints {
-                let item = S::build_sql_part_back(ctx, constraint);
+                let item = S::fragment_to_string(ctx, constraint);
                 clauses.push(item);
             }
 
@@ -65,7 +65,7 @@ impl<S: QueryBuilder> Buildable for CreateTableSt<S> {
     }
 }
 
-impl<S: QueryBuilder> CreateTableSt<S> {
+impl<Q: QueryBuilder + Default> CreateTableSt<Q> {
     pub fn init(header: &str, table: &str) -> Self {
         Self {
             header: header.to_string(),
@@ -79,9 +79,9 @@ impl<S: QueryBuilder> CreateTableSt<S> {
     }
     pub fn column_def<C>(&mut self, name: &str, constraint: C)
     where
-        C: BindItem<S> + 'static + ColumPositionConstraint,
+        Q: ExpressionToFragment<'static, C> + ColumPositionConstraint,
     {
-        let item = S::handle_bind_item(constraint, &mut self.ctx);
+        let item = Q::expression_to_fragment(&mut self.ctx, constraint);
         self.columns.push((name.to_string(), item));
     }
 }

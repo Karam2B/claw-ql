@@ -1,79 +1,149 @@
 use std::marker::PhantomData;
 
-use crate::{Accept, BindItem, IntoInferFromPhantom, QueryBuilder};
+use crate::{
+    EncodeExtention, Expression, IntoInferFromPhantom, QueryBuilder, SanitzingMechanisim,
+    SelectListItem, WhereItem, sanitize::SanitizeAndHardcode,
+};
 
-pub struct Col {
-    pub(crate) table: Option<String>,
-    pub(crate) alias: Option<String>,
-    pub(crate) col: String,
-}
+impl SelectListItem for &'_ str {}
+impl SelectListItem for String {}
 
-impl From<Col> for String {
-    fn from(value: Col) -> Self {
-        format!(
-            "{}{}{}",
-            match value.table {
-                Some(table) => format!("{table}."),
-                None => "".to_string(),
-            },
-            value.col,
-            match value.alias {
-                Some(alias) => format!(" AS {alias}"),
-                None => "".to_string(),
-            }
-        )
+// impl<B,C> Member<B> for scoped_col<&str, C> where C: Member<B> {}
+// impl<B,C> Member<B> for scoped_col<String, C> where C: Member<B> {}
+// impl<B,C> Member<B> for col<C> where C: Member<B> {}
+
+// impl Member<&str> for &str {}
+// impl Member<String> for &str {}
+// impl Member<String> for String {}
+// impl Member<&'str> for String {}
+
+pub struct table<Table>(pub Table);
+
+impl<T> table<T> {
+    pub fn col<C>(self, c: C) -> scoped_col<T, C> {
+        scoped_col {
+            table: self.0,
+            col: c,
+        }
     }
 }
 
-pub struct ColEq<T> {
-    pub(crate) col: Col,
-    pub(crate) item: T,
+pub struct col<Name>(pub Name);
+
+impl<C> col<C> {
+    pub fn table<T>(self, t: T) -> scoped_col<T, C> {
+        scoped_col {
+            table: t,
+            col: self.0,
+        }
+    }
+
+    pub fn to_eq<ToEq>(self, to_eq: ToEq) -> col_to_eq<C, ToEq> {
+        col_to_eq {
+            select: self.0,
+            to_eq,
+        }
+    }
+
+    pub fn alias<As>(self, as_: As) -> aliased<col<C>, As> {
+        aliased { select: self, as_ }
+    }
 }
 
-impl<S, T> BindItem<S> for ColEq<T>
+impl<Name> SelectListItem for col<Name> {}
+impl<E, Name: SanitizeAndHardcode<E>> SanitizeAndHardcode<E> for col<Name> {
+    fn sanitize(&self) -> String {
+        self.0.sanitize()
+    }
+}
+
+pub struct col_to_eq<Name, ToEq> {
+    pub select: Name,
+    pub to_eq: ToEq,
+}
+
+impl<Name, ToEq> WhereItem<Name> for col_to_eq<Name, ToEq> {}
+
+impl<'q, S, Name, ToEq> Expression<'q, S> for col_to_eq<Name, ToEq>
 where
-    S: QueryBuilder,
-    S: Accept<T>,
+    S: SanitzingMechanisim,
+    Name: 'q + SelectListItem + SanitizeAndHardcode<S::SanitzingMechanisim>,
+    S: 'q + EncodeExtention<'q, ToEq>,
 {
-    fn bind_item(
+    fn expression(
         self,
-        ctx: &mut S::Context1,
-    ) -> impl FnOnce(&mut S::Context2) -> String + 'static + use<T, S> {
-        let acc = S::accept(self.item, ctx);
-        move |ctx2| {
-            format!(
-                "{} = {}",
-                self.col.into_pd(PhantomData::<String>),
-                acc(ctx2)
-            )
-        }
+        query_builder: &mut S,
+    ) -> impl FnOnce(&mut <S>::Context) -> String + 'q + use<'q, S, Name, ToEq>
+    where
+        S: QueryBuilder,
+    {
+        let to_eq = S::encode(query_builder, self.to_eq);
+        move |ctx| format!("{} = {}", self.select.sanitize(), to_eq(ctx))
     }
 }
 
-impl Col {
-    pub fn table(mut self, table: &str) -> Self {
-        self.table = Some(table.to_string());
-        self
-    }
-    pub fn alias(mut self, alias: &str) -> Self {
-        self.alias = Some(alias.to_string());
-        self
-    }
-    pub fn eq<T1>(self, value: T1) -> ColEq<T1> {
-        ColEq {
-            col: self,
-            item: value,
+pub struct scoped_col<Table, Col> {
+    pub table: Table,
+    pub col: Col,
+}
+
+impl<T, C> scoped_col<T, C> {
+    pub fn to_eq<ToEq>(self, to_eq: ToEq) -> col_to_eq<scoped_col<T, C>, ToEq> {
+        col_to_eq {
+            select: self,
+            to_eq,
         }
+    }
+
+    pub fn alias<As>(self, as_: As) -> aliased<scoped_col<T, C>, As> {
+        aliased { select: self, as_ }
+    }
+}
+
+impl<Table, Name> SelectListItem for scoped_col<Table, Name>
+where
+    Table: SelectListItem,
+    Name: SelectListItem,
+{
+}
+impl<E, Table, Name> SanitizeAndHardcode<E> for scoped_col<Table, Name>
+where
+    Table: SanitizeAndHardcode<E>,
+    Name: SanitizeAndHardcode<E>,
+{
+    fn sanitize(&self) -> String {
+        format!("{}.{}", self.table.sanitize(), self.col.sanitize())
+    }
+}
+
+pub struct aliased<Select, As> {
+    pub select: Select,
+    pub as_: As,
+}
+
+impl<Select, As> SelectListItem for aliased<Select, As>
+where
+    Select: SelectListItem,
+    As: SelectListItem,
+{
+}
+impl<E, Select, As> SanitizeAndHardcode<E> for aliased<Select, As>
+where
+    As: SanitizeAndHardcode<E>,
+    Select: SanitizeAndHardcode<E>,
+{
+    fn sanitize(&self) -> String {
+        format!("{} AS {}", self.select.sanitize(), self.as_.sanitize())
     }
 }
 
 pub mod is_null {
-    use sqlx::TypeInfo;
+    use sqlx::{Database, TypeInfo};
     use std::{marker::PhantomData, ops::Not};
 
     use sqlx::Type;
 
-    use crate::{BindItem, ColumPositionConstraint, QueryBuilder};
+    use crate::{ColumPositionConstraint, Expression, QueryBuilder};
 
     pub trait IsNull {
         fn is_null() -> bool;
@@ -82,15 +152,18 @@ pub mod is_null {
 
     impl<T> ColumPositionConstraint for ColumnTypeCheckIfNull<T> {}
 
-    impl<S, T> BindItem<S> for ColumnTypeCheckIfNull<T>
+    impl<Q, T> Expression<'static, Q> for ColumnTypeCheckIfNull<T>
     where
-        S: QueryBuilder,
-        T: Type<S> + IsNull,
+        Q: QueryBuilder,
+        Q: Database,
+        T: Type<Q> + IsNull,
     {
-        fn bind_item(
+        fn expression(
             self,
-            _: &mut <S as QueryBuilder>::Context1,
-        ) -> impl FnOnce(&mut <S as QueryBuilder>::Context2) -> String + 'static + use<T, S>
+            query_builder: &mut Q,
+        ) -> impl FnOnce(&mut <Q>::Context) -> String + use<Q, T> + 'static
+        where
+            Q: QueryBuilder,
         {
             |_| {
                 let ty = T::type_info();
@@ -154,27 +227,30 @@ pub mod is_null {
 pub mod primary_key {
     use std::marker::PhantomData;
 
-    use crate::{BindItem, ColumPositionConstraint, QueryBuilder};
+    use crate::{ColumPositionConstraint, Expression, QueryBuilder};
 
     pub struct PrimaryKey<S>(pub PhantomData<S>);
 
-    use sqlx::prelude::Type;
+    use sqlx::{Database, prelude::Type};
 
     impl<T> ColumPositionConstraint for PrimaryKey<T> {}
 
-    impl<S> BindItem<S> for PrimaryKey<S>
+    impl<Q> Expression<'static, Q> for PrimaryKey<Q>
     where
-        S: DatabaseDefaultPrimaryKey,
-        S: QueryBuilder,
-        S::KeyType: Type<S>,
+        Q: QueryBuilder,
+        Q::SqlxDb: Database,
+        Q::SqlxDb: DatabaseDefaultPrimaryKey<KeyType: Type<Q::SqlxDb>>,
     {
-        fn bind_item(
+        fn expression(
             self,
-            _ctx: &mut <S as QueryBuilder>::Context1,
-        ) -> impl FnOnce(&mut <S as QueryBuilder>::Context2) -> String + 'static + use<S> {
+            query_builder: &mut Q,
+        ) -> impl FnOnce(&mut <Q>::Context) -> String + 'static + use<Q>
+        where
+            Q: QueryBuilder,
+        {
             |_| {
-                let ty = S::KeyType::type_info();
-                format!("{} {}", ty, S::default_primary_key())
+                let ty = <Q::SqlxDb as DatabaseDefaultPrimaryKey>::KeyType::type_info();
+                format!("{} {}", ty, Q::SqlxDb::default_primary_key())
             }
         }
     }
@@ -205,14 +281,6 @@ pub mod exports {
     use super::*;
     use std::marker::PhantomData;
 
-    #[track_caller]
-    pub fn col(str: &str) -> Col {
-        Col {
-            table: None,
-            col: str.to_string(),
-            alias: None,
-        }
-    }
     pub fn primary_key<S: DatabaseDefaultPrimaryKey>() -> PrimaryKey<S> {
         PrimaryKey(PhantomData)
     }

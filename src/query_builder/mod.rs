@@ -1,138 +1,76 @@
-use sqlx::Database;
+use sqlx::{Database, Sqlite};
 
-pub mod any;
-pub mod sqlite;
+pub mod defered_builder;
+pub mod direct_builder;
+pub mod sanitize;
 
-pub trait SqlxExtention: Database {
-    fn phantom() -> Self;
-}
-
-impl SqlxExtention for sqlx::Sqlite {
-    fn phantom() -> Self {
-        sqlx::Sqlite
-    }
-}
-
-pub trait QueryBuilder: Database {
-    type Fragment;
-    type Context1: Default + 'static;
-    type Context2: From<Self::Context1>;
-
-    fn build_sql_part_back(ctx: &mut Self::Context2, from: Self::Fragment) -> String;
-
+pub trait QueryBuilder {
     type Output;
-
-    fn build_query(
-        ctx1: Self::Context1,
-        f: impl FnOnce(&mut Self::Context2) -> String,
+    type Fragment;
+    type Context;
+    type SqlxDb;
+    fn to_output(
+        self,
+        statement_builder: impl FnOnce(&mut Self::Context) -> String,
     ) -> (String, Self::Output);
+    fn fragment_to_string(ctx: &mut Self::Context, fragment: Self::Fragment) -> String;
+}
 
-    fn handle_bind_item<T>(t: T, ctx: &mut Self::Context1) -> Self::Fragment
-    where
-        T: BindItem<Self> + 'static;
+pub trait ExpressionToFragment<'q, T>: QueryBuilder {
+    fn expression_to_fragment(&mut self, expression: T) -> <Self as QueryBuilder>::Fragment;
+}
 
-    fn handle_accept<T>(t: T, ctx: &mut Self::Context1) -> Self::Fragment
-    where
-        T: 'static + Send,
-        Self: Accept<T>;
+// trait to extend sqlx's Encode trait -- adapted to fit the need of this library
+pub trait EncodeExtention<'q, T>: QueryBuilder {
+    fn encode(
+        &mut self,
+        val: T,
+    ) -> impl FnOnce(&mut Self::Context) -> String + 'q + use<'q, T, Self>;
 }
 
 pub trait Buildable: Sized {
-    type Database: QueryBuilder;
-    fn build(self) -> (String, <Self::Database as QueryBuilder>::Output);
+    type QueryBuilder: QueryBuilder;
+    fn build(self) -> (String, <Self::QueryBuilder as QueryBuilder>::Output);
 }
 
-pub trait BuildableAsRef {
-    type Database: QueryBuilder;
-
-    fn build(&self) -> (&str, <Self::Database as QueryBuilder>::Output);
-}
-
-impl<St> Buildable for St
-where
-    St: BuildableAsRef,
-{
-    type Database = St::Database;
-    fn build(self) -> (String, <Self::Database as QueryBuilder>::Output) {
-        let (string, output) = <Self as BuildableAsRef>::build(&self);
-        (string.to_string(), output)
-    }
-}
-
-pub trait BindItem<S: QueryBuilder> {
-    fn bind_item(
+pub trait Expression<'q, Q> {
+    fn expression(
         self,
-        ctx: &mut S::Context1,
-    ) -> impl FnOnce(&mut S::Context2) -> String + 'static + use<Self, S>;
+        query_builder: &mut Q,
+    ) -> impl FnOnce(&mut Q::Context) -> String + 'q + use<'q, Q, Self>
+    where
+        Q: QueryBuilder;
 }
 
 pub trait ColumPositionConstraint {}
+pub trait WhereItem<Base> {}
+pub trait SelectListItem {}
+pub trait JoinItem {}
 
-#[rustfmt::skip]
-mod impl_tuples {
-    use crate::{BindItem, ColumPositionConstraint, QueryBuilder};
-    use paste::paste;
+pub trait PositionalPlaceholder {
+    fn placeholder() -> &'static str;
+}
 
-        macro_rules! implt {
-        ($([$ty:ident, $part:literal],)*) => {
-    impl<S: QueryBuilder, $($ty,)*> BindItem<S> for ($($ty,)*)
-    where
-        $($ty: BindItem<S>,)*
-    {
-        fn bind_item(
-            self,
-            s: &mut <S as QueryBuilder>::Context1,
-        ) -> impl FnOnce(&mut <S as QueryBuilder>::Context2) -> String + 'static + 
-            use<$($ty,)* S>
-        {
-            let tuple = (
-                $(paste!(self.$part.bind_item(s)),)*
-            );
-            |ctx| {
-                let mut str = String::new();
+pub trait NamedPlaceholder {
+    fn placeholder(inc: usize) -> String;
+}
 
-                $(
-                str.push_str(&paste!(tuple.$part(ctx)));
-                str.push(' ');
-                )*
+pub trait SanitzingMechanisim {
+    type SanitzingMechanisim;
+}
 
-                str.pop().unwrap();
+mod sqlite {
+    use sqlx::Sqlite;
 
-                str
-            }
-        }
-    }
-        }} // end of macro
+    use crate::{NamedPlaceholder, SanitzingMechanisim, sanitize::by_double_quote};
 
-    impl<S: QueryBuilder> BindItem<S> for () {
-        fn bind_item(
-            self,
-            _: &mut <S as QueryBuilder>::Context1,
-        ) -> impl FnOnce(&mut <S as QueryBuilder>::Context2) -> String + 'static + use<S> {
-            |_| "".to_string()
+    impl NamedPlaceholder for Sqlite {
+        fn placeholder(inc: usize) -> String {
+            format!("${}", inc)
         }
     }
 
-    implt!([R0, 0],);
-    implt!([R0, 0], [R1, 1],);
-
-    impl ColumPositionConstraint for () {}
-    impl<T0> ColumPositionConstraint for (T0,) {}
-    impl<T0, T1> ColumPositionConstraint for (T0, T1) {}
-}
-
-pub trait Accept<This>: QueryBuilder + Send {
-    fn accept(
-        this: This,
-        ctx1: &mut Self::Context1,
-    ) -> impl FnOnce(&mut Self::Context2) -> String + 'static + Send + use<Self, This>;
-}
-
-pub trait IntoMutArguments<'q, DB>
-where
-    Self: Sized,
-    DB: Database,
-{
-    const LEN: usize;
-    fn into_arguments(self, argument: &mut DB::Arguments<'q>);
+    impl SanitzingMechanisim for Sqlite {
+        type SanitzingMechanisim = by_double_quote;
+    }
 }

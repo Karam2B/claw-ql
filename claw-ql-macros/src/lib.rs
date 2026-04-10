@@ -1,11 +1,13 @@
 use proc_macro::TokenStream;
 use proc_macro_error::proc_macro_error;
+use quote::ToTokens;
 
 mod collection_derive;
 mod dynamic_fn_mod;
 mod flat_struct;
 mod pdev;
 mod relation;
+mod sql_mod;
 // #[cfg(test)]
 // mod tests;
 
@@ -41,6 +43,30 @@ pub fn simple_enum(_attr: TokenStream, input: TokenStream) -> TokenStream {
     simple_enum_mod::main(input.into()).into()
 }
 
+#[doc(hidden)]
+#[allow(unreachable_code)]
+#[proc_macro_attribute]
+pub fn panic_for_fun(_attr: TokenStream, input: TokenStream) -> TokenStream {
+    proc_macro_error::entry_point(
+        || {
+            let fn_item = syn::parse::<syn::ItemFn>(input).unwrap();
+            proc_macro_error::abort!(fn_item.sig.ident.span(), "hi");
+            quote::quote!().into()
+        },
+        false,
+    )
+    .into()
+}
+
+#[proc_macro]
+#[proc_macro_error]
+pub fn sql(input: TokenStream) -> TokenStream {
+    match syn::parse::<sql_mod::statement>(input) {
+        Ok(ok) => ok.to_token_stream().into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
 mod simple_enum_mod {
     #![allow(unused)]
     #![warn(unused_must_use)]
@@ -52,7 +78,7 @@ mod simple_enum_mod {
     use quote::{quote, quote_spanned};
     use syn::{
         Field, FieldsNamed, ItemEnum, TypePath, parse_quote, parse_quote_spanned,
-        punctuated::Punctuated, visit::Visit, visit_mut::VisitMut,
+        punctuated::Punctuated, spanned::Spanned, visit::Visit, visit_mut::VisitMut,
     };
 
     pub fn main(input: TokenStream) -> TokenStream {
@@ -200,6 +226,24 @@ mod simple_enum_mod {
     use std::panic::AssertUnwindSafe;
 
     #[test]
+    pub fn failing() {
+        let expect = quote!(
+            #[derive(Debug)]
+            enum Bar {
+                Hi(String),
+            }
+        );
+
+        // todo: create test_entry_point
+        let expect = proc_macro_error::entry_point(|| main(expect).into(), true);
+
+        pretty_assertions::assert_eq!(
+            quote!(::core::compile_error! {"expected `enum`"}).to_string(),
+            expect.to_string()
+        );
+    }
+
+    #[test]
     fn simple_enum_test() {
         let expect = quote!(
             #[derive(Debug)]
@@ -272,7 +316,7 @@ mod simple_enum_mod {
             }
         };
 
-        pretty_assertions::assert_eq!(res.to_string(), output.to_string());
+        pretty_assertions::assert_eq!(expect.to_string(), to_be.to_string());
     }
 }
 

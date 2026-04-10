@@ -4,8 +4,8 @@
 /// implies intent to set a value or keep it.
 /// update::set(None) means to set a value to null even if it is possiblly non-null in database
 ///
-/// there is no way around having different serde implementation
-/// for serde trait, because Option<Option<T>> does not know
+/// there is no way around having different serde implementation from Option<T>
+/// because Option<Option<T>> does not know
 /// the difference between `{}` and `{val:null}` or might confuse
 /// Some(None) with None
 #[derive(Default, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]

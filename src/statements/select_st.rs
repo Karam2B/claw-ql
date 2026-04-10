@@ -1,72 +1,68 @@
 use std::marker::PhantomData;
 
-use crate::{Accept, BindItem, Buildable, QueryBuilder};
+use crate::{
+    Buildable, ExpressionToFragment, JoinItem, QueryBuilder, SanitzingMechanisim, SelectListItem,
+    WhereItem, sanitize::SanitizeAndHardcode,
+};
 
 pub struct SelectSt<S: QueryBuilder> {
     pub(crate) select_list: Vec<String>,
     pub(crate) where_clause: Vec<S::Fragment>,
-    pub(crate) joins: Vec<Box<dyn Join>>,
+    pub(crate) joins: Vec<String>,
     pub(crate) order_by: Vec<(String, bool)>,
     pub(crate) group_by: Option<String>,
     pub(crate) limit: Option<S::Fragment>,
     pub(crate) shift: Option<S::Fragment>,
-    pub(crate) ctx: S::Context1,
+    pub(crate) ctx: S,
     pub(crate) from: String,
     pub(crate) _sqlx: PhantomData<S>,
 }
 
-pub trait Join: 'static + Send + Sync {
-    fn display_from(self: Box<Self>, from: &str) -> String;
-    fn global_table(&self) -> &str;
-}
-
 #[allow(non_camel_case_types)]
 pub mod join {
-    use super::Join;
+    use crate::{
+        JoinItem,
+        sanitize::{SanitizeAndHardcode, by_double_quote},
+    };
 
     pub struct join {
         pub foriegn_table: String,
         pub foriegn_column: String,
+        pub local_table: String,
         pub local_column: String,
     }
 
-    impl Join for join {
-        fn display_from(self: Box<Self>, from: &str) -> String {
-            let Self {
-                foriegn_table,
-                foriegn_column,
-                local_column,
-            } = *self;
+    impl JoinItem for join {}
+    impl SanitizeAndHardcode<by_double_quote> for join {
+        fn sanitize(&self) -> String {
             format!(
-                " JOIN {foriegn_table} ON {foriegn_table}.{foriegn_column} = {self_from}.{local_column}",
-                self_from = from,
+                " JOIN {foriegn_table} ON {foriegn_table}.{foriegn_column} = {local_table}.{local_column}",
+                foriegn_table = String::sanitize(&self.foriegn_table),
+                foriegn_column = String::sanitize(&self.foriegn_column),
+                local_table = String::sanitize(&self.local_table),
+                local_column = String::sanitize(&self.local_column),
             )
-        }
-        fn global_table(&self) -> &str {
-            self.foriegn_table.as_str()
         }
     }
 
     pub struct left_join {
         pub foriegn_table: String,
         pub foriegn_column: String,
+        pub local_table: String,
         pub local_column: String,
     }
-    impl Join for left_join {
-        fn display_from(self: Box<Self>, from: &str) -> String {
-            let Self {
-                foriegn_table,
-                foriegn_column,
-                local_column,
-            } = *self;
-            format!(
-                " LEFT JOIN {foriegn_table} ON {foriegn_table}.{foriegn_column} = {self_from}.{local_column}",
-                self_from = from,
-            )
-        }
 
-        fn global_table(&self) -> &str {
-            self.foriegn_table.as_str()
+    impl JoinItem for left_join {}
+
+    impl SanitizeAndHardcode<by_double_quote> for left_join {
+        fn sanitize(&self) -> String {
+            format!(
+                "LEFT JOIN {foriegn_table} ON {foriegn_table}.{foriegn_column} = {local_table}.{local_column}",
+                foriegn_table = String::sanitize(&self.foriegn_table),
+                foriegn_column = String::sanitize(&self.foriegn_column),
+                local_table = String::sanitize(&self.local_table),
+                local_column = String::sanitize(&self.local_column),
+            )
         }
     }
 }
@@ -77,11 +73,11 @@ pub mod order_by {
 }
 
 impl<S: QueryBuilder> Buildable for SelectSt<S> {
-    type Database = S;
+    type QueryBuilder = S;
 
     #[track_caller]
     fn build(self) -> (String, <S as QueryBuilder>::Output) {
-        S::build_query(self.ctx, |ctx| {
+        S::to_output(self.ctx, |ctx| {
             let mut str = String::from("SELECT ");
 
             if self.select_list.len() == 0 {
@@ -99,12 +95,12 @@ impl<S: QueryBuilder> Buildable for SelectSt<S> {
             str.push_str(self.from.as_ref());
 
             for join_ in self.joins.into_iter() {
-                str.push_str(&join_.display_from(self.from.as_str()));
+                str.push_str(&join_);
             }
 
             let mut where_str = Vec::default();
             for item in self.where_clause {
-                let item = S::build_sql_part_back(ctx, item);
+                let item = S::fragment_to_string(ctx, item);
                 if item.is_empty() {
                     continue;
                 }
@@ -139,15 +135,17 @@ impl<S: QueryBuilder> Buildable for SelectSt<S> {
             }
 
             if let Some(limit) = self.limit {
-                let limit = S::build_sql_part_back(ctx, limit);
+                let limit = S::fragment_to_string(ctx, limit);
                 str.push_str(" LIMIT ");
                 str.push_str(&limit);
             }
 
             if let Some(shift) = self.shift {
-                let shift = S::build_sql_part_back(ctx, shift);
+                let shift = S::fragment_to_string(ctx, shift);
                 str.push_str(" OFFSET ");
                 str.push_str(&shift);
+
+                // panic!("hit {:?}", shift);
             }
 
             str.push_str(";");
@@ -156,8 +154,12 @@ impl<S: QueryBuilder> Buildable for SelectSt<S> {
     }
 }
 
-impl<S: QueryBuilder> SelectSt<S> {
-    pub fn init<T: AsRef<str>>(from: T) -> Self {
+impl<S: QueryBuilder + Default> SelectSt<S> {
+    pub fn init<T>(from: T, query_builder: S) -> Self
+    where
+        S: SanitzingMechanisim,
+        T: SelectListItem + SanitizeAndHardcode<S::SanitzingMechanisim>,
+    {
         SelectSt {
             select_list: Default::default(),
             where_clause: Default::default(),
@@ -166,7 +168,7 @@ impl<S: QueryBuilder> SelectSt<S> {
             limit: Default::default(),
             shift: Default::default(),
             ctx: Default::default(),
-            from: from.as_ref().to_string(),
+            from: from.sanitize(),
             _sqlx: PhantomData,
             group_by: None,
         }
@@ -174,30 +176,27 @@ impl<S: QueryBuilder> SelectSt<S> {
 
     pub fn group_by<T>(&mut self, item: T)
     where
-        T: Into<String>,
+        S: SanitzingMechanisim,
+        T: SanitizeAndHardcode<S::SanitzingMechanisim>,
     {
-        self.group_by = Some(item.into())
+        self.group_by = Some(item.sanitize())
     }
     pub fn select<T>(&mut self, item: T)
     where
-        T: Into<String>,
+        S: SanitzingMechanisim,
+        T: SelectListItem,
+        T: SanitizeAndHardcode<S::SanitzingMechanisim>,
     {
-        self.select_list.push(item.into())
+        self.select_list.push(item.sanitize())
     }
 
     #[track_caller]
-    pub fn join(&mut self, j: impl Join) {
-        let global_table = j.global_table();
-        if self
-            .joins
-            .iter()
-            .find(|e| e.global_table() == global_table)
-            .is_some()
-        {
-            panic!("table {} has been joined already", global_table);
-        }
-
-        self.joins.push(Box::new(j));
+    pub fn join<T>(&mut self, j: T)
+    where
+        S: SanitzingMechanisim,
+        T: JoinItem + SanitizeAndHardcode<S::SanitzingMechanisim>,
+    {
+        self.joins.push(j.sanitize());
     }
 
     pub fn order_by(&mut self, by: String, asc: bool) {
@@ -205,40 +204,40 @@ impl<S: QueryBuilder> SelectSt<S> {
     }
 
     #[track_caller]
-    pub fn offset<T>(&mut self, shift: T)
+    pub fn offset<'q, T>(&mut self, shift: T)
     where
-        S: Accept<T>,
-        T: Send + 'static,
+        S: ExpressionToFragment<'q, T>,
+        T: Send + 'q,
     {
         if self.shift.is_some() {
             panic!("limit has been set already");
         }
 
-        let limit = S::handle_accept(shift, &mut self.ctx);
+        let limit = S::expression_to_fragment(&mut self.ctx, shift);
 
         self.shift = Some(limit);
     }
 
     #[track_caller]
-    pub fn limit<T>(&mut self, limit: T)
+    pub fn limit<'q, T>(&mut self, limit: T)
     where
-        S: Accept<T>,
-        T: Send + 'static,
+        S: ExpressionToFragment<'q, T>,
+        T: Send + 'q,
     {
         if self.limit.is_some() {
             panic!("limit has been set already");
         }
 
-        let limit = S::handle_accept(limit, &mut self.ctx);
+        let limit = S::expression_to_fragment(&mut self.ctx, limit);
 
         self.limit = Some(limit);
     }
-    pub fn where_<T>(&mut self, item: T)
+    pub fn where_<'q, T>(&mut self, item: T)
     where
-        T: BindItem<S> + 'static,
+        T: WhereItem<String>,
+        S: ExpressionToFragment<'q, T>,
     {
-        let item = S::handle_bind_item(item, &mut self.ctx);
-
+        let item = S::expression_to_fragment(&mut self.ctx, item);
         self.where_clause.push(item);
     }
 }

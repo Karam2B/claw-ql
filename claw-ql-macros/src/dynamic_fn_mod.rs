@@ -15,7 +15,7 @@ pub fn main(input: TokenStream) -> TokenStream {
         }
     };
 
-    ret.extend(item_fn.to_token_stream());
+    // ret.extend(item_fn.to_token_stream());
 
     let handler = item_fn
         .sig
