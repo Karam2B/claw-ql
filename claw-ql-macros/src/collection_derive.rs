@@ -82,23 +82,36 @@ pub fn main(input: TokenStream) -> TokenStream {
     ts.extend(quote!(
         #[allow(non_camel_case_types)]
         pub mod #members_mod {
-        use ::claw_ql::prelude::macro_derive_collection::*;
-        use super::#this_lowercase;
+            use ::claw_ql::prelude::macro_derive_collection::*;
+            use super::#this_lowercase;
 
-        #(
-            #[derive(Clone, Default)]
-            pub struct #mem_name;
-            impl MemberBasic for #mem_name {
+            #(
+                #[derive(Clone, Default)]
+                pub struct #mem_name;
+                impl MemberBasic for #mem_name {
+                    fn name(&self) -> &str {
+                        stringify!(#mem_name)
+                    }
+                }
+                impl Member for #mem_name {
+                    type Collection = #this_lowercase;
+                    type Data = #mem_ty;
+                }
+            )*
+
+            // because Collection::id = SigngleIncId
+            pub struct id;
+            impl MemberBasic for id {
                 fn name(&self) -> &str {
-                    stringify!(#mem_name)
+                    SingleIncremintalInt.ident()
                 }
             }
-            impl Member for #mem_name {
+            impl Member for id {
                 type Collection = #this_lowercase;
-                type Data = #mem_ty;
+                type Data = <SingleIncremintalInt as Id>::Data;
             }
-        )*
-    }));
+        }
+    ));
 
     ts.extend(quote!( const _: () = {
         use ::claw_ql::prelude::macro_derive_collection::*;
@@ -216,6 +229,17 @@ fn test_collection_derive() {
             impl Member for description {
                 type Collection = todo;
                 type Data = Option<String>;
+            }
+
+            pub struct id;
+            impl MemberBasic for id {
+                fn name(&self) -> &str {
+                    "id"
+                }
+            }
+            impl Member for id {
+                type Collection = todo;
+                type Data = <SingleIncremintalInt as Id>::Data;
             }
         }
 

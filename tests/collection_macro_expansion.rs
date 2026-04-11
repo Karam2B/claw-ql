@@ -78,7 +78,7 @@ pub mod prelude {
     pub use ::claw_ql::expressions::col;
     pub use ::claw_ql::expressions::primary_key::DatabaseDefaultPrimaryKey;
     pub use ::claw_ql::sanitize::SanitizeAndHardcode;
-    pub use ::claw_ql::statements::select_st::SelectSt;
+    pub use ::claw_ql::statements::select_statement::SelectSt;
     pub use sqlx::ColumnIndex;
     pub use sqlx::Database;
     pub use sqlx::Decode;

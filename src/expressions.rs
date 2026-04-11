@@ -1,179 +1,87 @@
-use std::marker::PhantomData;
-
-use crate::{
-    EncodeExtention, Expression, IntoInferFromPhantom, QueryBuilder, SanitzingMechanisim,
-    SelectListItem, WhereItem, sanitize::SanitizeAndHardcode,
+#![allow(non_camel_case_types)]
+use crate::collections::{CollectionBasic, Member, MemberBasic};
+use crate::database_extention::DatabaseExt;
+use crate::query_builder::syntax::space_join;
+use crate::query_builder::{
+    Expression, OpExpression, QueryBuilder, SqlSanitize, SqlSyntax, ZeroOrMoreExpressions,
 };
+use sqlx::{Database, Encode, Type, TypeInfo};
+use std::fmt::Display;
+use std::marker::PhantomData;
+use std::ops::Not;
 
-impl SelectListItem for &'_ str {}
-impl SelectListItem for String {}
-
-// impl<B,C> Member<B> for scoped_col<&str, C> where C: Member<B> {}
-// impl<B,C> Member<B> for scoped_col<String, C> where C: Member<B> {}
-// impl<B,C> Member<B> for col<C> where C: Member<B> {}
-
-// impl Member<&str> for &str {}
-// impl Member<String> for &str {}
-// impl Member<String> for String {}
-// impl Member<&'str> for String {}
-
-pub struct table<Table>(pub Table);
-
-impl<T> table<T> {
-    pub fn col<C>(self, c: C) -> scoped_col<T, C> {
-        scoped_col {
-            table: self.0,
-            col: c,
-        }
-    }
-}
-
-pub struct col<Name>(pub Name);
-
-impl<C> col<C> {
-    pub fn table<T>(self, t: T) -> scoped_col<T, C> {
-        scoped_col {
-            table: t,
-            col: self.0,
-        }
-    }
-
-    pub fn to_eq<ToEq>(self, to_eq: ToEq) -> col_to_eq<C, ToEq> {
-        col_to_eq {
-            select: self.0,
-            to_eq,
-        }
-    }
-
-    pub fn alias<As>(self, as_: As) -> aliased<col<C>, As> {
-        aliased { select: self, as_ }
-    }
-}
-
-impl<Name> SelectListItem for col<Name> {}
-impl<E, Name: SanitizeAndHardcode<E>> SanitizeAndHardcode<E> for col<Name> {
-    fn sanitize(&self) -> String {
-        self.0.sanitize()
-    }
-}
-
-pub struct col_to_eq<Name, ToEq> {
-    pub select: Name,
-    pub to_eq: ToEq,
-}
-
-impl<Name, ToEq> WhereItem<Name> for col_to_eq<Name, ToEq> {}
-
-impl<'q, S, Name, ToEq> Expression<'q, S> for col_to_eq<Name, ToEq>
+pub struct member_as_expression<T>(pub T);
+impl<T> OpExpression for member_as_expression<T> {}
+impl<'q, S, T> Expression<'q, S> for member_as_expression<T>
 where
-    S: SanitzingMechanisim,
-    Name: 'q + SelectListItem + SanitizeAndHardcode<S::SanitzingMechanisim>,
-    S: 'q + EncodeExtention<'q, ToEq>,
+    T: MemberBasic,
+    T: 'q,
 {
-    fn expression(
-        self,
-        query_builder: &mut S,
-    ) -> impl FnOnce(&mut <S>::Context) -> String + 'q + use<'q, S, Name, ToEq>
+    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
     where
-        S: QueryBuilder,
+        S: DatabaseExt,
     {
-        let to_eq = S::encode(query_builder, self.to_eq);
-        move |ctx| format!("{} = {}", self.select.sanitize(), to_eq(ctx))
+        ctx.sanitize(self.0.name());
     }
 }
 
-pub struct scoped_col<Table, Col> {
-    pub table: Table,
-    pub col: Col,
-}
-
-impl<T, C> scoped_col<T, C> {
-    pub fn to_eq<ToEq>(self, to_eq: ToEq) -> col_to_eq<scoped_col<T, C>, ToEq> {
-        col_to_eq {
-            select: self,
-            to_eq,
-        }
-    }
-
-    pub fn alias<As>(self, as_: As) -> aliased<scoped_col<T, C>, As> {
-        aliased { select: self, as_ }
+impl<T> member_as_expression<T> {
+    pub fn eq<V>(self, eq: V) -> col_eq<Self, V> {
+        col_eq { col: self, eq }
     }
 }
 
-impl<Table, Name> SelectListItem for scoped_col<Table, Name>
+pub struct table_as_expression<T>(pub T);
+impl<T> OpExpression for table_as_expression<T> {}
+impl<'q, S, T> Expression<'q, S> for table_as_expression<T>
 where
-    Table: SelectListItem,
-    Name: SelectListItem,
+    T: CollectionBasic,
+    T: 'q,
 {
-}
-impl<E, Table, Name> SanitizeAndHardcode<E> for scoped_col<Table, Name>
-where
-    Table: SanitizeAndHardcode<E>,
-    Name: SanitizeAndHardcode<E>,
-{
-    fn sanitize(&self) -> String {
-        format!("{}.{}", self.table.sanitize(), self.col.sanitize())
+    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+        ctx.sanitize(self.0.table_name());
     }
 }
 
-pub struct aliased<Select, As> {
-    pub select: Select,
-    pub as_: As,
-}
+pub struct sqlx_type<T>(PhantomData<T>);
 
-impl<Select, As> SelectListItem for aliased<Select, As>
-where
-    Select: SelectListItem,
-    As: SelectListItem,
-{
-}
-impl<E, Select, As> SanitizeAndHardcode<E> for aliased<Select, As>
-where
-    As: SanitizeAndHardcode<E>,
-    Select: SanitizeAndHardcode<E>,
-{
-    fn sanitize(&self) -> String {
-        format!("{} AS {}", self.select.sanitize(), self.as_.sanitize())
+impl<T> Default for sqlx_type<T> {
+    fn default() -> Self {
+        sqlx_type(PhantomData)
     }
 }
 
-pub mod is_null {
-    use sqlx::{Database, TypeInfo};
-    use std::{marker::PhantomData, ops::Not};
+impl<T> OpExpression for sqlx_type<T> {}
 
-    use sqlx::Type;
+impl<'q, S, T> Expression<'q, S> for sqlx_type<T>
+where
+    S: Database,
+    T: Type<S> + 'q,
+{
+    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+        ctx.syntax(sqlx_type(PhantomData::<(S, T)>));
+    }
+}
 
-    use crate::{ColumPositionConstraint, Expression, QueryBuilder};
+impl<S, T> SqlSyntax for sqlx_type<(S, T)>
+where
+    S: Database,
+    T: Type<S>,
+{
+    fn to_sql(self, stmt: &mut String) {
+        stmt.push_str(T::type_info().name());
+    }
+}
 
+mod is_null {
     pub trait IsNull {
         fn is_null() -> bool;
-    }
-    pub struct ColumnTypeCheckIfNull<T>(pub PhantomData<T>);
-
-    impl<T> ColumPositionConstraint for ColumnTypeCheckIfNull<T> {}
-
-    impl<Q, T> Expression<'static, Q> for ColumnTypeCheckIfNull<T>
-    where
-        Q: QueryBuilder,
-        Q: Database,
-        T: Type<Q> + IsNull,
-    {
-        fn expression(
-            self,
-            query_builder: &mut Q,
-        ) -> impl FnOnce(&mut <Q>::Context) -> String + use<Q, T> + 'static
-        where
-            Q: QueryBuilder,
-        {
-            |_| {
-                let ty = T::type_info();
-                let mut ty = ty.name().to_string();
-                if T::is_null().not() {
-                    ty.push_str(" NOT NULL")
-                }
-                ty
-            }
-        }
     }
 
     impl<T> IsNull for Option<T> {
@@ -224,67 +132,355 @@ pub mod is_null {
     }
 }
 
-pub mod primary_key {
-    use std::marker::PhantomData;
+pub struct col_def<Name, Type, Constraints> {
+    pub name: Name,
+    pub ty: Type,
+    pub constraints: Constraints,
+}
 
-    use crate::{ColumPositionConstraint, Expression, QueryBuilder};
+impl<Name, Type, Constraints> OpExpression for col_def<Name, Type, Constraints> {}
 
-    pub struct PrimaryKey<S>(pub PhantomData<S>);
-
-    use sqlx::{Database, prelude::Type};
-
-    impl<T> ColumPositionConstraint for PrimaryKey<T> {}
-
-    impl<Q> Expression<'static, Q> for PrimaryKey<Q>
+impl<'q, S, Name, Type, Constraints> Expression<'q, S> for col_def<Name, Type, Constraints>
+where
+    S: Database,
+    Name: SqlSanitize<S> + 'q,
+    Type: Expression<'q, S> + 'q,
+    Constraints: ZeroOrMoreExpressions<'q, S> + 'q,
+{
+    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
     where
-        Q: QueryBuilder,
-        Q::SqlxDb: Database,
-        Q::SqlxDb: DatabaseDefaultPrimaryKey<KeyType: Type<Q::SqlxDb>>,
+        S: DatabaseExt,
     {
-        fn expression(
-            self,
-            query_builder: &mut Q,
-        ) -> impl FnOnce(&mut <Q>::Context) -> String + 'static + use<Q>
-        where
-            Q: QueryBuilder,
-        {
-            |_| {
-                let ty = <Q::SqlxDb as DatabaseDefaultPrimaryKey>::KeyType::type_info();
-                format!("{} {}", ty, Q::SqlxDb::default_primary_key())
-            }
-        }
-    }
-
-    impl DatabaseDefaultPrimaryKey for sqlx::Sqlite {
-        type KeyType = i64;
-        fn default_primary_key() -> &'static str {
-            "PRIMARY KEY AUTOINCREMENT"
-        }
-    }
-
-    // impl PrimaryKey for sqlx::Postgres {
-    //     type KeyType = i64;
-    //     fn default_primary_key() -> &'static str {
-    //         "PRIMARY KEY"
-    //     }
-    // }
-
-    pub trait DatabaseDefaultPrimaryKey {
-        type KeyType;
-        fn default_primary_key() -> &'static str;
+        ctx.sanitize(self.name);
+        ctx.syntax(space_join);
+        self.ty.expression(ctx);
+        self.constraints.expression(" ", " ", ctx);
     }
 }
 
-pub mod exports {
-    use super::is_null::ColumnTypeCheckIfNull;
-    use super::primary_key::{DatabaseDefaultPrimaryKey, PrimaryKey};
-    use super::*;
-    use std::marker::PhantomData;
+pub struct col_def_for_collection_member<T>(pub T);
 
-    pub fn primary_key<S: DatabaseDefaultPrimaryKey>() -> PrimaryKey<S> {
-        PrimaryKey(PhantomData)
+impl<T> OpExpression for col_def_for_collection_member<T> {}
+
+impl<'q, S, T> Expression<'q, S> for col_def_for_collection_member<T>
+where
+    S: Database,
+    T: Member + 'q,
+    T::Data: sqlx::Type<S>,
+    T::Data: is_null::IsNull,
+{
+    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+        ctx.sanitize(self.0.name());
+        ctx.syntax(" ");
+        ctx.syntax(sqlx_type(PhantomData::<(S, T::Data)>));
+        let s = <T::Data as is_null::IsNull>::is_null();
+        if s.not() {
+            ctx.syntax(" NOT NULL");
+        }
     }
-    pub fn col_type_check_if_null<T>() -> ColumnTypeCheckIfNull<T> {
-        ColumnTypeCheckIfNull(PhantomData::<T>)
+}
+
+pub struct col<T>(pub T);
+
+impl<Column> col<Column> {
+    pub fn pre_alias<Alias>(self, alias: Alias) -> PreAlias<col<Column>, Alias> {
+        PreAlias { on: self, alias }
+    }
+    pub fn eq<Eq>(self, eq: Eq) -> col_eq<Self, Eq> {
+        col_eq { col: self, eq }
+    }
+}
+
+impl<T> OpExpression for col<T> {}
+
+impl<'q, S, T> Expression<'q, S> for col<T>
+where
+    T: 'q,
+    T: SqlSanitize<S>,
+{
+    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+        ctx.sanitize(self.0);
+    }
+}
+
+pub struct pre_alias<T>(pub T, pub &'static str);
+
+impl<T> OpExpression for pre_alias<T> {}
+
+impl<'q, S, T: 'q + Expression<'q, S>> Expression<'q, S> for pre_alias<T> {
+    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+        self.0.expression(ctx);
+        ctx.syntax(" AS ");
+        todo!()
+    }
+}
+
+pub struct left_join {
+    pub ft: String,
+    pub fc: String,
+    pub lt: String,
+    pub lc: String,
+}
+
+impl OpExpression for left_join {}
+
+impl<'a, S> Expression<'a, S> for left_join {
+    fn expression(self, ctx: &mut QueryBuilder<'a, S>)
+    where
+        S: DatabaseExt,
+    {
+        ctx.syntax("LEFT JOIN ");
+        ctx.sanitize(self.ft.clone());
+        ctx.syntax(" ON ");
+        ctx.sanitize(self.lt);
+        ctx.syntax(".");
+        ctx.sanitize(self.lc);
+        ctx.syntax(" = ");
+        ctx.sanitize(self.ft);
+        ctx.syntax(".");
+        ctx.sanitize(self.fc);
+    }
+}
+
+// redundant: use prealias
+// pub struct local_col<T>(pub T);
+// impl<'q, S, T> Expression<'q, S> for local_col<T>
+// where
+//     T: SqlSanitize<S>,
+// {
+//     fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+//     where
+//         S: DatabaseExt,
+//     {
+//         tracing::warn!(
+//             "todo: have better implementation for local_col 1.create col(..).alias(..) 2. handle namming conflicts"
+//         );
+//         ctx.sanitize(self.0);
+//         ctx.syntax(".");
+//         ctx.sanitize("id");
+//         ctx.syntax(" AS ");
+//         ctx.sanitize("local_id");
+//     }
+// }
+
+pub struct col_eq<Col, Eq> {
+    pub col: Col,
+    pub eq: Eq,
+}
+
+impl<Col, Eq> OpExpression for col_eq<Col, Eq> {}
+
+impl<'q, S, Col, Eq> Expression<'q, S> for col_eq<Col, Eq>
+where
+    S: DatabaseExt,
+    Eq: 'q + Encode<'q, S> + Type<S>,
+    Col: Expression<'q, S> + 'q,
+{
+    fn expression(self, arg: &mut QueryBuilder<'q, S>) {
+        self.col.expression(arg);
+        arg.syntax(" = ");
+        arg.bind(self.eq);
+    }
+}
+
+pub struct table<T>(pub T);
+
+impl<T> OpExpression for table<T> {}
+
+impl<'q, S, Table> Expression<'q, S> for table<Table>
+where
+    S: DatabaseExt,
+    Table: SqlSanitize<S> + 'q,
+{
+    fn expression(self, arg: &mut QueryBuilder<'q, S>) {
+        arg.sanitize(self.0);
+    }
+}
+
+impl<Table> table<Table> {
+    pub fn col<Column>(self, column: Column) -> scoped_column<Table, Column> {
+        scoped_column {
+            table: self.0,
+            column,
+        }
+    }
+}
+
+pub struct scoped_column<Table, Column> {
+    pub table: Table,
+    pub column: Column,
+}
+
+impl<Table, Column> scoped_column<Table, Column> {
+    pub fn eq<V>(self, eq: V) -> col_eq<Self, V> {
+        col_eq { col: self, eq }
+    }
+    pub fn pre_alias<Alias>(self, alias: Alias) -> PreAlias<scoped_column<Table, Column>, Alias> {
+        PreAlias { on: self, alias }
+    }
+}
+
+impl<Table, Column> OpExpression for scoped_column<Table, Column> {}
+
+impl<'q, S, Column, Table> Expression<'q, S> for scoped_column<Table, Column>
+where
+    S: DatabaseExt,
+    Table: SqlSanitize<S> + 'q,
+    Column: SqlSanitize<S> + 'q,
+{
+    fn expression(self, arg: &mut QueryBuilder<'q, S>) {
+        arg.sanitize(self.table);
+        arg.syntax(".");
+        arg.sanitize(self.column);
+    }
+}
+
+pub struct PreAlias<On, Alias> {
+    pub on: On,
+    pub alias: Alias,
+}
+
+impl<On, Alias> OpExpression for PreAlias<On, Alias> {}
+
+// todo: replace &str with generics
+impl<'q, S, T, C, A> Expression<'q, S> for PreAlias<scoped_column<T, C>, A>
+where
+    Self: 'q,
+    S: DatabaseExt,
+    T: SqlSanitize<S> + 'q,
+    C: SqlSanitize<S> + 'q + Display,
+    A: SqlSanitize<S> + 'q + Display,
+{
+    fn expression(self, arg: &mut QueryBuilder<'q, S>) {
+        let alias = format!("{}{}", self.alias, self.on.column);
+        arg.sanitize(self.on.table);
+        arg.syntax(".");
+        arg.sanitize(self.on.column);
+        arg.syntax(" AS ");
+        arg.sanitize(alias);
+    }
+}
+
+// impl<'q, S> Expression<'q, S> for PreAlias<scoped_column<&str, &str>, &str>
+// where
+//     Self: 'q,
+//     S: DatabaseExt,
+// {
+//     fn expression(self, arg: &mut QueryBuilder<'q, S>) {
+//         let alias = format!("{}{}", self.alias, self.on.column);
+//         arg.sanitize(self.on.table);
+//         arg.syntax(".");
+//         arg.sanitize(self.on.column);
+//         arg.syntax(" AS ");
+//         arg.sanitize(alias);
+//     }
+// }
+
+impl<'q, S> Expression<'q, S> for PreAlias<col<&str>, &str>
+where
+    Self: 'q,
+    S: DatabaseExt,
+{
+    fn expression(self, arg: &mut QueryBuilder<'q, S>) {
+        let alias = format!("{}{}", self.alias, self.on.0);
+        arg.sanitize(self.on.0);
+        arg.syntax(" AS ");
+        arg.sanitize(alias);
+    }
+}
+
+pub struct id_constraint<Id, Constraint>(pub Id, pub Constraint);
+
+impl<Id, Constraint> OpExpression for id_constraint<Id, Constraint> {}
+
+mod imp_id_constraint_for_sqlite {
+    use sqlx::Sqlite;
+
+    use crate::{
+        database_extention::DatabaseExt,
+        query_builder::{Expression, QueryBuilder, SqlSanitize},
+    };
+
+    impl<'q, Id, Constraint> Expression<'q, Sqlite> for super::id_constraint<Id, Constraint>
+    where
+        Id: SqlSanitize<Sqlite> + 'q,
+        Constraint: Expression<'q, Sqlite>,
+    {
+        fn expression(self, ctx: &mut QueryBuilder<'q, Sqlite>)
+        where
+            Sqlite: DatabaseExt,
+        {
+            ctx.sanitize(self.0);
+            ctx.syntax(" ");
+            self.1.expression(ctx);
+        }
+    }
+}
+
+pub struct foriegn_key<Ons> {
+    pub references_table: String,
+    pub references_col: String,
+    pub ons: Ons,
+}
+
+impl<Ons> OpExpression for foriegn_key<Ons> {}
+
+mod imp_foriegn_key_for_sqlite {
+    use sqlx::Sqlite;
+
+    use crate::{
+        database_extention::DatabaseExt,
+        query_builder::{Expression, QueryBuilder, ZeroOrMoreExpressions},
+    };
+
+    impl<'q, Ons> Expression<'q, Sqlite> for super::foriegn_key<Ons>
+    where
+        Ons: ZeroOrMoreExpressions<'q, Sqlite> + 'q,
+    {
+        fn expression(self, ctx: &mut QueryBuilder<'q, Sqlite>)
+        where
+            Sqlite: DatabaseExt,
+        {
+            let o = "(";
+            let c = ")";
+            ctx.syntax(" REFERENCES ");
+
+            ctx.sanitize(self.references_table);
+            ctx.syntax(o);
+            ctx.sanitize(self.references_col);
+            ctx.syntax(c);
+            self.ons.expression(" ", " ", ctx);
+        }
+    }
+}
+
+pub struct on_delete_set_null;
+
+impl OpExpression for on_delete_set_null {}
+
+mod imp_on_delete_set_null_for_sqlite {
+    use sqlx::Sqlite;
+
+    use crate::{
+        database_extention::DatabaseExt,
+        query_builder::{Expression, QueryBuilder},
+    };
+
+    impl<'q> Expression<'q, Sqlite> for super::on_delete_set_null {
+        fn expression(self, ctx: &mut QueryBuilder<'q, Sqlite>)
+        where
+            Sqlite: DatabaseExt,
+        {
+            ctx.syntax("ON DELETE SET NULL");
+        }
     }
 }

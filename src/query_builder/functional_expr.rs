@@ -1,5 +1,5 @@
-use crate::QueryBuilder;
-use crate::{
+use super::QueryBuilder;
+use super::{
     DatabaseExt, Expression, IsOpExpression, OpExpression, PossibleExpression,
     ZeroOrMoreExpressions,
 };
@@ -155,9 +155,11 @@ mod impl_many_expr {
     use super::super::BoxedExpression;
     use super::PossibleExprImplExpr;
     use crate::database_extention::DatabaseExt;
-    use crate::functional_expr::StaticExpression;
     use crate::query_builder::QueryBuilder;
-    use crate::{IsOpExpression, PossibleExpression, ToStaticExpressions, ZeroOrMoreExpressions};
+    use crate::query_builder::functional_expr::StaticExpression;
+    use crate::query_builder::{
+        IsOpExpression, PossibleExpression, ToStaticExpressions, ZeroOrMoreExpressions,
+    };
     use paste::paste;
 
     macro_rules! implt {

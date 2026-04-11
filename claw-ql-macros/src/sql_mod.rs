@@ -4,301 +4,252 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    marker::PhantomData,
     ops::Not,
 };
 
 use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, quote, quote_spanned};
 use syn::{
-    Error as SErr, Expr, Ident, custom_keyword, parenthesized,
-    parse::{Parse, ParseBuffer},
+    Error as SErr, Expr, Ident, parenthesized,
+    parse::{Parse, ParseBuffer, ParseStream},
     parse2,
     punctuated::Punctuated,
     spanned::Spanned,
     token::{self, Comma, Dot, Paren},
 };
 
-custom_keyword!(SELECT);
-custom_keyword!(LINK);
-custom_keyword!(FROM);
-custom_keyword!(BASE);
-custom_keyword!(WHERE);
-custom_keyword!(RETURN);
+use crate::sql_mod::{
+    kws::{FROM, SELECT, WITH},
+    link_mod::LinkSegment,
+    wheres_mod::{WhereScope, WhereSegment},
+};
 
-pub struct statement {
-    kw: SELECT,
-    from_kw: FROM,
-    from: Ident,
-    links: Option<(LINK, Vec<Ident>)>,
-    where_clause: Option<(WHERE, Vec<where_expression>)>,
-    return_list: Option<(RETURN, Punctuated<Ident, Comma>)>,
-    aliases: HashMap<Ident, Ident>,
+pub mod kws {
+    use syn::custom_keyword;
+
+    custom_keyword!(SELECT);
+    custom_keyword!(LINK);
+    custom_keyword!(FROM);
+    custom_keyword!(BASE);
+    custom_keyword!(WHERE);
+    custom_keyword!(RETURN);
+    custom_keyword!(WITH);
 }
 
-pub struct where_expression {
-    scope: Option<Ident>,
-    this: Ident,
-    fn_ident: Ident,
-    expr: Expr,
+trait MyParse: Sized {
+    type Scope;
+    fn parse_scope(scope: Self::Scope, input: ParseStream) -> syn::Result<Self>;
+    fn parse(this: PhantomData<Self>, scope: Self::Scope, input: ParseStream) -> syn::Result<Self> {
+        Self::parse_scope(scope, input)
+    }
 }
 
-fn parse(input: syn::parse::ParseStream) -> syn::Result<statement> {
-    let mut aliases = HashMap::<Ident, Ident>::new();
-    let kw = input.parse::<SELECT>()?;
+pub struct MainStatement {
+    main: MainEnum,
+    with: Ident,
+}
 
-    let from_kw = input.parse()?;
-    let from: Ident = input.parse()?;
+enum MainEnum {
+    FetchOne {
+        base: Ident,
+        wheres: WhereSegment,
+        links: LinkSegment,
+    },
+}
 
-    if input.peek(Ident) {
-        aliases.insert(input.parse::<Ident>()?, from.clone());
+impl MainEnum {
+    fn options() -> Vec<&'static str> {
+        vec!["SELECT FROM", "INSERT INTO"]
+    }
+}
+
+pub fn parse_main_statement(input: ParseStream) -> syn::Result<MainStatement> {
+    let main = if input.peek(SELECT) {
+        input.parse::<SELECT>()?;
+        input.parse::<FROM>()?;
+
+        let base = input.parse::<Ident>()?;
+
+        let links = MyParse::parse(PhantomData::<LinkSegment>, (), input)?;
+        let wheres = MyParse::parse(
+            PhantomData::<WhereSegment>,
+            WhereScope { base: base.clone() },
+            input,
+        )?;
+
+        MainEnum::FetchOne {
+            base,
+            wheres,
+            links,
+        }
+    } else {
+        return match input.cursor().token_tree() {
+            Some(i) => Err(syn::Error::new(
+                i.0.span(),
+                format!(
+                    "expected '{}' found '{}'",
+                    MainEnum::options().join(", "),
+                    i.0.to_string()
+                ),
+            )),
+            None => return Err(input.error("unexpected token")),
+        };
+    };
+
+    let with = if input.peek(WITH) {
+        input.parse::<WITH>()?;
+        input.parse::<Ident>()?
+    } else {
+        Ident::new("pool", Span::call_site())
+    };
+
+    if input.is_empty().not() {
+        let tt = input.cursor().token_tree().unwrap();
+        return Err(syn::Error::new(
+            tt.0.span(),
+            format!("end of input found '{}'", tt.0.to_string()),
+        ));
     }
 
-    let links = if input.peek(LINK) {
-        let kw = input.parse::<LINK>()?;
-        let mut idents = vec![input.parse::<Ident>()?];
-        while input.peek(Comma) {
-            let c = input.parse::<Comma>()?;
-            idents.push(input.parse()?);
-        }
-        Some((kw, idents))
-    } else {
-        None
-    };
+    Ok(MainStatement { main, with })
+}
 
-    let where_clause = if input.peek(WHERE) {
-        let kw = input.parse::<WHERE>()?;
-        let mut predicates: Vec<where_expression> = vec![];
-        loop {
-            let first = input.parse::<Ident>()?;
-            let dot = input.parse::<Dot>()?;
-            let second = input.parse::<Ident>()?;
-            let possible_third = if input.peek(Dot) {
-                let dot = input.parse::<Dot>()?;
-                let dot = input.parse::<Ident>()?;
-                Some(dot)
-            } else {
-                None
-            };
+impl Parse for MainStatement {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        parse_main_statement(input)
+    }
+}
 
-            let (pren, rest) = parse_parens(&input)?;
-            let expr = <syn::Expr as Parse>::parse(&rest)?;
-
-            let s = if let Some(fn_ident) = possible_third {
-                predicates.push(where_expression {
-                    scope: Some(first),
-                    this: second,
-                    fn_ident,
-                    expr,
-                })
-            } else {
-                predicates.push(where_expression {
-                    scope: None,
-                    this: first,
-                    fn_ident: second,
-                    expr,
-                })
-            };
-
-            if rest.is_empty().not() {
-                return err(rest.span(), "expected nothing but found {..}");
-            }
-
-            if input.peek(Comma) {
-                input.parse::<Comma>()?;
-                continue;
-            } else if input.is_empty() {
-                break;
-            } else if input.peek(RETURN) {
-                break;
-            } else {
-                return Err(SErr::new(
-                    input.span(),
-                    "expected either , or return but found something else",
-                ));
+pub fn main_statment_to_token(input: MainStatement) -> TokenStream {
+    let main = match &input.main {
+        MainEnum::FetchOne {
+            base,
+            wheres,
+            links,
+        } => {
+            quote! {
+                FetchOne {
+                    base: #base,
+                    links: #links,
+                    wheres: #wheres,
+                }
             }
         }
-
-        Some((kw, predicates))
-    } else {
-        None
     };
+    let with = &input.with;
+    quote!({
+        use ::claw_ql::prelude::sql::*;
+        let op = is_valid_syntax(#main, infer_db(&#with));
 
-    let return_list = if input.peek(RETURN) {
-        let kw = input.parse::<RETURN>()?;
-        let mut list: Punctuated<Ident, Comma> = Default::default();
-        while input.is_empty().not() {
-            if input.peek(FROM) {
-                break;
-            }
-            let ident = input.parse::<Ident>()?;
-            if input.peek(Comma) {
-                list.push(ident);
-                list.push_punct(input.parse()?);
-                continue;
-            } else {
-                break;
-            }
-        }
-        Some((kw, list))
-    } else {
-        None
-    };
-
-    Ok(statement {
-        kw,
-        from,
-        links,
-        where_clause,
-        from_kw,
-        return_list,
-        aliases,
+        Operation::exec(op, #with)
     })
 }
 
-struct Ctx<'a> {
-    aliases: &'a HashMap<Ident, Ident>,
-    from: &'a Ident,
-}
+mod link_mod {
+    use crate::sql_mod::{MyParse, kws::LINK};
+    use quote::{ToTokens, quote};
+    use syn::Ident;
 
-// fn where_to_token(
-//     ctx: Ctx,
-//     where_clause: &Option<(WHERE, Vec<where_expression>)>,
-// ) -> Result<TokenStream, SErr> {
-//     if let Some(wc) = where_clause {
-//         let mut ino = Vec::<TokenStream>::new();
-//         for where_expression {
-//             scope,
-//             this,
-//             fn_ident,
-//             expr,
-//         } in wc.1.iter()
-//         {
-//             let span = this.span();
+    #[derive(Clone)]
+    pub struct LinkSegment {
+        inner: Vec<Ident>,
+    }
 
-//             let _from = if let Some(alias) = scope {
-//                 let s = if let Some(found) = ctx.aliases.get(alias) {
-//                     found
-//                 } else {
-//                     return err(
-//                         alias,
-//                         format!(
-//                             "cannot find this aliase, all are {}",
-//                             ctx.aliases
-//                                 .keys()
-//                                 .map(|e| e.to_string())
-//                                 .collect::<Vec<_>>()
-//                                 .join(", ")
-//                         ),
-//                     );
-//                 };
-//                 Ident::new(&format!("{}_members", s.to_string()), s.span())
-//             } else {
-//                 Ident::new(
-//                     &format!("{}_members", ctx.from.to_string()),
-//                     ctx.from.span(),
-//                 )
-//             };
-//             ino.push(quote_spanned!(span=>
-//                 Box::new(#fn_ident (#_from::#this, #expr)) as Box<dyn WhereExpression>,
-//             ));
-//         }
-//         Ok(quote! {
-//             {
-//                 let mut v = Vec::<Box<dyn WhereExpression>>::new();
+    impl MyParse for LinkSegment {
+        type Scope = ();
+        fn parse_scope(scope: Self::Scope, input: syn::parse::ParseStream) -> syn::Result<Self> {
+            let mut links = vec![];
+            while input.peek(LINK) {
+                input.parse::<LINK>()?;
+                let i = input.parse::<Ident>()?;
+                links.push(i);
+            }
 
-//                 #(v.push(#ino);)*
-
-//                 v
-//             }
-//         })
-//     } else {
-//         Ok(quote! {
-//             Vec::<Box<dyn WhereExpression>>::new()
-//         })
-//     }
-// }
-fn where_to_token(
-    ctx: Ctx,
-    where_clause: &Option<(WHERE, Vec<where_expression>)>,
-) -> Result<TokenStream, SErr> {
-    if let Some(wc) = where_clause {
-        let mut ino = Vec::<TokenStream>::new();
-        for where_expression {
-            scope,
-            this,
-            fn_ident,
-            expr,
-        } in wc.1.iter()
-        {
-            let span = this.span();
-
-            let _from = if let Some(alias) = scope {
-                let s = if let Some(found) = ctx.aliases.get(alias) {
-                    found
-                } else {
-                    return err(
-                        alias,
-                        format!(
-                            "cannot find this aliase, all are {}",
-                            ctx.aliases
-                                .keys()
-                                .map(|e| e.to_string())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ),
-                    );
-                };
-                Ident::new(&format!("{}_members", s.to_string()), s.span())
-            } else {
-                Ident::new(
-                    &format!("{}_members", ctx.from.to_string()),
-                    ctx.from.span(),
-                )
-            };
-            ino.push(quote_spanned!(span=>
-                #fn_ident (#_from::#this, #expr)
-            ));
+            return Ok(LinkSegment { inner: links });
         }
-        Ok(quote! { (#(#ino,)*) })
-    } else {
-        Ok(quote! { () })
+    }
+
+    impl ToTokens for LinkSegment {
+        fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+            let idents = self.inner.clone();
+            tokens.extend(quote! {
+                (#(#idents,)*)
+            });
+        }
     }
 }
 
-fn to_token(
-    statement {
-        kw,
-        from_kw,
-        from,
-        links,
-        where_clause,
-        return_list,
-        aliases,
-    }: &statement,
-    token: &mut TokenStream,
-) -> Result<(), SErr> {
-    let _from = Ident::new(&format!("_{}", from.to_string()), from.span());
+mod wheres_mod {
+    use proc_macro2::TokenStream;
+    use quote::ToTokens;
+    use quote::quote;
+    use quote::quote_spanned;
+    use syn::token::Where;
+    use syn::{Ident, token::Dot};
 
-    let where_clause_ = where_to_token(Ctx { aliases, from }, where_clause)?;
-
-    let links = if let Some((_, links)) = links {
-        quote!( (#(#links,)*))
-    } else {
-        quote! { () }
+    use crate::{
+        local_lib::parse_parens,
+        sql_mod::{MyParse, kws::WHERE},
     };
 
-    let mut out = token.extend(quote!({
-        // use prelude::*;
-        Select {
-            from: #from,
-            wheres: #where_clause_,
-            limit: (),
-            link: #links,
-            returning: ()
-        }
-    }));
+    pub struct WhereSegment {
+        ands: Vec<TokenStream>,
+    }
 
-    Ok(())
+    pub struct WhereScope {
+        pub base: Ident,
+    }
+    impl MyParse for WhereSegment {
+        type Scope = WhereScope;
+        fn parse_scope(scope: Self::Scope, input: syn::parse::ParseStream) -> syn::Result<Self> {
+            // if input.peek(WH);
+
+            if input.peek(WHERE) {
+                input.parse::<WHERE>()?;
+                let i1 = input.parse::<Ident>()?;
+                input.parse::<Dot>()?;
+                let i2 = input.parse::<Ident>()?;
+                let (scope, member, method) = if input.peek(Dot) {
+                    input.parse::<Dot>()?;
+                    let i3 = input.parse::<Ident>()?;
+
+                    let members_mod =
+                        Ident::new(&format!("{}_members", i2.to_string().as_str()), i2.span());
+
+                    (members_mod, i2, i3)
+                } else {
+                    let members_mod = Ident::new(
+                        &format!("{}_members", scope.base.to_string().as_str()),
+                        scope.base.span(),
+                    );
+
+                    let member =
+                        Ident::new(&format!("{}_members", i1.to_string().as_str()), i1.span());
+
+                    (members_mod, i1, i2)
+                };
+
+                let (_, input) = parse_parens(input)?;
+
+                let expr = input.parse::<syn::Expr>()?;
+
+                let member_spanned = quote_spanned! {member.span()=> member(#scope::#member)};
+
+                return Ok(Self {
+                    ands: vec![quote!(member(#scope::#member).#method(#expr))],
+                });
+            }
+            Ok(Self { ands: vec![] })
+        }
+    }
+
+    impl ToTokens for WhereSegment {
+        fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+            let s = &self.ands;
+            tokens.extend(quote! ((#(#s,)*)))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -307,56 +258,41 @@ mod tests {
     use quote::{ToTokens, quote};
     use syn::spanned::Spanned;
 
-    use crate::sql_mod::statement;
+    use crate::sql_mod::{MainStatement, main_statment_to_token};
 
     #[test]
-    fn main() {
-        let input = quote!(SELECT FROM todo LINK has_category WHERE title.eq(s) RETURN title);
-
-        let err = syn::parse2::<statement>(input).err().unwrap().to_string();
-        assert_eq!(err, String::from("should be empty for now"));
-
-        let input = quote!(
+    fn simple() {
+        let expect = quote!(
             SELECT FROM todo
-            LINK has_category
-            WHERE title.eq()
-            RETURN title
-            LIMIT 3
+            LINK category
+            WHERE title.eq("first_todo")
+
         );
 
-        let expect = syn::parse2::<statement>(input)
-            .unwrap()
-            .into_token_stream()
-            .to_string();
+        let expect = match syn::parse2::<MainStatement>(expect) {
+            Ok(ok) => main_statment_to_token(ok),
+            Err(e) => e.to_compile_error(),
+        };
 
-        let to_be = quote!(
-            const {
-                use prelude::*;
-                Select {
-                    from: todo,
-                    wheres: (),
-                }
-            }
-        )
-        .to_string();
+        let to_be = quote!({
+            use ::claw_ql::prelude::sql::*;
+            let op = is_valid_syntax(
+                FetchOne {
+                    base: todo,
+                    link: (category,),
+                    wheres: (member(todo_members::title).eq("first_todo"),),
+                },
+                infer_db(&pool),
+            );
 
-        pretty_assertions::assert_eq!(expect, to_be);
+            Operation::exec(op, pool)
+        });
+
+        pretty_assertions::assert_eq!(expect.to_string(), to_be.to_string());
     }
 }
 
 // reduce indentation!
-impl Parse for statement {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        parse(input)
-    }
-}
-impl ToTokens for statement {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        if let Err(er) = to_token(self, tokens) {
-            tokens.extend(er.to_compile_error());
-        }
-    }
-}
 
 // utils
 fn parse_parens<'a>(input: syn::parse::ParseStream<'a>) -> syn::Result<(Paren, ParseBuffer<'a>)> {

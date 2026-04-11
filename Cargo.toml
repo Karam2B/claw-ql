@@ -43,6 +43,7 @@ http = ["serde", "dep:tower-service", "dep:hyper", "dep:axum", "tokio/full"]
 serde = ["dep:serde_json", "dep:serde", "claw-ql-macros/serde"]
 trace = ["dep:tracing"]
 sqlite = ["sqlx/sqlite"]
+skip_without_comments = []
 unstable = []
 
 [[example]]

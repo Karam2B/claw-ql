@@ -121,5 +121,5 @@ fn main_test() {
         };
     };
 
-    crate::expect_to_eq(expect, to_be);
+    crate::local_lib::expect_to_eq(expect, to_be);
 }

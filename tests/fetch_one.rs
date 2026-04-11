@@ -18,11 +18,11 @@ fn asert_in_json<T1: Serialize + 'static, T2: Serialize + 'static>(t1: T1, t2: T
 use std::{any::Any, collections::HashMap, ffi::FromVecWithNulError, mem, sync::Arc};
 
 use claw_ql::{
-    ConnectInMemory, DatabaseExt, Expression, QueryBuilder,
     collections::{Collection, Member, MemberBasic},
+    connect_in_memory::ConnectInMemory,
+    database_extention::DatabaseExt,
     execute::Executable,
-    expressions::{col, col_def_for_collection_member, col_eq},
-    functional_expr::boxed_expr,
+    expressions::{col, col_def_for_collection_member, col_eq, member_as_expression, table},
     json_client::{
         FetchOneInput, JsonClient, json_collection::JsonCollection, json_link::JsonLink,
     },
@@ -30,15 +30,13 @@ use claw_ql::{
         Link,
         relation_optional_to_many::{impl_dynamic_link::OptionalToManyLinks, optional_to_many},
     },
-    on_migrate::OnMigrate,
-    operations::{
-        Operation,
-        fetch_one::{FetchOne, execute_fetch_one},
-    },
-    run_expression,
-    statements::{CreateTable, create_if_not_exist, create_table},
+    on_migrate::{OnMigrate, dynamic_migrate::migrate_on_empty_database},
+    operations::{CollectionOutput, IdOutput, LinkedOutput, Operation, fetch_one::FetchOne},
+    query_builder::ZeroOrMoreExpressions,
+    schema::Schema,
+    valid_syntax::{self, is_valid_syntax},
 };
-use claw_ql::{ZeroOrMoreExpressions, use_executor};
+use claw_ql_macros::sql;
 use futures::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{from_value, json, to_value};
@@ -51,6 +49,7 @@ use crate::todo_members::description;
     claw_ql_macros::OnMigrate,
     Serialize,
     Deserialize,
+    Debug,
     claw_ql_macros::FromRowAlias,
 )]
 pub struct Todo {
@@ -64,6 +63,7 @@ pub struct Todo {
     claw_ql_macros::OnMigrate,
     Serialize,
     Deserialize,
+    Debug,
     claw_ql_macros::FromRowAlias,
 )]
 pub struct Category {
@@ -81,46 +81,23 @@ impl Link<todo> for category {
     }
 }
 
-async fn execute_statements<Db, Statements>(
-    pool: &Pool<Db>,
-    s: Statements,
-) -> Result<(), sqlx::Error>
-where
-    Db: DatabaseExt,
-    Statements: ZeroOrMoreExpressions<'static, Db>,
-    for<'c> &'c mut <Db as sqlx::Database>::Connection: Executor<'c, Database = Db>,
-{
-    static HI: () = ();
-    let mut b = QueryBuilder::<'_, Db>::default();
-    s.expression("", " ", &mut b);
-    // let stmt = b.stmt.clone();
-
-    let s = use_executor!(fetch_optional(pool, b));
-
-    Ok(())
-}
-
 #[tokio::test]
 async fn main() {
     let pool = Sqlite::connect_in_memory().await;
 
-    execute_statements(
-        &pool,
+    migrate_on_empty_database(
         vec![
-            boxed_expr(todo.statments()),
-            boxed_expr(category.statments()),
-            boxed_expr(
-                optional_to_many {
-                    from: todo,
-                    to: category,
-                    foriegn_key: String::from("category_id"),
-                }
-                .statments(),
-            ),
+            Box::new(todo),
+            Box::new(category),
+            Box::new(optional_to_many {
+                foriegn_key: "category_id".to_string(),
+                from: todo,
+                to: category,
+            }),
         ],
+        &pool,
     )
-    .await
-    .unwrap();
+    .await;
 
     Executor::execute(
         &pool,
@@ -143,19 +120,31 @@ async fn main() {
     .await
     .expect("bug: hardcoded dumpy insert statments");
 
-    // sql!(
-    //     SELECT FROM todo
-    //     WHERE todo.title.eq("first_todo")
-    //     LINK category
-    // );
-
-    let op = FetchOne {
+    let fetch_one = FetchOne {
         base: todo,
-        wheres: (col(todo_members::title).eq("first_todo")),
-        link: (category,),
-    };
+        wheres: table("Todo").col("title").eq("first_todo"),
+        links: (category,),
+    }
+    .exec(pool)
+    .await;
 
-    let out = op.exec(pool).await;
+    pretty_assertions::assert_eq!(
+        fetch_one,
+        LinkedOutput {
+            id: 6,
+            attributes: Todo {
+                title: "first_todo".to_string(),
+                done: true,
+                description: Some("description_1".to_string())
+            },
+            link: (CollectionOutput {
+                id: 3,
+                attributes: Category {
+                    title: "cat_1".to_string()
+                }
+            },)
+        }
+    );
 
     asert_in_json(
         out,
@@ -178,23 +167,18 @@ async fn main() {
 async fn json_client() {
     let pool = Sqlite::connect_in_memory().await;
 
-    execute_statements(
+    migrate_on_empty_database(
+        Schema {
+            collections: vec![Box::new(todo), Box::new(category)],
+            links: vec![Box::new(optional_to_many {
+                foriegn_key: "category_id".to_string(),
+                from: todo,
+                to: category,
+            })],
+        },
         &pool,
-        vec![
-            boxed_expr(todo.statments()),
-            boxed_expr(category.statments()),
-            boxed_expr(
-                optional_to_many {
-                    from: todo,
-                    to: category,
-                    foriegn_key: String::from("category_id"),
-                }
-                .statments(),
-            ),
-        ],
     )
-    .await
-    .unwrap();
+    .await;
 
     Executor::execute(
         &pool,
@@ -236,19 +220,21 @@ async fn json_client() {
     };
 
     let out = jc
-        .fetch_one(FetchOneInput {
-            base: String::from("todo"),
-            wheres: vec![],
-            link: vec![
-                from_value(json!({
-                       "id": "category_id",
-                       "ty": "optional_to_many",
-                       "to": "category",
-                   }
-                ))
-                .unwrap(),
-            ],
-        })
+        .fetch_one(
+            from_value(json!({
+                "base": String::from("todo"),
+                "wheres": [],
+                "link": [
+                    {
+                        "id": "category_id",
+                        "ty": "optional_to_many",
+                        "to": "category",
+                    },
+                ]
+
+            }))
+            .unwrap(),
+        )
         .await
         .unwrap();
 

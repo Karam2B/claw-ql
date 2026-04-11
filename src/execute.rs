@@ -34,23 +34,25 @@ impl<'q, S: Database> Execute<'q, S> for Executable<'q, S, S::Arguments<'q>> {
 #[macro_export]
 macro_rules! use_executor {
     ($fn_name:ident ($executor: expr, $execute:ident) $($rest:tt)*) => {
+
         {
             let (stmt, arg) = $execute.unwrap();
             let query_result = ::sqlx::Executor::$fn_name(
                 $executor,
+                #[allow(unused_doc_comments)]
                 $crate::execute::Executable {
+
+                    /// safer alternative is to leak
+                    /// string: Box::<str>::leak(stmt.into_boxed_str()),
                     string: unsafe {
-                        // breaking lifetimes! because I'm dropping `stmt` after static query_result
-                        // I will not have any use-after-free bug, which is the bug lifetimes are solving
+                        /// breaking lifetimes! because I'm dropping `stmt` after static query_result
+                        /// I will not have any use-after-free bug, which is the bug lifetimes are solving
 
-                        // the problem is in the strict signature of sqlx::Execute::sql function
-                        // the only `safe` way to avoid it is to rewrite sqlx::Executor trait
+                        /// the problem is in the strict signature of sqlx::Execute::sql function
+                        /// the only `safe` way to avoid it is to rewrite sqlx::Executor and sqlx::Execute traits
                         &*(stmt.as_str() as *const _)
-                        // or maybe I should introduce new lifetime `'a: 'q` somewhere (I tried to do that at Executable sig with no success)
-
-                        // safer alternative is to leak
-                        // string: Box::<str>::leak(stmt.into_boxed_str()),
                     },
+
 
                     arguments: arg,
                     db: ::std::marker::PhantomData,

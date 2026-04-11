@@ -1,52 +1,58 @@
-use axum::debug_handler;
-use axum::extract::State;
-use axum::response::{IntoResponse, Response};
-use axum::{Json, Router, body::Bytes, extract::Path, routing::get};
-use hyper::StatusCode;
+use crate::{
+    QueryBuilder,
+    json_client::{JsonClient, select_one::SelectOneInput},
+    operations::LinkedOutput,
+    update_mod::update,
+};
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    handler::Handler,
+    routing::get,
+};
+use hyper::Request;
 use serde::Deserialize;
-use serde::Serialize;
-use serde_json::json;
-use sqlx::Database;
-use sqlx::Pool;
-use sqlx::Sqlite;
-use std::sync::Arc;
-use std::sync::RwLock;
-use tokio::sync::RwLock as TrwLock;
+use serde_json::{Map, Value, json};
+use sqlx::{ColumnIndex, Database, Decode, Encode, Sqlite, prelude::Type};
+use std::{convert::Infallible, pin::Pin, sync::Arc, task::Poll};
+use tower_service::Service;
 
-use crate::json_client::JsonClient;
-use crate::json_client::add_collection::AddCollectionBody;
+impl<S: QueryBuilder> JsonClient<S>
+where
+    S: QueryBuilder<Output = <S as Database>::Arguments<'static>> + Send,
+    S: QueryBuilder<Fragment: Send, Context1: Send>,
+    for<'c> &'c mut S::Connection: sqlx::Executor<'c, Database = S>,
+    for<'e> i64: Encode<'e, S> + Type<S> + Decode<'e, S>,
+    for<'e> &'e str: ColumnIndex<S::Row>,
+{
+    /// note: current implementation is as follow, but breaking changes
+    /// can occur at any time!
+    /// 1. (todo) no permissions are implemented
+    /// 2. collections have the path `/collections/:collection`
+    /// 3. (todo) these endpoint implemeted for each collection
+    ///    - [ ] GET / `to retrieve all collections`
+    ///    - [x] GET /:id `to retrieve one collection`
+    ///    - [ ] POST /:id `update one collection`
+    ///    - [ ] DELETE /:id `delete one collection`
+    ///    - [ ] PUT / `insert one collection`
+    /// 4. (todo) no real-time update is implemted (will be at /rt/:collection)
+    pub fn as_router(self) -> Router<()> {
+        let router = {
+            Router::new()
+                .route("/{collection}/", get(get_all::<S>).post(insert_one))
+                .route(
+                    "/{collection}/{id}",
+                    get(get_one).put(update_one).delete(delete_one),
+                )
+                .with_state(Arc::new(self))
 
-pub trait HttpError {
-    fn status_code(&self) -> StatusCode;
-    fn sub_code(&self) -> Option<&'static str> {
-        None
-    }
-    fn sub_message(&self) -> Option<String> {
-        None
-    }
-}
 
-impl HttpError for String {
-    fn status_code(&self) -> StatusCode {
-        // string lacks semantics, for now it is internal error
-        StatusCode::INTERNAL_SERVER_ERROR
-    }
-    fn sub_message(&self) -> Option<String> {
-        Some(self.clone())
-    }
-}
-
-impl HttpError for serde_json::Value {
-    fn status_code(&self) -> StatusCode {
-        todo!()
-    }
-}
-
-pub fn axum_router(jc: Arc<JsonClient<Sqlite>>) -> Router<()> {
     axum::Router::new()
         .route(
             "/select_one_{collection}",
-            get(|path: Path<String>| async move {
+            get(|
+    jc: State<Arc<TrwLock<JsonClient<Sqlite>>>>,
+                path: Path<String>| async move {
                 todo!();
                 ()
             }),
@@ -79,7 +85,7 @@ pub fn axum_router(jc: Arc<JsonClient<Sqlite>>) -> Router<()> {
                 return ();
             }),
         )
-}
+        };
 
 #[debug_handler]
 async fn add_collection_wrapper(
@@ -135,4 +141,8 @@ pub fn axum_router_dynamic(pool: Pool<Sqlite>) -> Router<()> {
         .route("/admin/add_collection", get(add_collection_wrapper))
         .route("/api/select_one_{collection}", get(select_one_wrapper))
         .with_state(jc)
+}
+
+        router
+    }
 }

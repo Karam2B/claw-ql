@@ -1,68 +1,44 @@
-use sqlx::Sqlite;
+use sqlx::Type;
 
-use crate::{Expression, QueryBuilder, SanitzingMechanisim};
+use super::{DatabaseExt, SqlSanitize};
 
-pub trait SanitizeAndHardcode<Escape> {
-    fn sanitize(&self) -> String;
+impl<S> SqlSanitize<S> for &'_ str {
+    fn to_sql(&self) -> &str {
+        self
+    }
+    fn safe_to_sql(&self) -> bool {
+        false
+    }
 }
 
-pub struct by_double_quote;
+impl<S> SqlSanitize<S> for String {
+    fn to_sql(&self) -> &str {
+        self.as_str()
+    }
+    fn safe_to_sql(&self) -> bool {
+        false
+    }
+}
 
-/// explicitly hardcode the inner value
-pub struct hardcode<T>(pub T);
-
-impl SanitizeAndHardcode<by_double_quote> for bool {
-    fn sanitize(&self) -> String {
+impl<S> SqlSanitize<S> for bool {
+    fn to_sql(&self) -> &str {
         match self {
             true => "true",
             false => "false",
         }
-        .to_string()
+    }
+    fn safe_to_sql(&self) -> bool {
+        true
     }
 }
 
-impl SanitizeAndHardcode<by_double_quote> for String {
-    fn sanitize(&self) -> String {
-        let mut new = String::from('\'');
-        for (index, char) in self.chars().enumerate() {
-            if char == '\'' {
-                new.push('"');
-            } else {
-                new.push(char);
-            }
-        }
-        new.push('\'');
-        new
-    }
-}
-
-impl SanitizeAndHardcode<by_double_quote> for &'_ str {
-    fn sanitize(&self) -> String {
-        let mut new = String::from('\'');
-        for (index, char) in self.chars().enumerate() {
-            if char == '\'' {
-                new.push('"');
-            } else {
-                new.push(char);
-            }
-        }
-        new.push('\'');
-        new
-    }
-}
-
-impl<'q, Q, T> Expression<'q, Q> for hardcode<T>
+pub struct hardcode<T>(pub T);
+impl<S, T> SqlSanitize<S> for hardcode<T>
 where
-    Q: QueryBuilder + SanitzingMechanisim,
-    T: SanitizeAndHardcode<Q::SanitzingMechanisim> + 'q,
+    S: DatabaseExt,
+    T: Type<S>,
 {
-    fn expression(
-        self,
-        ctx: &mut Q,
-    ) -> impl FnOnce(&mut <Q>::Context) -> String + 'q + use<'q, Q, T>
-    where
-        Q: QueryBuilder,
-    {
-        move |_| self.0.sanitize()
+    fn to_sql(&self) -> &str {
+        todo!("hvae access to DatabaseExt api")
     }
 }

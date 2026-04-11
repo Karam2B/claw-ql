@@ -1,18 +1,16 @@
 #![allow(unused)]
-use crate::collections::{Id, SingleIncremintalInt};
+use crate::collections::{Collection, Id, SingleIncremintalInt};
+use crate::database_extention::DatabaseExt;
 use crate::execute::Executable;
 use crate::expressions::{col, scoped_column, table};
 use crate::extentions::Members;
 use crate::from_row::{FromRowAlias, pre_alias};
-use crate::functional_expr::ZeroOrMoreImplPossible;
 use crate::links::{self, Link};
 use crate::operations::{LinkedOutput, Operation};
-use crate::{DatabaseExt, Expression, query_builder::QueryBuilder};
-use crate::{PossibleExpression, ZeroOrMoreExpressions, use_executor};
-use crate::{
-    collections::Collection, functional_expr::BoxedExpression, functional_expr::boxed_expr,
-    statements::SelectStatement,
-};
+use crate::query_builder::functional_expr::ZeroOrMoreImplPossible;
+use crate::query_builder::{Expression, QueryBuilder, ZeroOrMoreExpressions};
+use crate::statements::select_statement::SelectStatement;
+use crate::use_executor;
 use axum::serve::Listener;
 use sqlx::{ColumnIndex, Database, Decode, Pool, Type};
 use sqlx::{Executor, Row};
@@ -22,7 +20,7 @@ pub struct FetchOne<From, Links, Wheres> {
     // extendable
     pub wheres: Wheres,
     // extendable and generate data
-    pub link: Links,
+    pub links: Links,
 }
 
 impl<S: Database, Base, Links, W> Operation<S> for FetchOne<Base, Links, W>
@@ -32,6 +30,7 @@ where
     <Base::Id as Id>::Data: for<'q> Decode<'q, S> + Type<S>,
     for<'q> &'q str: ColumnIndex<S::Row>,
     Base: Members<S>,
+    W: ZeroOrMoreExpressions<'static, S>,
     Base: for<'r> FromRowAlias<'r, S::Row>,
     // fetch_optional
     for<'c> &'c mut <S as sqlx::Database>::Connection: Executor<'c, Database = S>,
@@ -62,10 +61,10 @@ where
     {
         let mut query_builder = QueryBuilder::<'_, S>::default();
 
-        let link_spec = self.link.spec(&self.base);
-        let extend_stmt = link_spec.extend_select();
+        let link_spec = self.links.spec(&self.base);
+        let link_extend_stmt = link_spec.extend_select();
 
-        let ss = SelectStatement {
+        let main_statement = SelectStatement {
             select_items: (
                 table(self.base.table_name().to_string())
                     .col("id")
@@ -85,7 +84,7 @@ where
                     join: ", ",
                 },
                 ZeroOrMoreImplPossible {
-                    expressions: extend_stmt
+                    expressions: link_extend_stmt
                         .non_aggregating_select_items
                         .into_iter()
                         .map(|e| e.pre_alias("link_"))
@@ -95,27 +94,39 @@ where
                 },
             ),
             from: table(self.base.table_name().to_string()),
-            joins: extend_stmt.non_duplicating_joins,
-            wheres: extend_stmt.wheres,
+            joins: link_extend_stmt.non_duplicating_joins,
+            wheres: (
+                ZeroOrMoreImplPossible {
+                    expressions: link_extend_stmt.wheres,
+                    start: "",
+                    join: " AND ",
+                },
+                ZeroOrMoreImplPossible {
+                    expressions: self.wheres,
+                    start: "",
+                    join: " AND ",
+                },
+            ),
             order: (),
             limit: (),
         };
 
-        Expression::expression(ss, &mut query_builder);
-        // let (sql, arg) = query_builder.unwrap();
+        Expression::expression(main_statement, &mut query_builder);
 
-        let s = use_executor!(fetch_optional(&pool, query_builder))
-            .expect("bug: claw_ql must clear all sqlx's error, but I really don't know where this error has originated!")?;
-        // let s = Executor::fetch_optional(
-        // &pool,
-        // Executable {
-        //     string: &sql,
-        //     arguments: arg,
-        //     db: std::marker::PhantomData,
-        // },
-        //     )
-        //     .await
-        //     .expect("bug: claw_ql must clear all sqlx's error, but I really don't know where this error has originated!")?;
+        let s = use_executor!(fetch_optional(&pool, query_builder));
+
+        let s = match s {
+            Err(sqlx::Error::RowNotFound) | Ok(None) => return None,
+            Err(err) => {
+                panic!(
+                    "bug: claw_ql must clear all sqlx's error, 
+it is hard to know where this error was originated!
+error: {:?}",
+                    err
+                )
+            }
+            Ok(Some(ok)) => ok,
+        };
 
         let (sub_op, inner) = link_spec.sub_op(pre_alias(&s, "link_"));
 

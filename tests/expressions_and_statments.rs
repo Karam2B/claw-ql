@@ -8,7 +8,7 @@ use axum::response;
 use claw_ql::{
     Buildable, ConnectInMemory, EncodeExtention, Expression, SanitzingMechanisim, SelectListItem,
     WhereItem, direct_builder::direct_bind, execute::Executable, expressions::*,
-    sanitize::SanitizeAndHardcode, statements::select_st::SelectSt,
+    sanitize::SanitizeAndHardcode, statements::select_statement::SelectSt,
 };
 use sqlx::{Executor, Sqlite};
 

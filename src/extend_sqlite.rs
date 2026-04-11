@@ -1,5 +1,5 @@
 mod impl_connect_in_memory {
-    use crate::ConnectInMemory;
+    use crate::connect_in_memory::ConnectInMemory;
     use sqlx::{Pool, Sqlite, SqlitePool};
 
     impl ConnectInMemory for Sqlite {
@@ -10,7 +10,7 @@ mod impl_connect_in_memory {
 }
 
 mod impl_database_extention {
-    use crate::DatabaseExt;
+    use crate::database_extention::DatabaseExt;
     use sqlx::Sqlite;
 
     impl DatabaseExt for Sqlite {}

@@ -1,45 +1,75 @@
-trait OnMigrate<S> {
-    type Statement;
-    fn migrate(&self) -> Self::Statement;
+pub trait OnMigrate {
+    type Statements;
+    fn statments(&self) -> Self::Statements;
 }
 
-trait LiqOnMigrate<S: Database> {
-    fn migrate(&self, pool: Pool<S>) -> Box<dyn Future<Output = ()>>;
-}
+// #[cfg(feature = "skip_without_comments")]
+pub mod dynamic_migrate {
+    use std::pin::Pin;
 
-impl<T, S> LiqOnMigrate<S> for T
-where
-    S: Database + QueryBuilder,
-    T: OnMigrate2<S>,
-    T::Statement: Buildable<Database = S>,
-    T::Statement: StatementMayNeverBind,
-{
-    fn migrate(&self, pool: Pool<S>) -> Box<dyn Future<Output = ()>> {
-        let str = OnMigrate2::migrate(self).build();
-        todo!()
+    use sqlx::{Database, Executor, Pool};
+
+    use crate::{
+        database_extention::DatabaseExt,
+        on_migrate::OnMigrate,
+        query_builder::{Expression, QueryBuilder},
+        schema::Schema,
+        use_executor,
+    };
+
+    pub trait DynamicOnMigrate<S: Database> {
+        fn migrate(&self, pool: Pool<S>) -> Pin<Box<dyn Future<Output = ()>>>;
     }
-}
 
-impl OnMigrate2<Sqlite> for SingleIncremintalInt {
-    type Statement = CreateTableSt<Sqlite>;
-    fn migrate(&self) -> Self::Statement {
-        let mut stmt = CreateTableSt::init(header::create, <Self as Id>::ident());
-        stmt.column_def("id", crate::expressions::exports::primary_key::<Sqlite>());
-        stmt
+    impl<T, S> DynamicOnMigrate<S> for T
+    where
+        S: DatabaseExt,
+        T: OnMigrate,
+        T::Statements: for<'q> Expression<'q, S>,
+        for<'c> &'c mut <S as sqlx::Database>::Connection: Executor<'c, Database = S>,
+    {
+        fn migrate(&self, pool: Pool<S>) -> Pin<Box<dyn Future<Output = ()>>> {
+            let mut qb = QueryBuilder::default();
+            self.statments().expression(&mut qb);
+
+            Box::pin(async move {
+                use_executor!(fetch_optional(&pool, qb)).unwrap();
+            })
+        }
     }
-}
 
-impl<F> OnMigrate2<Sqlite> for date_spec<F> {
-    type Statement = (AlterTableAddColumn, AlterTableAddColumn, CreateTrigger);
-    fn migrate(&self) -> Self::Statement {
-        todo!()
-    }
-}
+    pub async fn migrate_on_empty_database<S: Database>(
+        all: Vec<Box<dyn DynamicOnMigrate<S>>>,
+        pool: &Pool<S>,
+    ) {
+        // let tables = sqlx::query_as::<_, (String,)>("SELECT name FROM sqlite_master")
+        //     .fetch_all(&*pool)
+        //     .await
+        //     .unwrap();
 
-impl OnMigrate<Sqlite> for SingleIncremintalInt {
-    fn custom_migrate_statements(&self) -> Vec<String> {
-        let mut stmt = CreateTableSt::init(header::create, <Self as Id>::ident());
-        stmt.column_def("id", crate::expressions::exports::primary_key::<Sqlite>());
-        vec![Buildable::build(stmt).0]
+        // if tables.is_empty().not() {
+        //     panic!("migrate_on_empty_database function should only run on empty database");
+        // }
+
+        // let mut v = vec![];
+        // v.extend(schema.collections.custom_migrate_statements());
+        // v.extend(schema.links.custom_migrate_statements());
+
+        // for each in v {
+        //     sqlx::query(&each).execute(pool).await.unwrap();
+        // }
+
+        // sqlx::query("CREATE TABLE migration_history (version INTEGER)")
+        //     .execute(&*pool)
+        //     .await
+        //     .unwrap();
+        // sqlx::query("INSERT INTO migration_history (version) VALUES (0)")
+        //     .execute(&*pool)
+        //     .await
+        //     .unwrap();
+
+        for each in all {
+            each.migrate(pool.clone()).await;
+        }
     }
 }

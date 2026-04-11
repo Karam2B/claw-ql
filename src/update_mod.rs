@@ -60,13 +60,13 @@ mod impl_deserialize {
         where
             D: Deserializer<'de>,
         {
-            deser.deserialize_option(OptionVisitor(PhantomData))
+            deser.deserialize_option(EntryPointVisitor(PhantomData))
         }
     }
 
-    struct OptionVisitor<T>(PhantomData<T>);
+    struct EntryPointVisitor<T>(PhantomData<T>);
 
-    impl<'de, T> Visitor<'de> for OptionVisitor<T>
+    impl<'de, T> Visitor<'de> for EntryPointVisitor<T>
     where
         T: Deserialize<'de>,
     {
@@ -96,7 +96,7 @@ mod impl_deserialize {
         where
             D: Deserializer<'de>,
         {
-            SecondDeser::<update<T>>::deserialize(deser).map(|e| return e.0)
+            HelperDeser::<update<T>>::deserialize(deser).map(|e| return e.0)
         }
 
         fn __private_visit_untagged_option<D>(self, deserializer: D) -> Result<Self::Value, ()>
@@ -110,21 +110,22 @@ mod impl_deserialize {
         }
     }
 
-    struct SecondDeser<T>(T);
-    struct SecondVisitor<T>(PhantomData<T>);
+    struct HelperDeser<T>(T);
 
-    impl<'de, T: Deserialize<'de>> Deserialize<'de> for SecondDeser<update<T>> {
+    impl<'de, T: Deserialize<'de>> Deserialize<'de> for HelperDeser<update<T>> {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: Deserializer<'de>,
         {
             deserializer
-                .deserialize_tuple_struct("update_option", 2, SecondVisitor(PhantomData))
-                .map(|e| SecondDeser(e))
+                .deserialize_tuple_struct("update_option", 2, LastVisitor(PhantomData))
+                .map(|e| HelperDeser(e))
         }
     }
 
-    impl<'de, T: Deserialize<'de>> Visitor<'de> for SecondVisitor<T> {
+    struct LastVisitor<T>(PhantomData<T>);
+
+    impl<'de, T: Deserialize<'de>> Visitor<'de> for LastVisitor<T> {
         type Value = update<T>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

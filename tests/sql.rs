@@ -1,4 +1,4 @@
-use claw_ql::{ConnectInMemory, execute::Executable};
+use claw_ql::execute::Executable;
 use serde_json::Value;
 use serde_json::json;
 use sqlx::Executor;

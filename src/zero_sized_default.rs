@@ -61,7 +61,7 @@ pub mod impl_collectinos {
     impl<T> CollectionBasic for PhantomData<T>
     where
         T: HasHandler,
-        T: CollectionBasic,
+        T::Handler: CollectionBasic,
         T::Handler: ZeroSizeDefault,
     {
         fn table_name(&self) -> &str {
@@ -76,7 +76,7 @@ pub mod impl_collectinos {
     where
         T: HasHandler,
         T: Collection,
-        T::Handler: ZeroSizeDefault,
+        T::Handler: Collection + ZeroSizeDefault,
     {
         type Partial = <T::Handler as Collection>::Partial;
 

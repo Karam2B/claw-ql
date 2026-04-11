@@ -20,7 +20,7 @@ pub trait Member: MemberBasic {
 }
 
 pub trait HasHandler {
-    type Handler: Collection;
+    type Handler;
 }
 
 pub trait Id {
@@ -43,15 +43,15 @@ impl Id for SingleIncremintalInt {
 mod impl_expression {
     use sqlx::Sqlite;
 
-    use crate::{Expression, OpExpression, collections::SingleIncremintalInt};
+    use crate::{
+        collections::SingleIncremintalInt,
+        query_builder::{Expression, OpExpression, QueryBuilder},
+    };
 
     impl OpExpression for SingleIncremintalInt {}
 
     impl<'q> Expression<'q, Sqlite> for SingleIncremintalInt {
-        fn expression(self, ctx: &mut crate::QueryBuilder<'q, Sqlite>)
-        // where
-        //     S: crate::DatabaseExt,
-        {
+        fn expression(self, ctx: &mut QueryBuilder<'q, Sqlite>) {
             ctx.syntax("'id' INT PRIMARY KEY");
         }
     }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Not};
+use std::collections::HashMap;
 
 use serde::Serialize;
 use serde_json::Number;
@@ -32,7 +32,7 @@ impl PartialEq<serde_json::Value> for Value {
                 loop {
                     match (other.next(), this.next()) {
                         (Some(other), Some(this)) => {
-                            if (this == other) {
+                            if this == other {
                                 continue;
                             }
                             return false;
@@ -48,7 +48,7 @@ impl PartialEq<serde_json::Value> for Value {
                 } else {
                     return false;
                 };
-                if (hash_map.keys().count() != other.keys().count()) {
+                if hash_map.keys().count() != other.keys().count() {
                     return false;
                 }
                 for (key, value) in hash_map.iter() {
@@ -57,7 +57,7 @@ impl PartialEq<serde_json::Value> for Value {
                     } else {
                         return false;
                     };
-                    if (value == found) {
+                    if value == found {
                         continue;
                     } else {
                         return false;

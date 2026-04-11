@@ -4,7 +4,7 @@
 
 use claw_ql::{
     ExpressionToFragment, QueryBuilder, SanitzingMechanisim, SelectListItem, WhereItem,
-    build_tuple::BuildTuple, sanitize::SanitizeAndHardcode, statements::select_st::SelectSt,
+    build_tuple::BuildTuple, sanitize::SanitizeAndHardcode, statements::select_statement::SelectSt,
 };
 use claw_ql_macros::dynamic_fn;
 

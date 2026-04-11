@@ -1,11 +1,19 @@
 #![allow(unexpected_cfgs)]
 
+use crate::links::{LinkedToBase, LinkedViaId};
+
 #[derive(Clone)]
 #[allow(non_camel_case_types)]
 pub struct optional_to_many<Id, F, T> {
     pub foriegn_key: Id,
     pub from: F,
     pub to: T,
+}
+
+impl<Id, F, T> LinkedViaId for optional_to_many<Id, F, T> {}
+
+impl<Id, F, T> LinkedToBase for optional_to_many<Id, F, T> {
+    type Base = F;
 }
 
 mod impl_on_migrate {
@@ -136,44 +144,14 @@ mod impl_fetch_one {
     }
 }
 
-// #[cfg(test)]
-// mod test {
-//     use crate as claw_ql;
-//     use claw_ql_macros::{Collection, OnMigrate};
-
-//     use crate::on_migrate::OnMigrate;
-//     use crate::query_builder::QueryBuilder;
-
-//     #[derive(OnMigrate, Collection)]
-//     pub struct Todo {
-//         pub title: String,
-//     }
-
-//     fn _assert_stmt_impl() {
-//         let mut b = QueryBuilder::<'_, sqlx::Sqlite>::default;
-
-//         OnMigrate::statments(&optional_to_many {
-//             foriegn_key: (),
-//             from: (),
-//             to: (),
-//         })
-//     }
-// }
-
-#[allow(unused)]
-#[warn(unused_must_use)]
 pub mod impl_dynamic_link {
-    use std::{collections::HashMap, sync::Arc};
+    use std::collections::HashMap;
 
     use serde::{Deserialize, Serialize};
 
     use crate::{
         collections::CollectionBasic,
-        json_client::json_collection::JsonCollection,
-        links::{
-            dynamic_link::{CollectionsStore, DynamicLink},
-            relation_optional_to_many::optional_to_many,
-        },
+        links::{CollectionsStore, DynamicLink, relation_optional_to_many::optional_to_many},
     };
 
     pub struct OptionalToManyLinks<DynamicBase> {
@@ -243,16 +221,16 @@ pub mod impl_dynamic_link {
 
         fn create_link(
             &self,
-            base: &HashMap<String, DynamicBase>,
-            input: Self::CreateLinkInput,
+            _: &HashMap<String, DynamicBase>,
+            _: Self::CreateLinkInput,
         ) -> Result<Self::CreateLinkOk, Self::CreateLinkError> {
             todo!()
         }
 
         fn modify_link(
             &self,
-            base: &HashMap<String, DynamicBase>,
-            input: Self::ModifyLinkInput,
+            _: &HashMap<String, DynamicBase>,
+            _: Self::ModifyLinkInput,
         ) -> Result<Self::ModifyLinkOk, Self::ModifyLinkError> {
             todo!()
         }
@@ -260,104 +238,7 @@ pub mod impl_dynamic_link {
 }
 
 #[cfg(feature = "skip_without_comment")]
-mod impls {
-    // use crate::Accept;
-    // use crate::execute::Execute;
-    // use crate::json_client::axum_router_mod::HttpError;
-    // use crate::json_client::{JsonClient, JsonCollection, JsonError};
-    // use crate::links::{Change, LinkedViaId, LinkedViaIds, LiqLink};
-    // use crate::operations::CollectionOutput;
-    // use crate::operations::delete_one_op::DeleteOneFragment;
-    // use crate::prelude::join::left_join;
-    // use crate::{
-    //     QueryBuilder,
-    //     migration::OnMigrate,
-    //     operations::{collections::Collection, select_one_op::SelectOneFragment},
-    //     prelude::{col, join, stmt::SelectSt},
-    // };
-    use convert_case::{Case, Casing};
-    use serde_json::from_value;
-    use sqlx::Pool;
-    use sqlx::{ColumnIndex, Decode, Executor, Row, Sqlite, prelude::Type};
-    impl<S> optional_to_many<Box<dyn JsonCollection<S>>, Box<dyn JsonCollection<S>>> {
-        pub fn liquid() -> Box<dyn LiqLinkExt<S>> {
-            Box::new(optional_to_many_liq {
-                existing_links: Default::default(),
-            })
-        }
-    }
-
-    impl<F, T> LinkedViaId for optional_to_many<F, T> {}
-
-    #[derive(Clone)]
-    #[allow(non_camel_case_types)]
-    pub struct optional_to_many_inverse<F, T> {
-        pub foriegn_key: String,
-        pub from: F,
-        pub to: T,
-    }
-
-    impl<F, T> LinkedViaIds for optional_to_many_inverse<F, T> {}
-
-    impl<From, To> OnMigrate<Sqlite> for optional_to_many<From, To>
-    where
-        From: Collection<Sqlite>,
-        To: Collection<Sqlite>,
-    {
-        fn custom_migrate_statements(&self) -> Vec<String> {
-            vec![format!(
-                "
-ALTER TABLE {from_table_name} 
-ADD COLUMN {col_name} INT 
-REFERENCES {to_table_name} 
-(id) 
-ON DELETE SET NULL;",
-                from_table_name = self.from.table_name(),
-                to_table_name = self.to.table_name(),
-                col_name = self.foriegn_key,
-            )]
-        }
-    }
-
-    impl<S, From, To> SelectOneFragment<S> for optional_to_many<From, To>
-    where
-        S: QueryBuilder,
-        To: Collection<S, Data: Send + Sync>,
-        From: Collection<S, Data: Send + Sync>,
-        for<'c> &'c str: ColumnIndex<S::Row>,
-        for<'q> i64: Decode<'q, S>,
-        i64: Type<S>,
-    {
-        type Output = Option<CollectionOutput<To::Data>>;
-        type Inner = Option<(i64, To::Data)>;
-
-        fn on_select(&mut self, _: &mut Self::Inner, st: &mut SelectSt<S>) {
-            st.join(join::left_join {
-                foriegn_table: self.to.table_name().to_string(),
-                foriegn_column: "id".to_string(),
-                local_column: self.foriegn_key.to_string(),
-            });
-            st.select(col(&self.foriegn_key).table(self.from.table_name()));
-            self.to.on_select(st);
-        }
-
-        fn from_row(&mut self, data: &mut Self::Inner, row: &S::Row) {
-            let id: Option<i64> = row.get(self.foriegn_key.as_str());
-            if let Some(id) = id {
-                let value = self.to.from_row_scoped(row);
-                *data = Some((id, value));
-            }
-        }
-
-        async fn sub_op<'this>(&'this mut self, _: &'this mut Self::Inner, _: Pool<S>) {
-            // no sub_op for optional_to_many
-        }
-
-        fn take(self, data: Self::Inner) -> Self::Output {
-            data.map(|(id, attr)| CollectionOutput { id, attr })
-        }
-    }
-
+mod old_api_waiting_refactoring {
     impl<S, From, To> DeleteOneFragment<S> for optional_to_many<From, To>
     where
         From: Collection<S, Data: Sync + Send>,
@@ -413,151 +294,5 @@ ON DELETE SET NULL;",
         fn take(self, data: Self::Inner) -> Self::Output {
             data
         }
-    }
-
-    #[derive(Default)]
-    pub struct optional_to_many_liq {
-        pub existing_links: HashMap<
-            String,
-            optional_to_many<Box<dyn JsonCollection<Sqlite>>, Box<dyn JsonCollection<Sqlite>>>,
-        >,
-    }
-
-    #[derive(Deserialize)]
-    pub struct CreateLinkRelationInput {
-        to: String,
-        #[serde(default)]
-        id: Option<String>,
-    }
-
-    #[derive(Serialize)]
-    pub enum CreateLinkRelationErr {
-        LinkWithIdExist { id: String },
-        CollectionDoesntExist { name: String },
-    }
-    impl HttpError for CreateLinkRelationErr {
-        fn status_code(&self) -> hyper::StatusCode {
-            StatusCode::BAD_REQUEST
-        }
-    }
-
-    #[derive(Serialize)]
-    pub enum OnRequestErr {
-        LinkWithIdDoesntExist {
-            id: String,
-        },
-        CollectionsAreNotRelated {
-            from: String,
-            to: String,
-            with_id: String,
-            type_: String,
-        },
-    }
-
-    impl HttpError for OnRequestErr {
-        fn status_code(&self) -> hyper::StatusCode {
-            StatusCode::BAD_REQUEST
-        }
-    }
-
-    impl LiqLink<Sqlite> for optional_to_many_liq {
-        type This = optional_to_many<
-            //from, to
-            Box<dyn JsonCollection<Sqlite>>,
-            Box<dyn JsonCollection<Sqlite>>,
-        >;
-
-        type CreateLinkInput = CreateLinkRelationInput;
-
-        type CreateLinkError = CreateLinkRelationErr;
-
-        type CreateLinkOk = ();
-
-        type OnRequestInput = CreateLinkRelationInput;
-
-        type OnRequestError = OnRequestErr;
-
-        fn on_request(
-            &self,
-            base: &dyn JsonCollection<Sqlite>,
-            input: Self::OnRequestInput,
-        ) -> Result<Self::This, Self::OnRequestError> {
-            let id = if let Some(id) = input.id {
-                id
-            } else {
-                "default".to_string()
-            };
-
-            let found = self
-                .existing_links
-                .get(&id)
-                .ok_or(OnRequestErr::LinkWithIdDoesntExist { id: id.clone() })?;
-
-            if found.to.table_name_js() != input.to
-                || found.from.table_name_js() != base.table_name_js()
-            {
-                return Err(OnRequestErr::CollectionsAreNotRelated {
-                    from: base.table_name_js().to_string(),
-                    to: input.to.to_string(),
-                    with_id: id.to_string(),
-                    type_: "optional_to_many".to_string(),
-                });
-            }
-
-            Ok(found.clone())
-        }
-
-        fn create_link(
-            &mut self,
-            collections: &HashMap<String, Box<dyn JsonCollection<Sqlite>>>,
-            base: &dyn JsonCollection<Sqlite>,
-            input: Self::CreateLinkInput,
-        ) -> Result<(Self::CreateLinkOk, Self::This), Self::CreateLinkError> {
-            #[rustfmt::skip]
-            let id = if let Some(f) = input.id { f } else { "default".to_string() };
-
-            if self.existing_links.contains_key(&id) {
-                return Err(CreateLinkRelationErr::LinkWithIdExist { id: id });
-            }
-
-            let from = if let Some(found) = collections.get(base.table_name_js()) {
-                found.clone_self()
-            } else {
-                return Err(CreateLinkRelationErr::CollectionDoesntExist {
-                    name: base.table_name_js().to_string(),
-                });
-            };
-
-            let to = if let Some(found) = collections.get(&input.to) {
-                found.clone_self()
-            } else {
-                return Err(CreateLinkRelationErr::CollectionDoesntExist {
-                    name: base.table_name_js().to_string(),
-                });
-            };
-
-            let spec = optional_to_many {
-                foriegn_key: format!(
-                    "{from}_{to}_{id}",
-                    from = from.table_name_js(),
-                    to = to.table_name_js()
-                ),
-                from,
-                to,
-            };
-            self.existing_links.insert(id, spec.clone());
-
-            Ok(((), spec))
-        }
-    }
-
-    #[derive(Deserialize)]
-    pub struct OnRequestRelationInput {
-        id: Option<String>,
-    }
-
-    #[derive(Serialize)]
-    pub enum OnRequestRelationErr {
-        RelationWithIdDoesntExist { id: String },
     }
 }
