@@ -1,7 +1,9 @@
+use crate::query_builder::SqlSyntax;
+use crate::query_builder::syntax::empty;
+
 use super::QueryBuilder;
 use super::{
-    DatabaseExt, Expression, IsOpExpression, OpExpression, PossibleExpression,
-    ZeroOrMoreExpressions,
+    DatabaseExt, Expression, IsOpExpression, ManyExpressions, OpExpression, PossibleExpression,
 };
 use std::ops::Not;
 
@@ -91,8 +93,11 @@ impl<'q, S, T> PossibleExpression<'q, S> for T
 where
     T: Expression<'q, S> + 'q,
 {
-    fn expression_starting(self, start: &'static str, ctx: &mut QueryBuilder<'q, S>)
-    where
+    fn expression_starting<Start: SqlSyntax + ?Sized>(
+        self,
+        start: &Start,
+        ctx: &mut QueryBuilder<'q, S>,
+    ) where
         S: DatabaseExt,
     {
         ctx.syntax(start);
@@ -115,8 +120,11 @@ impl<'q, T: 'q, S> PossibleExpression<'q, S> for Option<T>
 where
     T: Expression<'q, S> + 'q,
 {
-    fn expression_starting(self, start: &'static str, ctx: &mut QueryBuilder<'q, S>)
-    where
+    fn expression_starting<Start: SqlSyntax + ?Sized>(
+        self,
+        start: &Start,
+        ctx: &mut QueryBuilder<'q, S>,
+    ) where
         S: DatabaseExt,
     {
         if let Some(this) = self {
@@ -134,12 +142,13 @@ where
     }
 }
 
-// impl IsOpExpression for () {
-//    // implemented inside 'impl_many_expr'
-// }
-
+impl IsOpExpression for () {
+    fn is_op(&self) -> bool {
+        false
+    }
+}
 impl<'q, S> PossibleExpression<'q, S> for () {
-    fn expression_starting(self, _: &'static str, _: &mut QueryBuilder<'q, S>)
+    fn expression_starting<Start: SqlSyntax + ?Sized>(self, _: &Start, _: &mut QueryBuilder<'q, S>)
     where
         S: DatabaseExt,
     {
@@ -151,14 +160,18 @@ impl<'q, S> PossibleExpression<'q, S> for () {
     }
 }
 
+pub struct ManyPossible<T>(pub T);
+
 mod impl_many_expr {
     use super::super::BoxedExpression;
+    use super::ManyPossible;
     use super::PossibleExprImplExpr;
     use crate::database_extention::DatabaseExt;
     use crate::query_builder::QueryBuilder;
+    use crate::query_builder::SqlSyntax;
     use crate::query_builder::functional_expr::StaticExpression;
     use crate::query_builder::{
-        IsOpExpression, PossibleExpression, ToStaticExpressions, ZeroOrMoreExpressions,
+        IsOpExpression, ManyExpressions, PossibleExpression, ToStaticExpressions,
     };
     use paste::paste;
 
@@ -202,7 +215,7 @@ mod impl_many_expr {
                 }
             }
 
-            impl<$($first,)? $($each,)* $($last,)?> IsOpExpression for ($($first,)? $($each,)* $($last,)?)
+            impl<$($first,)? $($each,)* $($last,)?> IsOpExpression for ManyPossible<($($first,)? $($each,)* $($last,)?)>
             where
                 $($first: IsOpExpression,)?
                 $($each:  IsOpExpression,)*
@@ -211,14 +224,14 @@ mod impl_many_expr {
                 fn is_op(&self) -> bool {
                     // if some are op then the entire tuple is op
                     false
-                    $(|| paste!(self.$first_part).is_op())?
-                    $(|| paste!(self.$part).is_op())?
-                    $(|| paste!(self.$last_part).is_op())?
+                    $(|| paste!(self.0.$first_part).is_op())?
+                    $(|| paste!(self.0.$part).is_op())?
+                    $(|| paste!(self.0.$last_part).is_op())?
                 }
             }
 
             #[allow(unused)]
-            impl<'q, S, $($first,)? $($each,)* $($last,)?> ZeroOrMoreExpressions<'q, S> for ($($first,)? $($each,)* $($last,)?)
+            impl<'q, S, $($first,)? $($each,)* $($last,)?> ManyExpressions<'q, S> for ManyPossible<($($first,)? $($each,)* $($last,)?)>
             where
                 $($first: PossibleExpression<'q, S> + 'q,)?
                 $($each:  PossibleExpression<'q, S> + 'q,)*
@@ -230,17 +243,17 @@ mod impl_many_expr {
                     let mut v: Vec<Box<dyn BoxedExpression<'_, S>>> = vec![ ];
 
                     $(
-                        if let Ok(s) = PossibleExprImplExpr::new(paste!(self.$first_part)) {
+                        if let Ok(s) = PossibleExprImplExpr::new(paste!(self.0.$first_part)) {
                             v.push(Box::new(s));
                         }
                     )?
                     $(
-                        if let Ok(s) = PossibleExprImplExpr::new(paste!(self.$part)) {
+                        if let Ok(s) = PossibleExprImplExpr::new(paste!(self.0.$part)) {
                             v.push(Box::new(s));
                         }
                     )*
                     $(
-                        if let Ok(s) = PossibleExprImplExpr::new(paste!(self.$last_part)) {
+                        if let Ok(s) = PossibleExprImplExpr::new(paste!(self.0.$last_part)) {
                             v.push(Box::new(s));
                         }
                     )?
@@ -248,39 +261,41 @@ mod impl_many_expr {
                    v
                 }
 
-                fn expression(self,start: &'static str, join: &'static str, ctx: &mut QueryBuilder<'q, S>)
+                fn expression<St,J>(self,start: &St, join: &J, ctx: &mut QueryBuilder<'q, S>)
                 where
+                St: SqlSyntax + ?Sized,
+                J: SqlSyntax + ?Sized,
                     S: DatabaseExt,
                 {
                     let mut need_to_start = true;
                     $(
-                        if paste!(self.$first_part).is_op() {
+                        if paste!(self.0.$first_part).is_op() {
                             if need_to_start {
                                 ctx.syntax(start);
                                 need_to_start = false
                             }
-                            paste!(self.$first_part).expression(ctx);
+                            paste!(self.0.$first_part).expression(ctx);
                         }
                     )?
                     $(
-                        if paste!(self.$part).is_op() {
+                        if paste!(self.0.$part).is_op() {
                             if need_to_start {
                                 ctx.syntax(start);
                                 need_to_start = false
                             } else {
                                 ctx.syntax(join)
                             }
-                            paste!(self.$part).expression(ctx);
+                            paste!(self.0.$part).expression(ctx);
                         }
                     )*
                     $(
-                        if paste!(self.$last_part).is_op() {
+                        if paste!(self.0.$last_part).is_op() {
                             if need_to_start {
                                 ctx.syntax(start);
                             } else {
                                 ctx.syntax(join)
                             }
-                            paste!(self.$last_part).expression(ctx);
+                            paste!(self.0.$last_part).expression(ctx);
                         }
                     )?
                 }
@@ -304,7 +319,7 @@ where
     }
 }
 
-impl<'q, T, S> ZeroOrMoreExpressions<'q, S> for Vec<T>
+impl<'q, T, S> ManyExpressions<'q, S> for Vec<T>
 where
     T: PossibleExpression<'q, S> + 'q,
 {
@@ -320,8 +335,12 @@ where
             })
             .collect()
     }
-    fn expression(self, start: &'static str, join: &'static str, ctx: &mut QueryBuilder<'q, S>)
-    where
+    fn expression<Start: super::SqlSyntax + ?Sized, Join: super::SqlSyntax + ?Sized>(
+        self,
+        start: &Start,
+        join: &Join,
+        ctx: &mut QueryBuilder<'q, S>,
+    ) where
         S: DatabaseExt,
     {
         let mut need_to_start = true;
@@ -340,6 +359,12 @@ where
             each.expression(ctx);
         }
     }
+    // fn expression(self, start: &'static str, join: &'static str, ctx: &mut QueryBuilder<'q, S>)
+    // where
+    //     S: DatabaseExt,
+    // {
+
+    // }
 }
 
 #[cfg(test)]
@@ -358,30 +383,33 @@ mod test {
     // }
 }
 
-pub struct ZeroOrMoreImplPossible<T> {
+pub struct ManyImplPossible<T> {
     pub start: &'static str,
     pub join: &'static str,
     pub expressions: T,
 }
 
-impl<T: IsOpExpression> IsOpExpression for ZeroOrMoreImplPossible<T> {
+impl<T: IsOpExpression> IsOpExpression for ManyImplPossible<T> {
     fn is_op(&self) -> bool {
         self.expressions.is_op()
     }
 }
 
-impl<'q, S, T> PossibleExpression<'q, S> for ZeroOrMoreImplPossible<T>
+impl<'q, S, T> PossibleExpression<'q, S> for ManyImplPossible<T>
 where
-    T: ZeroOrMoreExpressions<'q, S> + 'q,
+    T: ManyExpressions<'q, S> + 'q,
 {
     /// double start! maybe that can be intentional!
-    fn expression_starting(self, start: &'static str, ctx: &mut QueryBuilder<'q, S>)
-    where
+    fn expression_starting<Start: SqlSyntax + ?Sized>(
+        self,
+        start: &Start,
+        ctx: &mut QueryBuilder<'q, S>,
+    ) where
         S: DatabaseExt,
     {
         if self.is_op() {
             ctx.syntax(start);
-            self.expressions.expression(self.start, self.join, ctx);
+            self.expressions.expression(&self.start, &self.join, ctx);
         }
     }
 
@@ -389,7 +417,7 @@ where
     where
         S: DatabaseExt,
     {
-        self.expressions.expression(self.start, self.join, ctx);
+        self.expressions.expression(&self.start, &self.join, ctx);
     }
 }
 
@@ -422,5 +450,144 @@ where
         S: DatabaseExt,
     {
         PossibleExpression::expression(self.0, ctx);
+    }
+}
+
+pub struct ManyFlat<T>(pub T);
+
+impl<T0> IsOpExpression for ManyFlat<(T0,)>
+where
+    T0: IsOpExpression,
+{
+    fn is_op(&self) -> bool {
+        self.0.0.is_op()
+    }
+}
+
+impl<'s, T0, S> ManyExpressions<'s, S> for ManyFlat<(T0,)>
+where
+    T0: ManyExpressions<'s, S>,
+{
+    fn to_expr(
+        self,
+    ) -> Vec<Box<dyn crate::prelude::macro_derive_collection::BoxedExpression<'s, S> + 's>>
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
+    fn expression<Start: SqlSyntax + ?Sized, Join: SqlSyntax + ?Sized>(
+        self,
+        start: &Start,
+        join: &Join,
+        ctx: &mut QueryBuilder<'s, S>,
+    ) where
+        S: DatabaseExt,
+    {
+        if self.0.0.is_op() {
+            ctx.syntax(start);
+        }
+        self.0.0.expression(&empty, join, ctx);
+    }
+}
+
+impl<T0, T1> IsOpExpression for ManyFlat<(T0, T1)>
+where
+    T0: IsOpExpression,
+    T1: IsOpExpression,
+{
+    fn is_op(&self) -> bool {
+        self.0.0.is_op() || self.0.0.is_op()
+    }
+}
+
+impl<'s, T0, T1, S> ManyExpressions<'s, S> for ManyFlat<(T0, T1)>
+where
+    T0: ManyExpressions<'s, S>,
+    T1: ManyExpressions<'s, S>,
+{
+    fn to_expr(
+        self,
+    ) -> Vec<Box<dyn crate::prelude::macro_derive_collection::BoxedExpression<'s, S> + 's>>
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
+    fn expression<Start: SqlSyntax + ?Sized, Join: SqlSyntax + ?Sized>(
+        self,
+        start: &Start,
+        join: &Join,
+        ctx: &mut QueryBuilder<'s, S>,
+    ) where
+        S: DatabaseExt,
+    {
+        let mut need_start = true;
+        if need_start && self.0.0.is_op() {
+            ctx.syntax(start);
+            need_start = false;
+        }
+        self.0.0.expression(&empty, join, ctx);
+
+        if need_start && self.0.1.is_op() {
+            ctx.syntax(start);
+        } else {
+            ctx.syntax(join);
+        }
+        self.0.1.expression(&empty, join, ctx);
+    }
+}
+
+impl<T0, T1, T2> IsOpExpression for ManyFlat<(T0, T1, T2)>
+where
+    T0: IsOpExpression,
+    T1: IsOpExpression,
+    T2: IsOpExpression,
+{
+    fn is_op(&self) -> bool {
+        self.0.0.is_op() || self.0.0.is_op()
+    }
+}
+
+impl<'s, T0, T1, T2, S> ManyExpressions<'s, S> for ManyFlat<(T0, T1, T2)>
+where
+    T0: ManyExpressions<'s, S>,
+    T1: ManyExpressions<'s, S>,
+    T2: ManyExpressions<'s, S>,
+{
+    fn to_expr(
+        self,
+    ) -> Vec<Box<dyn crate::prelude::macro_derive_collection::BoxedExpression<'s, S> + 's>>
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
+    fn expression<Start: SqlSyntax + ?Sized, Join: SqlSyntax + ?Sized>(
+        self,
+        start: &Start,
+        join: &Join,
+        ctx: &mut QueryBuilder<'s, S>,
+    ) where
+        S: DatabaseExt,
+    {
+        let mut need_start = true;
+
+        if need_start && self.0.0.is_op() {
+            ctx.syntax(start);
+            need_start = false;
+        }
+        self.0.0.expression(&empty, join, ctx);
+
+        if need_start && self.0.1.is_op() {
+            ctx.syntax(start);
+            need_start = false
+        }
+        self.0.1.expression(&empty, join, ctx);
+
+        if need_start && self.0.2.is_op() {
+            ctx.syntax(start);
+        }
+        self.0.2.expression(&empty, join, ctx);
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
     database_extention::DatabaseExt,
-    query_builder::{Expression, OpExpression, QueryBuilder, ZeroOrMoreExpressions},
+    query_builder::{Expression, ManyExpressions, OpExpression, QueryBuilder},
 };
 
 pub struct CreateTable<Init, TableName, ColDefs> {
@@ -26,7 +26,7 @@ pub mod expressions {
         where
             S: DatabaseExt,
         {
-            ctx.syntax("CREATE TABLE");
+            ctx.syntax(&"CREATE TABLE");
         }
     }
 
@@ -39,7 +39,7 @@ pub mod expressions {
         where
             S: DatabaseExt,
         {
-            ctx.syntax("CREATE TABLE IF NOT EXISTS");
+            ctx.syntax(&"CREATE TABLE IF NOT EXISTS");
         }
     }
 }
@@ -50,7 +50,7 @@ impl<'q, S, Header, Table, Columns> Expression<'q, S> for CreateTable<Header, Ta
 where
     Header: Expression<'q, S> + 'q,
     Table: Expression<'q, S> + 'q,
-    Columns: ZeroOrMoreExpressions<'q, S> + 'q,
+    Columns: ManyExpressions<'q, S> + 'q,
 {
     fn expression(self, ctx: &mut QueryBuilder<'q, S>)
     where
@@ -59,13 +59,13 @@ where
         let open_b = "(";
         let close_b = ");";
         self.init.expression(ctx);
-        ctx.syntax(" ");
+        ctx.syntax(&" ");
         self.name.expression(ctx);
         // ctx.sanitize(self.name);
-        ctx.syntax(" ");
-        ctx.syntax(open_b);
-        self.col_defs.expression("", ", ", ctx);
-        ctx.syntax(close_b);
+        ctx.syntax(&" ");
+        ctx.syntax(&open_b);
+        self.col_defs.expression(&"", &", ", ctx);
+        ctx.syntax(&close_b);
     }
 }
 
@@ -96,7 +96,7 @@ mod impl_syntax_for_create_table {
     impl<T, C0> ColIdent<T> for (C0,) where C0: ColIdent<T> {}
 
     impl<Table, C> ColIdent<Table> for col_def_for_collection_member<C> where
-        C: Member<Collection = Table>
+        C: Member<CollectionHandler = Table>
     {
     }
 }

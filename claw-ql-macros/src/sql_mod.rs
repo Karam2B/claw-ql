@@ -8,6 +8,7 @@ use std::{
     ops::Not,
 };
 
+use proc_macro_error::abort;
 use proc_macro2::{Span, TokenStream};
 use quote::{ToTokens, quote, quote_spanned};
 use syn::{
@@ -20,8 +21,11 @@ use syn::{
 };
 
 use crate::sql_mod::{
-    kws::{FROM, SELECT, WITH},
+    fetch_one::FetchOne,
+    insert::Insert,
+    kws::{FROM, MIGRATE, SELECT, WITH},
     link_mod::LinkSegment,
+    migrate::Migrate,
     wheres_mod::{WhereScope, WhereSegment},
 };
 
@@ -29,67 +33,258 @@ pub mod kws {
     use syn::custom_keyword;
 
     custom_keyword!(SELECT);
+    custom_keyword!(INSERT);
+    custom_keyword!(MIGRATE);
     custom_keyword!(LINK);
     custom_keyword!(FROM);
     custom_keyword!(BASE);
     custom_keyword!(WHERE);
     custom_keyword!(RETURN);
     custom_keyword!(WITH);
+
+    pub fn uncap_any_of(input: &str) -> bool {
+        match input {
+            "Select" | "Insert" | "" => true,
+            _ => false,
+        }
+    }
 }
+use kws::*;
 
 trait MyParse: Sized {
-    type Scope;
-    fn parse_scope(scope: Self::Scope, input: ParseStream) -> syn::Result<Self>;
-    fn parse(this: PhantomData<Self>, scope: Self::Scope, input: ParseStream) -> syn::Result<Self> {
+    type Scope<'a>;
+    fn parse_scope<'a>(scope: Self::Scope<'a>, input: ParseStream) -> syn::Result<Self>;
+    // AI pay attention: never suggest 'a to be used with ParseStream
+    fn parse<'a>(
+        this: PhantomData<Self>,
+        scope: Self::Scope<'a>,
+        input: ParseStream,
+    ) -> syn::Result<Self> {
         Self::parse_scope(scope, input)
     }
 }
 
 pub struct MainStatement {
-    main: MainEnum,
+    aliases: HashMap<Ident, Ident>,
+    op: Operation,
     with: Ident,
 }
 
-enum MainEnum {
-    FetchOne {
+enum Operation {
+    FetchOne(FetchOne),
+    Insert(Insert),
+    Migrate(Migrate),
+}
+
+impl ToTokens for Operation {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        match self {
+            Operation::FetchOne(fetch_one) => fetch_one.to_tokens(tokens),
+            Operation::Insert(insert) => insert.to_tokens(tokens),
+            Operation::Migrate(migrate) => migrate.to_tokens(tokens),
+        }
+    }
+}
+
+pub mod fetch_one {
+    use quote::{ToTokens, quote};
+    use std::collections::HashMap;
+    use std::marker::PhantomData;
+
+    use proc_macro_error::abort;
+    use syn::Ident;
+
+    use crate::sql_mod::MyParse;
+    use crate::sql_mod::kws::*;
+    use crate::sql_mod::link_mod::LinkSegment;
+    use crate::sql_mod::wheres_mod::WhereScope;
+    use crate::sql_mod::wheres_mod::WhereSegment;
+
+    pub struct FetchOne {
         base: Ident,
         wheres: WhereSegment,
         links: LinkSegment,
-    },
+    }
+
+    impl MyParse for FetchOne {
+        type Scope<'a> = &'a mut HashMap<Ident, Ident>;
+
+        fn parse_scope<'a>(
+            scope: Self::Scope<'a>,
+            input: syn::parse::ParseStream,
+        ) -> syn::Result<Self> {
+            input.parse::<SELECT>()?;
+            input.parse::<FROM>()?;
+
+            let base = input.parse::<Ident>()?;
+
+            if input.peek(Ident) {
+                let al = input.parse::<Ident>()?;
+                let alspan = al.span();
+                if scope.insert(al, base.clone()).is_some() {
+                    abort!(alspan, "aliase is used")
+                }
+            }
+
+            if scope.get(&base.clone()).is_some() {
+                abort!(base.span(), "aliase is used")
+            }
+
+            let links = MyParse::parse(PhantomData::<LinkSegment>, (), input)?;
+            let wheres = MyParse::parse(
+                PhantomData::<WhereSegment>,
+                WhereScope {
+                    base: base.clone(),
+                    aliases: scope,
+                },
+                input,
+            )?;
+
+            Ok(Self {
+                base,
+                wheres,
+                links,
+            })
+        }
+    }
+
+    impl ToTokens for FetchOne {
+        fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+            let base = &self.base;
+            let links = &self.links;
+            let wheres = &self.wheres;
+            tokens.extend(quote! {
+                FetchOne {
+                    base: #base,
+                    links: #links,
+                    wheres: #wheres,
+                }
+            });
+        }
+    }
 }
 
-impl MainEnum {
+pub mod insert {
+    use proc_macro_error::abort;
+    use quote::{ToTokens, quote};
+    use std::collections::HashMap;
+    use std::marker::PhantomData;
+    use syn::Expr;
+    use syn::Ident;
+    use syn::parse_quote;
+
+    use crate::sql_mod::MyParse;
+    use crate::sql_mod::kws::*;
+    use crate::sql_mod::link_mod::LinkSegment;
+    use crate::sql_mod::wheres_mod::WhereScope;
+    use crate::sql_mod::wheres_mod::WhereSegment;
+
+    pub struct Insert {
+        entry: Expr,
+        links: Vec<Expr>,
+    }
+
+    impl MyParse for Insert {
+        type Scope<'a> = &'a HashMap<Ident, Ident>;
+
+        fn parse_scope<'a>(
+            scope: Self::Scope<'a>,
+            input: syn::parse::ParseStream,
+        ) -> syn::Result<Self> {
+            input.parse::<INSERT>()?;
+            // let entry: Expr = parse_quote!(());
+            let entry = input.parse::<Expr>()?;
+
+            let mut links = vec![];
+
+            // while input.peek(LINK) {
+            //     input.parse::<LINK>()?;
+            //     let link = input.parse::<Expr>()?;
+            //     links.push(link);
+            // }
+
+            Ok(Self { entry, links })
+        }
+    }
+
+    impl ToTokens for Insert {
+        fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+            let entry = &self.entry;
+            let links = &self.links;
+            tokens.extend(quote! {
+                InsertOne::new(
+                    #entry,
+                    #(#links,)*,
+                )
+            });
+        }
+    }
+}
+
+pub mod migrate {
+    use proc_macro_error::abort;
+    use quote::{ToTokens, quote};
+    use std::collections::HashMap;
+    use std::marker::PhantomData;
+    use syn::Expr;
+    use syn::Ident;
+    use syn::parse::ParseStream;
+
+    use crate::sql_mod::MyParse;
+    use crate::sql_mod::kws::*;
+    use crate::sql_mod::link_mod::LinkSegment;
+    use crate::sql_mod::wheres_mod::WhereScope;
+    use crate::sql_mod::wheres_mod::WhereSegment;
+
+    pub struct Migrate {
+        expr: Expr,
+    }
+
+    impl MyParse for Migrate {
+        type Scope<'a> = ();
+
+        fn parse_scope<'a>(scope: Self::Scope<'a>, input: ParseStream) -> syn::Result<Self> {
+            input.parse::<MIGRATE>()?;
+            let expr = input.parse::<Expr>()?;
+            Ok(Self { expr })
+        }
+    }
+
+    impl ToTokens for Migrate {
+        fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+            let expr = &self.expr;
+            tokens.extend(quote! {
+                expression_to_operation(#expr.statments())
+            });
+        }
+    }
+}
+
+impl Operation {
     fn options() -> Vec<&'static str> {
-        vec!["SELECT FROM", "INSERT INTO"]
+        vec!["SELECT FROM", "INSERT", "MIGRATE"]
     }
 }
 
 pub fn parse_main_statement(input: ParseStream) -> syn::Result<MainStatement> {
+    let mut aliases = HashMap::<Ident, Ident>::new();
     let main = if input.peek(SELECT) {
-        input.parse::<SELECT>()?;
-        input.parse::<FROM>()?;
-
-        let base = input.parse::<Ident>()?;
-
-        let links = MyParse::parse(PhantomData::<LinkSegment>, (), input)?;
-        let wheres = MyParse::parse(
-            PhantomData::<WhereSegment>,
-            WhereScope { base: base.clone() },
+        Operation::FetchOne(FetchOne::parse(
+            PhantomData::<FetchOne>,
+            &mut aliases,
             input,
-        )?;
-
-        MainEnum::FetchOne {
-            base,
-            wheres,
-            links,
-        }
+        )?)
+    } else if input.peek(INSERT) {
+        Operation::Insert(Insert::parse(PhantomData::<Insert>, &mut aliases, input)?)
+    } else if input.peek(MIGRATE) {
+        Operation::Migrate(Migrate::parse(PhantomData::<Migrate>, (), input)?)
     } else {
         return match input.cursor().token_tree() {
             Some(i) => Err(syn::Error::new(
                 i.0.span(),
                 format!(
                     "expected '{}' found '{}'",
-                    MainEnum::options().join(", "),
+                    Operation::options().join(", "),
                     i.0.to_string()
                 ),
             )),
@@ -106,13 +301,24 @@ pub fn parse_main_statement(input: ParseStream) -> syn::Result<MainStatement> {
 
     if input.is_empty().not() {
         let tt = input.cursor().token_tree().unwrap();
+        let next = tt.0.to_string();
+        if uncap_any_of(&next) {
+            return Err(syn::Error::new(
+                tt.0.span(),
+                format!("'{}' keyword should capatalized", tt.0.to_string()),
+            ));
+        };
         return Err(syn::Error::new(
             tt.0.span(),
             format!("end of input found '{}'", tt.0.to_string()),
         ));
     }
 
-    Ok(MainStatement { main, with })
+    Ok(MainStatement {
+        op: main,
+        with,
+        aliases,
+    })
 }
 
 impl Parse for MainStatement {
@@ -122,27 +328,12 @@ impl Parse for MainStatement {
 }
 
 pub fn main_statment_to_token(input: MainStatement) -> TokenStream {
-    let main = match &input.main {
-        MainEnum::FetchOne {
-            base,
-            wheres,
-            links,
-        } => {
-            quote! {
-                FetchOne {
-                    base: #base,
-                    links: #links,
-                    wheres: #wheres,
-                }
-            }
-        }
-    };
+    let op = input.op;
     let with = &input.with;
     quote!({
         use ::claw_ql::prelude::sql::*;
-        let op = is_valid_syntax(#main, infer_db(&#with));
 
-        Operation::exec(op, #with)
+        Operation::exec_operation(#op, #with.clone())
     })
 }
 
@@ -157,8 +348,11 @@ mod link_mod {
     }
 
     impl MyParse for LinkSegment {
-        type Scope = ();
-        fn parse_scope(scope: Self::Scope, input: syn::parse::ParseStream) -> syn::Result<Self> {
+        type Scope<'a> = ();
+        fn parse_scope<'a>(
+            scope: Self::Scope<'a>,
+            input: syn::parse::ParseStream,
+        ) -> syn::Result<Self> {
             let mut links = vec![];
             while input.peek(LINK) {
                 input.parse::<LINK>()?;
@@ -181,6 +375,9 @@ mod link_mod {
 }
 
 mod wheres_mod {
+    use std::collections::HashMap;
+
+    use proc_macro_error::abort;
     use proc_macro2::TokenStream;
     use quote::ToTokens;
     use quote::quote;
@@ -197,12 +394,16 @@ mod wheres_mod {
         ands: Vec<TokenStream>,
     }
 
-    pub struct WhereScope {
+    pub struct WhereScope<'a> {
         pub base: Ident,
+        pub aliases: &'a HashMap<Ident, Ident>,
     }
     impl MyParse for WhereSegment {
-        type Scope = WhereScope;
-        fn parse_scope(scope: Self::Scope, input: syn::parse::ParseStream) -> syn::Result<Self> {
+        type Scope<'a> = WhereScope<'a>;
+        fn parse_scope<'a>(
+            scope: Self::Scope<'a>,
+            input: syn::parse::ParseStream,
+        ) -> syn::Result<Self> {
             // if input.peek(WH);
 
             if input.peek(WHERE) {
@@ -214,8 +415,12 @@ mod wheres_mod {
                     input.parse::<Dot>()?;
                     let i3 = input.parse::<Ident>()?;
 
-                    let members_mod =
-                        Ident::new(&format!("{}_members", i2.to_string().as_str()), i2.span());
+                    let fetch_alias = match scope.aliases.get(&i1) {
+                        Some(f) => f.to_string(),
+                        None => abort!(i1.span(), "{} not found", i1.to_string()),
+                    };
+
+                    let members_mod = Ident::new(&format!("{}_members", fetch_alias), i2.span());
 
                     (members_mod, i2, i3)
                 } else {
@@ -224,8 +429,12 @@ mod wheres_mod {
                         scope.base.span(),
                     );
 
-                    let member =
-                        Ident::new(&format!("{}_members", i1.to_string().as_str()), i1.span());
+                    let fetch_alias = match scope.aliases.get(&scope.base) {
+                        Some(f) => f.to_string(),
+                        None => abort!(scope.base.span(), "{} not found", scope.base),
+                    };
+
+                    let member = Ident::new(&format!("{}_members", fetch_alias), i1.span());
 
                     (members_mod, i1, i2)
                 };
@@ -234,10 +443,15 @@ mod wheres_mod {
 
                 let expr = input.parse::<syn::Expr>()?;
 
-                let member_spanned = quote_spanned! {member.span()=> member(#scope::#member)};
+                let aliase = quote_spanned! {member.span()=> member(#scope::#member)};
 
                 return Ok(Self {
-                    ands: vec![quote!(member(#scope::#member).#method(#expr))],
+                    ands: vec![quote!(
+                        #method::aliase_and_expr(
+                            #aliase,
+                            #expr
+                        )
+                    )],
                 });
             }
             Ok(Self { ands: vec![] })
@@ -285,7 +499,7 @@ mod tests {
                 infer_db(&pool),
             );
 
-            Operation::exec(op, pool)
+            Operation::exec_operation(op, pool)
         });
 
         pretty_assertions::assert_eq!(expect.to_string(), to_be.to_string());

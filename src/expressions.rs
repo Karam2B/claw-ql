@@ -1,12 +1,10 @@
 #![allow(non_camel_case_types)]
 use crate::collections::{CollectionBasic, Member, MemberBasic};
 use crate::database_extention::DatabaseExt;
-use crate::query_builder::syntax::space_join;
-use crate::query_builder::{
-    Expression, OpExpression, QueryBuilder, SqlSanitize, SqlSyntax, ZeroOrMoreExpressions,
-};
+use crate::prelude::sql::AliasAndExpr;
+use crate::query_builder::syntax::{comma_join, empty, equal_join, space_join};
+use crate::query_builder::{Expression, ManyExpressions, OpExpression, QueryBuilder, SqlSyntax};
 use sqlx::{Database, Encode, Type, TypeInfo};
-use std::fmt::Display;
 use std::marker::PhantomData;
 use std::ops::Not;
 
@@ -65,7 +63,13 @@ where
     where
         S: DatabaseExt,
     {
-        ctx.syntax(sqlx_type(PhantomData::<(S, T)>));
+        ctx.syntax(&sqlx_type(PhantomData::<(S, T)>));
+    }
+}
+
+impl<T> Clone for sqlx_type<T> {
+    fn clone(&self) -> Self {
+        sqlx_type(PhantomData)
     }
 }
 
@@ -74,7 +78,7 @@ where
     S: Database,
     T: Type<S>,
 {
-    fn to_sql(self, stmt: &mut String) {
+    fn to_sql(&self, stmt: &mut String) {
         stmt.push_str(T::type_info().name());
     }
 }
@@ -143,18 +147,18 @@ impl<Name, Type, Constraints> OpExpression for col_def<Name, Type, Constraints> 
 impl<'q, S, Name, Type, Constraints> Expression<'q, S> for col_def<Name, Type, Constraints>
 where
     S: Database,
-    Name: SqlSanitize<S> + 'q,
+    Name: AsRef<str> + 'q,
     Type: Expression<'q, S> + 'q,
-    Constraints: ZeroOrMoreExpressions<'q, S> + 'q,
+    Constraints: ManyExpressions<'q, S> + 'q,
 {
     fn expression(self, ctx: &mut QueryBuilder<'q, S>)
     where
         S: DatabaseExt,
     {
-        ctx.sanitize(self.name);
-        ctx.syntax(space_join);
+        ctx.sanitize(self.name.as_ref());
+        ctx.syntax(&space_join);
         self.ty.expression(ctx);
-        self.constraints.expression(" ", " ", ctx);
+        self.constraints.expression(&empty, &comma_join, ctx);
     }
 }
 
@@ -174,11 +178,11 @@ where
         S: DatabaseExt,
     {
         ctx.sanitize(self.0.name());
-        ctx.syntax(" ");
-        ctx.syntax(sqlx_type(PhantomData::<(S, T::Data)>));
+        ctx.syntax(&space_join);
+        ctx.syntax(&sqlx_type(PhantomData::<(S, T::Data)>));
         let s = <T::Data as is_null::IsNull>::is_null();
         if s.not() {
-            ctx.syntax(" NOT NULL");
+            ctx.syntax(&" NOT NULL");
         }
     }
 }
@@ -199,13 +203,13 @@ impl<T> OpExpression for col<T> {}
 impl<'q, S, T> Expression<'q, S> for col<T>
 where
     T: 'q,
-    T: SqlSanitize<S>,
+    T: AsRef<str>,
 {
     fn expression(self, ctx: &mut QueryBuilder<'q, S>)
     where
         S: DatabaseExt,
     {
-        ctx.sanitize(self.0);
+        ctx.sanitize(self.0.as_ref());
     }
 }
 
@@ -219,7 +223,7 @@ impl<'q, S, T: 'q + Expression<'q, S>> Expression<'q, S> for pre_alias<T> {
         S: DatabaseExt,
     {
         self.0.expression(ctx);
-        ctx.syntax(" AS ");
+        ctx.syntax(&" AS ");
         todo!()
     }
 }
@@ -238,16 +242,16 @@ impl<'a, S> Expression<'a, S> for left_join {
     where
         S: DatabaseExt,
     {
-        ctx.syntax("LEFT JOIN ");
-        ctx.sanitize(self.ft.clone());
-        ctx.syntax(" ON ");
-        ctx.sanitize(self.lt);
-        ctx.syntax(".");
-        ctx.sanitize(self.lc);
-        ctx.syntax(" = ");
-        ctx.sanitize(self.ft);
-        ctx.syntax(".");
-        ctx.sanitize(self.fc);
+        ctx.syntax(&"LEFT JOIN ");
+        ctx.sanitize(self.ft.as_str());
+        ctx.syntax(&" ON ");
+        ctx.sanitize(self.lt.as_str());
+        ctx.syntax(&".");
+        ctx.sanitize(self.lc.as_str());
+        ctx.syntax(&" = ");
+        ctx.sanitize(self.ft.as_str());
+        ctx.syntax(&".");
+        ctx.sanitize(self.fc.as_str());
     }
 }
 
@@ -277,6 +281,15 @@ pub struct col_eq<Col, Eq> {
     pub eq: Eq,
 }
 
+impl<A, E> AliasAndExpr<A, E> for col_eq<A, E> {
+    fn aliase_and_expr(alias: A, expr: E) -> Self {
+        col_eq {
+            col: alias,
+            eq: expr,
+        }
+    }
+}
+
 impl<Col, Eq> OpExpression for col_eq<Col, Eq> {}
 
 impl<'q, S, Col, Eq> Expression<'q, S> for col_eq<Col, Eq>
@@ -287,7 +300,7 @@ where
 {
     fn expression(self, arg: &mut QueryBuilder<'q, S>) {
         self.col.expression(arg);
-        arg.syntax(" = ");
+        arg.syntax(&equal_join);
         arg.bind(self.eq);
     }
 }
@@ -299,10 +312,10 @@ impl<T> OpExpression for table<T> {}
 impl<'q, S, Table> Expression<'q, S> for table<Table>
 where
     S: DatabaseExt,
-    Table: SqlSanitize<S> + 'q,
+    Table: AsRef<str> + 'q,
 {
     fn expression(self, arg: &mut QueryBuilder<'q, S>) {
-        arg.sanitize(self.0);
+        arg.sanitize(self.0.as_ref());
     }
 }
 
@@ -334,13 +347,13 @@ impl<Table, Column> OpExpression for scoped_column<Table, Column> {}
 impl<'q, S, Column, Table> Expression<'q, S> for scoped_column<Table, Column>
 where
     S: DatabaseExt,
-    Table: SqlSanitize<S> + 'q,
-    Column: SqlSanitize<S> + 'q,
+    Table: AsRef<str> + 'q,
+    Column: AsRef<str> + 'q,
 {
     fn expression(self, arg: &mut QueryBuilder<'q, S>) {
-        arg.sanitize(self.table);
-        arg.syntax(".");
-        arg.sanitize(self.column);
+        arg.sanitize(self.table.as_ref());
+        arg.syntax(&".");
+        arg.sanitize(self.column.as_ref());
     }
 }
 
@@ -356,17 +369,22 @@ impl<'q, S, T, C, A> Expression<'q, S> for PreAlias<scoped_column<T, C>, A>
 where
     Self: 'q,
     S: DatabaseExt,
-    T: SqlSanitize<S> + 'q,
-    C: SqlSanitize<S> + 'q + Display,
-    A: SqlSanitize<S> + 'q + Display,
+    T: AsRef<str> + 'q,
+    C: AsRef<str> + 'q,
+    A: AsRef<str> + 'q,
 {
     fn expression(self, arg: &mut QueryBuilder<'q, S>) {
-        let alias = format!("{}{}", self.alias, self.on.column);
-        arg.sanitize(self.on.table);
-        arg.syntax(".");
-        arg.sanitize(self.on.column);
-        arg.syntax(" AS ");
-        arg.sanitize(alias);
+        let alias = format!(
+            "{}{}{}",
+            self.alias.as_ref(),
+            self.on.table.as_ref(),
+            self.on.column.as_ref()
+        );
+        arg.sanitize(self.on.table.as_ref());
+        arg.syntax(&".");
+        arg.sanitize(self.on.column.as_ref());
+        arg.syntax(&" AS ");
+        arg.sanitize(alias.as_str());
     }
 }
 
@@ -393,8 +411,8 @@ where
     fn expression(self, arg: &mut QueryBuilder<'q, S>) {
         let alias = format!("{}{}", self.alias, self.on.0);
         arg.sanitize(self.on.0);
-        arg.syntax(" AS ");
-        arg.sanitize(alias);
+        arg.syntax(&" AS ");
+        arg.sanitize(alias.as_str());
     }
 }
 
@@ -407,20 +425,20 @@ mod imp_id_constraint_for_sqlite {
 
     use crate::{
         database_extention::DatabaseExt,
-        query_builder::{Expression, QueryBuilder, SqlSanitize},
+        query_builder::{Expression, QueryBuilder, syntax::space_join},
     };
 
     impl<'q, Id, Constraint> Expression<'q, Sqlite> for super::id_constraint<Id, Constraint>
     where
-        Id: SqlSanitize<Sqlite> + 'q,
+        Id: AsRef<str> + 'q,
         Constraint: Expression<'q, Sqlite>,
     {
         fn expression(self, ctx: &mut QueryBuilder<'q, Sqlite>)
         where
             Sqlite: DatabaseExt,
         {
-            ctx.sanitize(self.0);
-            ctx.syntax(" ");
+            ctx.sanitize(self.0.as_ref());
+            ctx.syntax(&space_join);
             self.1.expression(ctx);
         }
     }
@@ -439,26 +457,27 @@ mod imp_foriegn_key_for_sqlite {
 
     use crate::{
         database_extention::DatabaseExt,
-        query_builder::{Expression, QueryBuilder, ZeroOrMoreExpressions},
+        query_builder::{
+            Expression, ManyExpressions, QueryBuilder,
+            syntax::{close_paranthesis, comma_join, open_paranthesis, space_join},
+        },
     };
 
     impl<'q, Ons> Expression<'q, Sqlite> for super::foriegn_key<Ons>
     where
-        Ons: ZeroOrMoreExpressions<'q, Sqlite> + 'q,
+        Ons: ManyExpressions<'q, Sqlite> + 'q,
     {
         fn expression(self, ctx: &mut QueryBuilder<'q, Sqlite>)
         where
             Sqlite: DatabaseExt,
         {
-            let o = "(";
-            let c = ")";
-            ctx.syntax(" REFERENCES ");
+            ctx.syntax(&" REFERENCES ");
 
-            ctx.sanitize(self.references_table);
-            ctx.syntax(o);
-            ctx.sanitize(self.references_col);
-            ctx.syntax(c);
-            self.ons.expression(" ", " ", ctx);
+            ctx.sanitize(self.references_table.as_str());
+            ctx.syntax(&open_paranthesis);
+            ctx.sanitize(self.references_col.as_str());
+            ctx.syntax(&close_paranthesis);
+            self.ons.expression(&space_join, &comma_join, ctx);
         }
     }
 }
@@ -480,7 +499,7 @@ mod imp_on_delete_set_null_for_sqlite {
         where
             Sqlite: DatabaseExt,
         {
-            ctx.syntax("ON DELETE SET NULL");
+            ctx.syntax(&"ON DELETE SET NULL");
         }
     }
 }

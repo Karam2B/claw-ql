@@ -13,23 +13,16 @@ use crate::{
     from_row::pre_alias,
     json_client::{JsonValue, json_collection::JsonCollection},
     links::Link,
-    operations::{
-        Operation,
-        fetch_one::{LinkFetchOne, SelectStatementExtendableParts},
-    },
+    operations::{Operation, fetch_one::LinkFetchOne},
 };
 
 pub trait JsonLinkFetchOne<S>: 'static + Send
 where
     S: Database,
 {
-    fn extend1(
-        &self,
-    ) -> SelectStatementExtendableParts<
-        Vec<scoped_column<String, String>>,
-        Vec<Box<dyn StaticExpression<S> + Send>>,
-        Vec<Box<dyn StaticExpression<S> + Send>>,
-    >;
+    fn non_aggregating_select_items(&self) -> Vec<scoped_column<String, String>>;
+    fn non_duplicating_joins(&self) -> Vec<Box<dyn StaticExpression<S> + Send>>;
+    fn wheres(&self) -> Vec<Box<dyn StaticExpression<S> + Send>>;
     fn sub_op(
         &self,
         row: pre_alias<'_, <S as Database>::Row>,
@@ -50,19 +43,14 @@ where
     T::Wheres: ToStaticExpressions<S>,
     S: 'static + Database,
 {
-    fn extend1(
-        &self,
-    ) -> SelectStatementExtendableParts<
-        Vec<scoped_column<String, String>>,
-        Vec<Box<dyn StaticExpression<S> + Send>>,
-        Vec<Box<dyn StaticExpression<S> + Send>>,
-    > {
-        let s = <T as LinkFetchOne<S>>::extend_select(self);
-        SelectStatementExtendableParts {
-            non_aggregating_select_items: s.non_aggregating_select_items,
-            non_duplicating_joins: s.non_duplicating_joins.to_static_expr(),
-            wheres: s.wheres.to_static_expr(),
-        }
+    fn non_aggregating_select_items(&self) -> Vec<scoped_column<String, String>> {
+        <T as LinkFetchOne<S>>::non_aggregating_select_items(self)
+    }
+    fn non_duplicating_joins(&self) -> Vec<Box<dyn StaticExpression<S> + Send>> {
+        <T as LinkFetchOne<S>>::non_duplicating_joins(self).to_static_expr()
+    }
+    fn wheres(&self) -> Vec<Box<dyn StaticExpression<S> + Send>> {
+        <T as LinkFetchOne<S>>::wheres(self).to_static_expr()
     }
     fn sub_op(
         &self,
@@ -92,15 +80,25 @@ impl<S: Database + 'static> LinkFetchOne<S> for Box<dyn JsonLinkFetchOne<S>> {
     type Joins = Vec<Box<dyn StaticExpression<S> + Send>>;
     type Wheres = Vec<Box<dyn StaticExpression<S> + Send>>;
 
-    fn extend_select(
-        &self,
-    ) -> crate::operations::fetch_one::SelectStatementExtendableParts<
-        Vec<crate::expressions::scoped_column<String, String>>,
-        Self::Joins,
-        Self::Wheres,
-    > {
-        JsonLinkFetchOne::extend1(&**self)
+    fn non_aggregating_select_items(&self) -> Vec<scoped_column<String, String>> {
+        JsonLinkFetchOne::non_aggregating_select_items(&**self)
     }
+    fn non_duplicating_joins(&self) -> Vec<Box<dyn StaticExpression<S> + Send>> {
+        JsonLinkFetchOne::non_duplicating_joins(&**self)
+    }
+    fn wheres(&self) -> Vec<Box<dyn StaticExpression<S> + Send>> {
+        JsonLinkFetchOne::wheres(&**self)
+    }
+
+    // fn extend_select(
+    //     &self,
+    // ) -> crate::operations::fetch_one::SelectStatementExtendableParts<
+    //     Vec<crate::expressions::scoped_column<String, String>>,
+    //     Self::Joins,
+    //     Self::Wheres,
+    // > {
+    //     JsonLinkFetchOne::extend1(&**self)
+    // }
 
     type Inner = Box<dyn Any + Send>;
 

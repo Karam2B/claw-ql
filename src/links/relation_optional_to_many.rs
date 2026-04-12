@@ -67,55 +67,47 @@ mod impl_fetch_one {
         extentions::Members,
         from_row::{FromRowAlias, pre_alias},
         links::relation_optional_to_many::optional_to_many,
-        operations::{
-            CollectionOutput, Operation,
-            fetch_one::{LinkFetchOne, SelectStatementExtendableParts},
-        },
+        operations::{CollectionOutput, Operation, fetch_one::LinkFetchOne},
     };
 
     impl<S, F, T> LinkFetchOne<S> for optional_to_many<String, F, T>
     where
         T: Collection<Id = SingleIncremintalInt> + Members<S>,
-        T: for<'r> FromRowAlias<'r, <S as Database>::Row>,
+        T: for<'r> FromRowAlias<'r, <S as Database>::Row, FromRowData = T::Data>,
         F: Collection,
         S: Database,
         i64: for<'q> sqlx::Decode<'q, S> + Type<S>,
         for<'q> &'q str: ColumnIndex<S::Row>,
     {
-        type Joins = (left_join,);
+        type Joins = left_join;
 
         type Wheres = ();
 
-        fn extend_select(
-            &self,
-        ) -> SelectStatementExtendableParts<
-            //
-            Vec<scoped_column<String, String>>,
-            Self::Joins,
-            Self::Wheres,
-        > {
-            let mut to_members =
-                vec![table(self.to.table_name().to_string()).col("id".to_string())];
+        fn non_aggregating_select_items(&self) -> Vec<scoped_column<String, String>> {
+            let mut base = vec![
+                table(self.to.table_name().to_string()).col("id".to_string()), // many fields of to
+            ];
 
-            to_members.extend(
-                Members::members_names(&self.to)
+            base.extend(
+                self.to
+                    .members_names()
                     .into_iter()
-                    .map(|e| return table(self.to.table_name().to_string()).col(e.to_string())),
+                    .map(|e| table(self.to.table_name().to_string()).col(e)),
             );
 
-            SelectStatementExtendableParts {
-                non_aggregating_select_items: to_members,
-                non_duplicating_joins: (left_join {
-                    ft: self.to.table_name().to_string(),
-                    fc: "id".to_string(),
-                    lt: self.from.table_name().to_string(),
-                    lc: self.foriegn_key.clone(),
-                },),
-                wheres: (),
+            base
+        }
+        fn non_duplicating_joins(&self) -> Self::Joins {
+            left_join {
+                ft: self.to.table_name().to_string(),
+                fc: "id".to_string(),
+                lt: self.from.table_name().to_string(),
+                lc: self.foriegn_key.clone(),
             }
         }
+        fn wheres(&self) -> Self::Wheres {}
 
-        type Inner = CollectionOutput<i64, T::Data>;
+        type Inner = Option<CollectionOutput<i64, T::Data>>;
 
         type SubOp = ();
 
@@ -123,16 +115,22 @@ mod impl_fetch_one {
         where
             S: sqlx::Database,
         {
-            (
-                (),
-                CollectionOutput {
-                    id: row.0.get(format!("{}id", row.1).as_str()),
-                    attributes: self.to.pre_alias(row).unwrap(),
-                },
-            )
+            let id: Option<i64> = row.0.get(format!("{}id", row.1).as_str());
+
+            if let Some(id) = id {
+                return (
+                    (),
+                    Some(CollectionOutput {
+                        id: id,
+                        attributes: self.to.pre_alias(row).unwrap(),
+                    }),
+                );
+            } else {
+                return ((), None);
+            }
         }
 
-        type Output = CollectionOutput<i64, T::Data>;
+        type Output = Option<CollectionOutput<i64, T::Data>>;
 
         fn take(
             self,

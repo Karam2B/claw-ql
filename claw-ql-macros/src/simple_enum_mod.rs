@@ -19,7 +19,6 @@ pub fn main(input: TokenStream) -> TokenStream {
     #[derive(Default)]
     struct Variants {
         units: Vec<syn::Ident>,
-        zeros: Vec<syn::Ident>,
         ones: Vec<(syn::Ident, syn::Type)>,
     }
 
@@ -41,9 +40,6 @@ pub fn main(input: TokenStream) -> TokenStream {
                         "nammed fields cannot be supported for simple enums!"
                     );
                 }
-                syn::Fields::Unnamed(fields_unnamed) if fields_unnamed.unnamed.len() == 0 => {
-                    self.zeros.push(ident);
-                }
                 syn::Fields::Unnamed(fields_unnamed) if fields_unnamed.unnamed.len() == 1 => {
                     let ty = fields_unnamed.unnamed.first().unwrap().ty.clone();
                     self.ones.push((ident, ty));
@@ -51,53 +47,28 @@ pub fn main(input: TokenStream) -> TokenStream {
                 syn::Fields::Unnamed(fields_unnamed) => {
                     abort!(
                         fields_unnamed.span(),
-                        "unnamed fields has to be either one or zero"
+                        "unnamed fields has to to contain one field"
                     );
                 }
             }
-
-            // _ => ,
         }
     }
 
     let mut v = Variants::default();
     v.visit_item_enum_mut(&mut input);
     let units = v.units;
-    if v.zeros.is_empty().not() {
-        todo!("contains zeros")
-    }
-    if v.ones.is_empty().not() {
-        todo!("contains ones")
-    }
+    let ones_ident = v
+        .ones
+        .iter()
+        .map(|(ident, _)| ident.clone())
+        .collect::<Vec<_>>();
+    let ones_ty = v.ones.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
     let this = &input.ident;
 
     let mut ret = quote! {
         #input
     };
     let mut macros = Vec::<(syn::Ident, syn::Ident)>::new();
-
-    {
-        let macro_name = syn::Ident::new(
-            &format!(
-                "{}_auto_match",
-                this.to_string().to_case(convert_case::Case::Snake)
-            ),
-            this.span(),
-        );
-
-        ret.extend(quote! {
-            #[macro_export]
-            macro_rules! #macro_name {
-                ($this:expr, $method:ident) => {
-                    match $this {
-                        #(#this::#units(v) => v.$method()),*
-                    }
-                };
-            }
-        });
-
-        macros.push((macro_name, syn::Ident::new("auto_match", this.span())));
-    }
 
     {
         let macro_name = syn::Ident::new(
@@ -116,6 +87,7 @@ pub fn main(input: TokenStream) -> TokenStream {
                         fn from(value: #this) -> Self {
                             match value {
                                 #(#this::#units(v) => Self::#units(v)),*
+                                #(#this::#ones_ident(v) => Self::#ones_ident(v)),*
                             }
                         }
                     }
@@ -141,6 +113,7 @@ pub fn main(input: TokenStream) -> TokenStream {
                 ($this:expr, |$new_ident:ident| $method:tt) => {
                     match $this {
                         #(#this::#units(v) => (|$new_ident: #units| $method)(v),)*
+                        #(#this::#ones_ident(v) => (|$new_ident: #ones_ty| $method)(v)),*
                     }
                 };
             }
@@ -178,6 +151,16 @@ pub fn main(input: TokenStream) -> TokenStream {
         });
     }
 
+    for (each, ty) in ones_ident.iter().zip(ones_ty.iter()) {
+        ret.extend(quote! {
+            impl From<#ty> for #this {
+                fn from(value: #ty) -> Self {
+                    Self::#each(value)
+                }
+            }
+        });
+    }
+
     ret
 }
 
@@ -204,6 +187,7 @@ fn simple_enum_test() {
     let expect = quote!(
         #[derive(Debug)]
         enum Bar {
+            I32(i32),
             String,
             Custom,
         }
@@ -213,21 +197,10 @@ fn simple_enum_test() {
     let to_be = quote! {
         #[derive(Debug)]
         enum Bar {
+            I32(i32),
             String(String),
             Custom(Custom),
         }
-
-        #[macro_export]
-        macro_rules! bar_auto_match {
-            ($this:expr, $method:ident) => {
-                match $this {
-                    Bar::String(v) => v.$method(),
-                    Bar::Custom(v) => v.$method()
-                }
-            };
-        }
-
-
 
         #[macro_export]
         macro_rules! bar_is_subset_of {
@@ -235,6 +208,7 @@ fn simple_enum_test() {
                 impl From<Bar> for $of {
                     fn from(value: Bar) -> Self {
                         match value {
+                            Bar::I32(v) => Self::I32(v),
                             Bar::String(v) => Self::String(v),
                             Bar::Custom(v) => Self::Custom(v),
                         }
@@ -247,6 +221,7 @@ fn simple_enum_test() {
         macro_rules! bar_closure {
             ($this:expr, |$new_ident:ident| $method:tt) => {
                 match $this {
+                    Bar::I32(v) => (|$new_ident: i32| $method)(v),
                     Bar::String(v) => (|$new_ident: String| $method)(v),
                     Bar::Custom(v) => (|$new_ident: Custom| $method)(v),
                 }
@@ -254,9 +229,14 @@ fn simple_enum_test() {
         }
 
         pub mod bar_macros {
-            pub use bar_auto_match as auto_match;
             pub use bar_is_subset_of as is_subset_of;
             pub use bar_closure as closure;
+        }
+
+        impl From<i32> for Bar {
+            fn from(value: i32) -> Self {
+                Self::I32(value)
+            }
         }
 
         impl From<String> for Bar {

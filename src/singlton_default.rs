@@ -49,34 +49,32 @@
 //! `
 //!
 
-pub trait ZeroSizeDefault: Default + 'static {
-    fn zero_size_default() -> &'static Self;
+pub trait SingltonDefault: 'static {
+    fn singlton_default() -> &'static Self;
 }
 
 pub mod impl_collectinos {
-    use super::ZeroSizeDefault;
+    use super::SingltonDefault;
     use crate::collections::{Collection, CollectionBasic, HasHandler};
     use std::marker::PhantomData;
 
     impl<T> CollectionBasic for PhantomData<T>
     where
         T: HasHandler,
-        T::Handler: CollectionBasic,
-        T::Handler: ZeroSizeDefault,
+        T::Handler: CollectionBasic + SingltonDefault,
     {
         fn table_name(&self) -> &str {
-            T::Handler::table_name(ZeroSizeDefault::zero_size_default())
+            T::Handler::table_name(SingltonDefault::singlton_default())
         }
         fn table_name_lower_case(&self) -> &str {
-            T::Handler::table_name_lower_case(ZeroSizeDefault::zero_size_default())
+            T::Handler::table_name_lower_case(SingltonDefault::singlton_default())
         }
     }
 
     impl<T> Collection for PhantomData<T>
     where
         T: HasHandler,
-        T: Collection,
-        T::Handler: Collection + ZeroSizeDefault,
+        T::Handler: Collection + SingltonDefault,
     {
         type Partial = <T::Handler as Collection>::Partial;
 
@@ -85,7 +83,7 @@ pub mod impl_collectinos {
         type Id = <T::Handler as Collection>::Id;
 
         fn id(&self) -> &Self::Id {
-            T::Handler::id(ZeroSizeDefault::zero_size_default())
+            T::Handler::id(SingltonDefault::singlton_default())
         }
     }
 }

@@ -49,7 +49,7 @@ pub trait ValidMember {
 
 impl<T, C> ValidMember for scoped_column<temp::Table<T>, temp::Member<C>>
 where
-    C: Member<Collection = T>,
+    C: Member<CollectionHandler = T>,
 {
     type Data = C::Data;
 }
@@ -75,28 +75,29 @@ pub mod temp {
     use crate::collections::{self, CollectionBasic, MemberBasic};
     use crate::expressions::scoped_column;
     use crate::expressions::table;
-    use crate::query_builder::SqlSanitize;
 
-    pub struct Table<T>(T);
-    impl<S, T: CollectionBasic> SqlSanitize<S> for Table<T> {
-        fn to_sql(&self) -> &str {
+    pub struct Table<T>(pub T);
+
+    impl<T: CollectionBasic> AsRef<str> for Table<T> {
+        fn as_ref(&self) -> &str {
             self.0.table_name_lower_case()
         }
     }
-    pub struct Member<T>(T);
 
-    impl<S, T: MemberBasic> SqlSanitize<S> for Member<T> {
-        fn to_sql(&self) -> &str {
+    pub struct Member<T>(pub T);
+
+    impl<T: MemberBasic> AsRef<str> for Member<T> {
+        fn as_ref(&self) -> &str {
             self.0.name()
         }
     }
 
-    pub fn member<T>(t: T) -> scoped_column<Table<T::Collection>, Member<T>>
+    pub fn member<T>(t: T) -> scoped_column<Table<T::CollectionHandler>, Member<T>>
     where
         T: collections::Member,
-        T::Collection: Default,
+        T::CollectionHandler: Default,
     {
-        table(Table(T::Collection::default())).col(Member(t))
+        table(Table(T::CollectionHandler::default())).col(Member(t))
     }
 
     pub fn infer_db<S: Database>(_: &Pool<S>) -> PhantomData<S> {

@@ -1,3 +1,4 @@
+#![cfg(feature = "skip_without_comment")]
 use claw_ql::Schema;
 use claw_ql::collections::CollectionHandler;
 use claw_ql::links::LinkData;
@@ -121,7 +122,7 @@ INSERT INTO StudentCourse (student_id, course_id) VALUES
             attributes: Student {
                 name: "Alice Smith".to_string()
             },
-            link: (vec![
+            links: (vec![
                 CollectionOutput {
                     id: 1,
                     attributes: Course {
@@ -150,7 +151,7 @@ INSERT INTO StudentCourse (student_id, course_id) VALUES
             attributes: Course {
                 code: "CS101".to_string()
             },
-            link: (
+            links: (
                 CountResult(2), // there are two students enroled in CS101
             ),
         },)

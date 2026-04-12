@@ -9,27 +9,30 @@ use crate::query_builder::SqlSyntax;
 ///
 /// I'm removing this impl in favor of more specifics impls
 impl SqlSyntax for &'static str {
-    fn to_sql(self, str: &mut String) {
+    fn to_sql(&self, str: &mut String) {
         str.push_str(self);
     }
 }
 
+#[macro_export]
 macro_rules! sql_syntax {
-    ($($ident:ident = $literal:literal),*) => {
+    ($ident:ident = $literal:literal) => {
+        #[allow(non_camel_case_types)]
+        pub struct $ident;
 
-$(
-pub struct $ident;
-
-impl SqlSyntax for $ident {
-    fn to_sql(self, str: &mut String) {
-        str.push_str($literal);
-    }
-}
-)*
+        impl $crate::query_builder::SqlSyntax for $ident {
+            fn to_sql(&self, str: &mut String) {
+                str.push_str($literal);
+            }
+        }
     };
 }
 
-#[rustfmt::skip]
-sql_syntax!(
-    and_join = " AND ", space_join = " "
-);
+sql_syntax!(equal_join = " = ");
+sql_syntax!(space_join = " ");
+sql_syntax!(open_paranthesis = "(");
+sql_syntax!(close_paranthesis = ")");
+sql_syntax!(empty = "");
+sql_syntax!(comma_join = ", ");
+sql_syntax!(and_join = " AND ");
+sql_syntax!(end_of_statement = ";");

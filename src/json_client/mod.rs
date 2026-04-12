@@ -13,7 +13,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::{
     database_extention::DatabaseExt,
     json_client::{json_collection::JsonCollection, json_link::JsonLink},
-    operations::{LinkedOutput, Operation, fetch_one::FetchOne},
+    operations::{LinkedOutput, fetch_one::FetchOne},
 };
 
 pub type JsonValue = serde_json::Value;
@@ -104,9 +104,9 @@ pub mod json_collection {
     where
         T: Send + Sync + 'static,
         S: Database,
-        T::Data: Serialize,
+        <T as Collection>::Data: Serialize,
         T: Collection<Id = SingleIncremintalInt>,
-        T: for<'r> FromRowAlias<'r, S::Row>,
+        T: for<'r> FromRowAlias<'r, S::Row, FromRowData = T::Data>,
         T: Members<S>,
     {
         fn table_name(&self) -> &str {
@@ -142,21 +142,25 @@ pub mod json_collection {
     }
 
     impl<'r, S: Database> FromRowAlias<'r, S::Row> for Arc<dyn JsonCollection<S>> {
-        fn no_alias(&self, _: &'r S::Row) -> Result<Self::Data, crate::from_row::FromRowError> {
+        type FromRowData = JsonValue;
+        fn no_alias(
+            &self,
+            _: &'r S::Row,
+        ) -> Result<Self::FromRowData, crate::from_row::FromRowError> {
             todo!("impl no alias")
         }
 
         fn pre_alias(
             &self,
             row: crate::from_row::pre_alias<'r, S::Row>,
-        ) -> Result<Self::Data, crate::from_row::FromRowError> {
+        ) -> Result<Self::FromRowData, crate::from_row::FromRowError> {
             Ok(JsonCollection::from_row_pre_alias(&**self, row))
         }
 
         fn post_alias(
             &self,
             _: crate::from_row::post_alias<'r, S::Row>,
-        ) -> Result<Self::Data, crate::from_row::FromRowError> {
+        ) -> Result<Self::FromRowData, crate::from_row::FromRowError> {
             todo!("impl post alias")
         }
     }
@@ -219,6 +223,9 @@ where
             .get(&input.base)
             .ok_or(FetchOneError::NoCollectionWithName(input.base))?;
 
+        // take where into account
+        None::<()>.unwrap();
+
         let op = FetchOne {
             base: base.clone(),
             wheres: (),
@@ -236,8 +243,9 @@ where
                 v
             },
         };
+        use crate::operations::Operation;
 
-        if let Some(e) = op.exec(self.pool.clone()).await {
+        if let Some(e) = op.exec_operation(self.pool.clone()).await {
             Ok(e)
         } else {
             Err(FetchOneError::NotFound)

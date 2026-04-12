@@ -69,8 +69,7 @@ pub fn main(input: TokenStream) -> TokenStream {
                     Ok(#name {
                         #(
                             #mem_name: row
-                                .try_get(stringify!(#mem_name))
-                                .map_err(|e| e.try_into().expect("unreachable error"))?,
+                                .try_get(stringify!(#mem_name))?,
                         )*
                     })
                 }
@@ -83,8 +82,7 @@ pub fn main(input: TokenStream) -> TokenStream {
                     Ok(#name {
                         #(
                             #mem_name: row.0
-                                .try_get(format!(#mem_pre, row.1).as_str())
-                                .map_err(|e| e.try_into().expect("unreachable error"))?,
+                                .try_get(format!(#mem_pre, row.1).as_str())?,
                         )*
                     })
                 }
@@ -97,8 +95,7 @@ pub fn main(input: TokenStream) -> TokenStream {
                     Ok(#name {
                         #(
                             #mem_name: row.0
-                                .try_get(format!(#mem_post, row.1).as_str())
-                                .map_err(|e| e.try_into().expect("unreachable error"))?,
+                                .try_get(format!(#mem_post, row.1).as_str())?,
                         )*
                     })
                 }

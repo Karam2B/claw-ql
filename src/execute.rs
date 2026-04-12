@@ -1,13 +1,12 @@
 use sqlx::{Database, Execute};
-use std::{marker::PhantomData, mem};
+use std::mem;
 
-pub struct Executable<'q, S: Database, A> {
+pub struct Executable<'q, A> {
     pub string: &'q str,
     pub arguments: A,
-    pub db: PhantomData<S>,
 }
 
-impl<'q, S: Database> Execute<'q, S> for Executable<'q, S, S::Arguments<'q>> {
+impl<'q, S: Database> Execute<'q, S> for Executable<'q, S::Arguments<'q>> {
     fn sql(&self) -> &'q str {
         &self.string
     }
@@ -36,7 +35,7 @@ macro_rules! use_executor {
     ($fn_name:ident ($executor: expr, $execute:ident) $($rest:tt)*) => {
 
         {
-            let (stmt, arg) = $execute.unwrap();
+            let (stmt, arg): (String, _) = $execute.unwrap();
             let query_result = ::sqlx::Executor::$fn_name(
                 $executor,
                 #[allow(unused_doc_comments)]
@@ -55,7 +54,6 @@ macro_rules! use_executor {
 
 
                     arguments: arg,
-                    db: ::std::marker::PhantomData,
                 },
             )$($rest)*.await;
 

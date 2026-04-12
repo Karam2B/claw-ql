@@ -20,9 +20,22 @@ pub mod from_row_alias {
 }
 pub mod sql {
     pub use crate::operations::Operation;
-    pub use crate::operations::fetch_one::FetchOne;
+    pub use crate::tuple;
     pub use crate::valid_syntax::is_valid_syntax;
     pub use crate::valid_syntax::temp::*;
+
+    // migrate
+    pub use crate::on_migrate::OnMigrate;
+    pub use crate::operations::execute_expression::expression_to_operation;
+
+    // fetch one
+    pub use crate::operations::fetch_one::FetchOne;
+
+    pub use crate::operations::insert_one::InsertOne;
+
+    pub trait AliasAndExpr<A, E> {
+        fn aliase_and_expr(alias: A, expr: E) -> Self;
+    }
 }
 
 pub mod macro_derive_collection {

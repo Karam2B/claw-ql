@@ -16,7 +16,7 @@ pub trait MemberBasic {
 
 pub trait Member: MemberBasic {
     type Data;
-    type Collection;
+    type CollectionHandler;
 }
 
 pub trait HasHandler {
@@ -52,7 +52,7 @@ mod impl_expression {
 
     impl<'q> Expression<'q, Sqlite> for SingleIncremintalInt {
         fn expression(self, ctx: &mut QueryBuilder<'q, Sqlite>) {
-            ctx.syntax("'id' INT PRIMARY KEY");
+            ctx.syntax(&"'id' INT PRIMARY KEY");
         }
     }
 }

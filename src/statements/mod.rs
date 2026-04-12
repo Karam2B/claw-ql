@@ -4,7 +4,9 @@ use crate::query_builder::OpExpression;
 pub mod create_table_statement;
 // pub mod delete_st;
 // pub mod insert_one_st;
+pub mod insert_one_statement;
 pub mod select_statement;
+pub mod update_statement;
 // pub mod update_st;
 
 pub trait Inverse {
@@ -32,7 +34,7 @@ impl<Table, Name, R0, R1> Inverse for AddColumn<Table, super::expressions::col_d
 impl<Table, Member> Inverse
     for AddColumn<Table, super::expressions::col_def_for_collection_member<Member>>
 where
-    Member: crate::collections::Member<Collection = Table>,
+    Member: crate::collections::Member<CollectionHandler = Table>,
 {
     type InverseStatement = DropColumn<Table, Member>;
     fn inverse(&self) -> Self::InverseStatement {
@@ -45,10 +47,14 @@ impl<Table, ColDef> OpExpression for AddColumn<Table, ColDef> {}
 mod impl_for_sqlx_fo {
     use crate::{
         database_extention::DatabaseExt,
-        query_builder::{Expression, QueryBuilder},
+        query_builder::{Expression, QueryBuilder, syntax::end_of_statement},
+        sql_syntax,
         statements::AddColumn,
     };
     use sqlx::Sqlite;
+
+    sql_syntax!(alter_table = "ALTER TABLE ");
+    sql_syntax!(add_column = " ADD COLUMN ");
 
     impl<'q, Table, ColDef> Expression<'q, Sqlite> for AddColumn<Table, ColDef>
     where
@@ -59,11 +65,11 @@ mod impl_for_sqlx_fo {
         where
             Sqlite: DatabaseExt,
         {
-            ctx.syntax("ALTER TABLE ");
+            ctx.syntax(&alter_table);
             self.table.expression(ctx);
-            ctx.syntax(" ADD COLUMN ");
+            ctx.syntax(&add_column);
             self.col_def.expression(ctx);
-            ctx.syntax(";");
+            ctx.syntax(&end_of_statement);
         }
     }
 }

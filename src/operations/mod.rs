@@ -3,22 +3,24 @@ use sqlx::{Database, Pool};
 
 pub mod fetch_one;
 // pub mod delete_one;
-// pub mod insert_one;
+pub mod insert_one;
+pub mod update_one;
 // pub mod fetch_many;
 // pub mod update_one;
 
 pub trait Operation<S>: Send {
     type Output: Send;
-    fn exec(self, pool: Pool<S>) -> impl Future<Output = Self::Output> + Send
+    fn exec_operation(self, pool: Pool<S>) -> impl Future<Output = Self::Output> + Send
     where
-        S: Database;
+        S: Database,
+        Self: Sized;
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct LinkedOutput<Id, C, L> {
     pub id: Id,
     pub attributes: C,
-    pub link: L,
+    pub links: L,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -58,23 +60,24 @@ pub use functional_impls::BoxedOperation;
 mod functional_impls {
     #![allow(unused)]
     #![deny(unused_must_use)]
+    use crate::operations::insert_one::LinkInsertOne;
     use futures::FutureExt;
     use std::{any::Any, pin::Pin};
 
+    use crate::expressions::scoped_column;
     use crate::from_row::pre_alias;
-    use crate::operations::{
-        Operation,
-        fetch_one::{LinkFetchOne, SelectStatementExtendableParts},
-    };
-    use crate::query_builder::functional_expr::ZeroOrMoreImplPossible;
+    use crate::operations::{Operation, fetch_one::LinkFetchOne};
+    use crate::query_builder::functional_expr::ManyImplPossible;
     use paste::paste;
-    use sqlx::{Database, Pool};
+    use sqlx::{Database, Executor, Pool};
 
     pub trait BoxedOperation<S: Database>: Send {
-        fn exec(
+        fn exec_p(
             self: Box<Self>,
             pool: Pool<S>,
-        ) -> Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>;
+        ) -> Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>
+        where
+            Self: 'static;
     }
 
     impl<T, S> BoxedOperation<S> for T
@@ -82,12 +85,13 @@ mod functional_impls {
         T: Send + Operation<S, Output: Send> + 'static,
         S: Database,
     {
-        fn exec(
+        fn exec_p(
             self: Box<Self>,
             pool: Pool<S>,
         ) -> Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>> {
-            Box::pin(async {
-                Operation::exec(*self, pool)
+            let p = pool.clone();
+            Box::pin(async move {
+                Operation::exec_operation(*self, p)
                     .map(|f| Box::new(f) as Box<dyn Any + Send>)
                     .await
             })
@@ -96,11 +100,11 @@ mod functional_impls {
 
     impl<S> Operation<S> for Box<dyn BoxedOperation<S> + Send> {
         type Output = Box<dyn Any + Send>;
-        fn exec(self, pool: Pool<S>) -> impl Future<Output = Self::Output> + Send
+        fn exec_operation(self, pool: Pool<S>) -> impl Future<Output = Self::Output> + Send
         where
             S: Database,
         {
-            BoxedOperation::exec(self, pool)
+            BoxedOperation::exec_p(self, pool)
         }
     }
 
@@ -110,13 +114,13 @@ mod functional_impls {
     {
         type Output = Vec<T::Output>;
 
-        async fn exec(self, pool: sqlx::Pool<S>) -> Self::Output
+        async fn exec_operation(self, pool: sqlx::Pool<S>) -> Self::Output
         where
             S: sqlx::Database,
         {
             let mut v = vec![];
             for each in self {
-                v.push(each.exec(pool.clone()).await);
+                v.push(each.exec_operation(pool.clone()).await);
             }
             v
         }
@@ -124,35 +128,36 @@ mod functional_impls {
 
     impl<T, S> LinkFetchOne<S> for Vec<T>
     where
-        T: LinkFetchOne<S, SubOp: Operation<S>, Joins: IntoIterator, Wheres: IntoIterator>,
+        T: LinkFetchOne<S>,
+        T::Joins: IntoIterator,
+        T::Wheres: IntoIterator,
     {
         type Joins = Vec<<T::Joins as IntoIterator>::Item>;
 
         type Wheres = Vec<<T::Wheres as IntoIterator>::Item>;
 
-        fn extend_select(
-            &self,
-        ) -> SelectStatementExtendableParts<
-            Vec<crate::expressions::scoped_column<String, String>>,
-            Self::Joins,
-            Self::Wheres,
-        > {
-            let mut parts = SelectStatementExtendableParts {
-                non_aggregating_select_items: vec![],
-                non_duplicating_joins: vec![],
-                wheres: vec![],
-            };
+        fn non_aggregating_select_items(&self) -> Vec<scoped_column<String, String>> {
+            let mut items = vec![];
             for each in self {
-                let each = each.extend_select();
-                parts
-                    .non_aggregating_select_items
-                    .extend(each.non_aggregating_select_items);
-                parts
-                    .non_duplicating_joins
-                    .extend(each.non_duplicating_joins);
-                parts.wheres.extend(each.wheres);
+                items.extend(each.non_aggregating_select_items());
             }
-            parts
+            items
+        }
+
+        fn non_duplicating_joins(&self) -> Self::Joins {
+            let mut joins = vec![];
+            for each in self {
+                joins.extend(each.non_duplicating_joins());
+            }
+            joins
+        }
+
+        fn wheres(&self) -> Self::Wheres {
+            let mut wheres = vec![];
+            for each in self {
+                wheres.extend(each.wheres());
+            }
+            wheres
         }
 
         type Inner = Vec<T::Inner>;
@@ -209,6 +214,8 @@ mod functional_impls {
     macro_rules! implt {
     ( $([$t:ident, $part:literal])*) => {
 
+
+
 impl<S, $($t,)* > Operation<S> for ($($t,)*)
 where
     $($t: Operation<S>,)*
@@ -217,12 +224,12 @@ where
         $($t::Output,)*
     );
 
-    async fn exec(self, pool: sqlx::Pool<S>) -> Self::Output
+    async fn exec_operation(self, pool: sqlx::Pool<S>) -> Self::Output
     where
         S: sqlx::Database,
     {
         ($(
-            paste!(self.$part).exec(pool.clone()).await,
+            paste!(self.$part).exec_operation(pool.clone()).await,
         )*)
     }
 }
@@ -232,43 +239,35 @@ where
     $($t: LinkFetchOne<S, SubOp: Operation<S>>,)*
 {
     type Joins = (
-        $(ZeroOrMoreImplPossible<$t::Joins>,)*
+        $(ManyImplPossible<$t::Joins>,)*
     );
 
     type Wheres = (
-        $(ZeroOrMoreImplPossible<$t::Wheres>,)*
+        $(ManyImplPossible<$t::Wheres>,)*
     );
 
-    fn extend_select(
-        &self,
-    ) -> SelectStatementExtendableParts<
-        Vec<crate::expressions::scoped_column<String, String>>,
-        Self::Joins,
-        Self::Wheres,
-    > {
-        let mut select_items = vec![];
+    fn non_aggregating_select_items(&self) -> Vec<scoped_column<String, String>> {
+        let mut items = vec![];
         $(
-            paste!{let  [<each_ $part>]  = self.$part.extend_select();}
-            select_items.extend(paste!( [<each_ $part>] ).non_aggregating_select_items);
+            items.extend(paste!(self.$part.non_aggregating_select_items()));
         )*
+        items
+    }
 
-        SelectStatementExtendableParts {
-            non_aggregating_select_items: select_items,
-            non_duplicating_joins: ($(
-                ZeroOrMoreImplPossible {
-                    start: "",
-                    join: ", ",
-                    expressions: paste!([<each_ $part>]).non_duplicating_joins,
-                },
-            )*),
-            wheres: ($(
-                ZeroOrMoreImplPossible {
-                    start: "",
-                    join: ", ",
-                    expressions: paste!( [<each_ $part>] ).wheres,
-                },
-            )*),
-        }
+    fn non_duplicating_joins(&self) -> Self::Joins {
+        ($(ManyImplPossible {
+            start: "",
+            join: ", ",
+            expressions: paste!(self.$part.non_duplicating_joins()),
+        },)*)
+    }
+
+    fn wheres(&self) -> Self::Wheres {
+        ($(ManyImplPossible {
+            start: "",
+            join: ", ",
+            expressions: paste!(self.$part.wheres()),
+        },)*)
     }
 
     type Inner = (
@@ -312,6 +311,34 @@ where
         )
     }
 }
+// impl <$($t,)*> LinkInsertOne for ($($t,)*)
+// where
+//     $($t: LinkInsertOne,)*
+// {
+//     fn current_table_cols(&self) -> Vec<String> {
+//         todo!()
+//     }
+//     type FromRow = ();
+//     type SubOp = ();
+//     fn from_row<S>(&self, _row: &S::Row) -> (Self::FromRow, Self::SubOp)
+//     where
+//         S: Database,
+//     {
+//         todo!()
+//     }
+//     type Output = ();
+//     fn take<S>(
+//         self,
+//         _from_row: Self::FromRow,
+//         _sub_op: <Self::SubOp as Operation<S>>::Output,
+//     ) -> Self::Output
+//     where
+//         Self::SubOp: Operation<S>,
+//         S: Database,
+//     {
+//         todo!()
+//     }
+// }
     };
 }
 
@@ -320,4 +347,35 @@ where
     implt!([T0, 0] [T1, 1]);
     implt!([T0, 0] [T1, 1] [T2, 2]);
     implt!([T0, 0] [T1, 1] [T2, 2] [T3, 3]);
+}
+
+pub mod execute_expression {
+    use crate::database_extention::DatabaseExt;
+    use crate::use_executor;
+    use crate::{
+        operations::Operation,
+        query_builder::{Expression, QueryBuilder},
+    };
+    use sqlx::{Database, Executor, Pool};
+
+    #[allow(non_camel_case_types)]
+    pub struct expression_to_operation<E>(pub E);
+
+    impl<S, E> Operation<S> for expression_to_operation<E>
+    where
+        E: for<'q> Expression<'q, S>,
+        E: Send,
+        S: DatabaseExt,
+        for<'c> &'c mut <S as sqlx::Database>::Connection: Executor<'c, Database = S>,
+    {
+        type Output = ();
+        async fn exec_operation(self, pool: Pool<S>) -> Self::Output
+        where
+            S: Database,
+        {
+            let mut qb = QueryBuilder::default();
+            self.0.expression(&mut qb);
+            use_executor!(execute(&pool, qb)).unwrap();
+        }
+    }
 }

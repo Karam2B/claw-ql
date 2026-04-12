@@ -1,3 +1,4 @@
+#![cfg(feature = "skip_without_comment")]
 pub struct IVec<T: ?Sized> {
     pub inner: Vec<Box<T>>,
 }

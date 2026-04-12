@@ -3,8 +3,10 @@ use std::ops::Not;
 use crate::{
     database_extention::DatabaseExt,
     query_builder::{
-        Expression, OpExpression, PossibleExpression, QueryBuilder, ZeroOrMoreExpressions,
+        Expression, ManyExpressions, OpExpression, PossibleExpression, QueryBuilder,
+        syntax::{and_join, comma_join, empty, end_of_statement, space_join},
     },
+    sql_syntax,
 };
 
 pub struct SelectStatement<SelectItems, From, Joins, Wheres, Order, Limit> {
@@ -21,13 +23,19 @@ impl<SelectItems, From, Joins, Wheres, Limit, Order> OpExpression
 {
 }
 
+sql_syntax!(select_start = "SELECT ");
+sql_syntax!(from_join = " FROM ");
+sql_syntax!(where_join = " WHERE ");
+sql_syntax!(order_join = " ORDER ");
+sql_syntax!(limit_join = " LIMIT ");
+
 impl<'q, S, SelectItems, From, Joins, Wheres, Limit, Order> Expression<'q, S>
     for SelectStatement<SelectItems, From, Joins, Wheres, Limit, Order>
 where
-    SelectItems: ZeroOrMoreExpressions<'q, S> + 'q,
+    SelectItems: ManyExpressions<'q, S> + 'q,
     From: Expression<'q, S> + 'q,
-    Joins: ZeroOrMoreExpressions<'q, S> + 'q,
-    Wheres: ZeroOrMoreExpressions<'q, S> + 'q,
+    Joins: ManyExpressions<'q, S> + 'q,
+    Wheres: ManyExpressions<'q, S> + 'q,
     Limit: PossibleExpression<'q, S> + 'q,
     Order: PossibleExpression<'q, S> + 'q,
 {
@@ -36,19 +44,19 @@ where
     where
         S: DatabaseExt,
     {
-        ctx.syntax("SELECT ");
+        ctx.syntax(&select_start);
         if self.select_items.is_op().not() {
             panic!("empty select item")
         }
-        self.select_items.expression("", ", ", ctx);
+        self.select_items.expression(&empty, &comma_join, ctx);
 
-        ctx.syntax(" FROM ");
+        ctx.syntax(&from_join);
         self.from.expression(ctx);
-        self.joins.expression(" ", " ", ctx);
-        self.wheres.expression(" WHERE ", " AND ", ctx);
-        self.order.expression_starting(" ORDER ", ctx);
-        self.limit.expression_starting(" LIMIT ", ctx);
-        ctx.syntax(";");
+        self.joins.expression(&space_join, &comma_join, ctx);
+        self.wheres.expression(&where_join, &and_join, ctx);
+        self.order.expression_starting(&order_join, ctx);
+        self.limit.expression_starting(&limit_join, ctx);
+        ctx.syntax(&end_of_statement);
     }
 }
 

@@ -1,6 +1,8 @@
-this is Rust ORM
+# ClawQl
 
-```
+Robust and flexable Rust ORM.
+
+```Rust
 #[derive(Collection, OnMigrate, FromRowAlias)]
 pub struct Todo {
     pub title: String,
@@ -28,42 +30,62 @@ impl Link<todo> for category {
 async fn main() {
     let pool = Sqlite::connect_in_memory().await;
 
-    { ...  /* migration and dumpy data */ }
+    use claw_ql::expressions::col_eq;
+    use claw_ql::links::relation_optional_to_many::optional_to_many;
+    use claw_ql::links::set_new_mod::set_new;
+    use claw_ql::test_module::{Category, Todo, category, todo, todo_members};
 
-    let fetch_one = sql!(
-        SELECT FROM todo
-        LINK category
-        WHERE title.eq("first_todo")
+    sql!(MIGRATE todo).await;
+    sql!(MIGRATE category).await;
+    sql!(MIGRATE optional_to_many {
+        from: todo,
+        to: category,
+        foriegn_key: "category_id".to_string()
+    })
+    .await;
+
+    sql!(
+        INSERT Todo { title:"first_todo".to_string(), done: false, description: None }
+            LINK set_new(Category { title: "cat_1".to_string() })
     )
     .await;
 
-    assert_eq!(
-        fetch_one,
-        LinkedOutput {
-            id: 6,
+    let result = sql!(
+        SELECT FROM todo t
+        LINK category
+        WHERE t.title.col_eq("first_todo".to_string())
+    )
+    .await;
+
+    pretty_assertions::assert_eq!(
+        result,
+        Some(LinkedOutput {
+            id: 0,
             attributes: Todo {
                 title: "first_todo".to_string(),
-                done: true,
-                description: Some("description_1".to_string())
+                done: false,
+                description: None
             },
-            link: (CollectionOutput {
-                id: 3,
+            links: (Some(CollectionOutput {
+                id: 0,
                 attributes: Category {
                     title: "cat_1".to_string()
                 }
-            },)
-        }
+            }),),
+        })
     );
 }
 ```
 
-or you can create a dynamic json client that is suitable for http servers
+`sql` macro doesn't do too much magic -- you can just construct types that implement `Operation` and call `exec_operation` on them. I made the macro to create an similar experience to SQL syntax
 
-```
+Note that this API is heavy on the type system, if you want to create an HTTP server, use `JsonClient`. This API rely on extension traits and trait objects to create a more dynamic/runtime experience at zero effort. 
+
+```Rust
 #[tokio::test]
 async fn json_client_test() {
-    let mut jc = JsonClient {
-        ..from_schema(
+    let mut jc = JsonClient::from(
+        (
             Schema {
                 collections: (todo, category)
                 links: (optional_to_many {
@@ -71,13 +93,13 @@ async fn json_client_test() {
                     from: todo,
                     to: category,
                 },)
-            }
+            },
+            pool,
         )
-        pool,
-    };
+    );
 
     let out = jc
-        .fetch_one_json(json!({
+        .fetch_one(json!({
             "base": "todo",
             "wheres": [],
             "link": [
@@ -106,32 +128,14 @@ async fn json_client_test() {
             }]
         }),
     );
-
 }
 ```
 
-you can migrate 
+# What are links
+This is the bread and butter of this crate, they use foreign keys, joins, and sessions when necessary to optimize performance, I'm not aiming to replace foreign keys -- I think storing data in tables with FKs between them is solid idea, however retrieving data as tables via string-based query is tedious and error-prone. 
 
-```
-    migrate_on_empty_database(
-        vec![
-            Box::new(todo),
-            Box::new(category),
-            Box::new(optional_to_many {
-                foriegn_key: "category_id".to_string(),
-                from: todo,
-                to: category,
-            }),
-        ],
-        &pool,
-    )
-    .await;
+I always had a dilemma whether to use the SQL client directly with hardcoded statements or use an ORM, and I figured out the problem finaly -- replace joins with links, I have a blog post talking about that in details. If there is a database that provide link-base interface, use FKs and joins internally, and you can query via something similar to BSON, this would make 90% or this crate (and most aother ORMs) unnecesary.
 
-    dumy_data(pool).await;
-```
+# I'm looking for help
 
-this is prove of concept, I have full crud-api written but in an older version of this crate, writing the rest of operation is straight forward, I just want time or contribution to be implement
-
-why not joins? I think the main idea of sql in genius (data stored in talbles with foriegn keys) but I think sql is not good at fetch data from db, because it force data in to tables, which is not how we usually build UI for example
-
-I alawy had a concodrum which is when should I use sql directly and when I should use ORM
+this is proof of concept, I have full CRUD API written but in an older version of this crate, reimplemnting everything is straight forward, I mainly looking for time or contribution to complete.

@@ -13,7 +13,6 @@ pub mod dynamic_migrate {
         database_extention::DatabaseExt,
         on_migrate::OnMigrate,
         query_builder::{Expression, QueryBuilder},
-        schema::Schema,
         use_executor,
     };
 
@@ -38,10 +37,7 @@ pub mod dynamic_migrate {
         }
     }
 
-    pub async fn migrate_on_empty_database<S: Database>(
-        all: Vec<Box<dyn DynamicOnMigrate<S>>>,
-        pool: &Pool<S>,
-    ) {
+    pub async fn migrate<S: Database>(all: Vec<Box<dyn DynamicOnMigrate<S>>>, pool: &Pool<S>) {
         // let tables = sqlx::query_as::<_, (String,)>("SELECT name FROM sqlite_master")
         //     .fetch_all(&*pool)
         //     .await

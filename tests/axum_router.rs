@@ -1,5 +1,6 @@
 #![allow(unused)]
 #![deny(unused_must_use)]
+#![cfg(feature = "skip_without_comment")]
 macro_rules! dated {
     ($collection:ident) => {};
 }

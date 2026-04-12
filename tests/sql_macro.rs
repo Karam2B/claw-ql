@@ -1,42 +1,65 @@
-use claw_ql::{
-    connect_in_memory::ConnectInMemory,
-    links::{Link, relation_optional_to_many::optional_to_many},
-};
+use claw_ql::connect_in_memory::ConnectInMemory;
+use claw_ql::operations::LinkedOutput;
+
 use claw_ql_macros::sql;
 use sqlx::Sqlite;
 
-#[derive(claw_ql_macros::Collection, claw_ql_macros::OnMigrate, claw_ql_macros::FromRowAlias)]
-pub struct Todo {
-    pub title: String,
-    pub done: bool,
-    pub description: Option<String>,
-}
-
-#[derive(claw_ql_macros::Collection, claw_ql_macros::OnMigrate, claw_ql_macros::FromRowAlias)]
-pub struct Category {
-    pub title: String,
-}
-
-impl Link<todo> for category {
-    type Spec = optional_to_many<String, todo, category>;
-    fn spec(self, _: &todo) -> Self::Spec {
-        optional_to_many {
-            foriegn_key: String::from("category_id"),
-            from: todo,
-            to: self,
-        }
-    }
-}
-
 #[tokio::test]
+#[allow(unused)]
 async fn main() {
-    let p = Sqlite::connect_in_memory().await;
+    let pool = Sqlite::connect_in_memory().await;
 
-    let out = sql!(
-        SELECT FROM todo
+    use claw_ql::expressions::col_eq;
+    use claw_ql::links::relation_optional_to_many::optional_to_many;
+    use claw_ql::links::set_new_mod::set_new;
+    use claw_ql::test_module::{Category, Todo, category, todo, todo_members};
+
+    sql!(MIGRATE todo).await;
+    sql!(MIGRATE category).await;
+    sql!(MIGRATE optional_to_many {
+        from: todo,
+        to: category,
+        foriegn_key: "category_id".to_string()
+    })
+    .await;
+
+    sqlx::query(
+        "
+    INSERT INTO Todo (title, done, description) VALUES ('first_todo', false, NULL)
+    ",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // sql!(
+    //     INSERT Todo { title:"first_todo".to_string(), done: false, description: None }
+    //         LINK set_new(Category { title: "cat_1".to_string() })
+    // )
+    // .await;
+
+    let result = sql!(
+        SELECT FROM todo t
         LINK category
-        WHERE title.eq("first_todo")
-        WITH p
+        WHERE t.title.col_eq("first_todo".to_string())
     )
     .await;
+
+    pretty_assertions::assert_eq!(
+        result,
+        Some(LinkedOutput {
+            id: 0,
+            attributes: Todo {
+                title: "first_todo".to_string(),
+                done: false,
+                description: None
+            },
+            links: (None,),
+            // links: (Some(CollectionOutput {
+            //     id: 1,
+            //     attributes: Category {
+            //         title: "cat_1".to_string()
+            //     }
+            // }),),
+        })
+    );
 }

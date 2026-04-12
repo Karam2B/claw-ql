@@ -94,7 +94,7 @@ pub fn main(input: TokenStream) -> TokenStream {
                     }
                 }
                 impl Member for #mem_name {
-                    type Collection = #this_lowercase;
+                    type CollectionHandler = #this_lowercase;
                     type Data = #mem_ty;
                 }
             )*
@@ -107,7 +107,7 @@ pub fn main(input: TokenStream) -> TokenStream {
                 }
             }
             impl Member for id {
-                type Collection = #this_lowercase;
+                type CollectionHandler = #this_lowercase;
                 type Data = <SingleIncremintalInt as Id>::Data;
             }
         }
@@ -205,7 +205,7 @@ fn test_collection_derive() {
                 }
             }
             impl Member for title {
-                type Collection = todo;
+                type CollectionHandler = todo;
                 type Data = String;
             }
             #[derive(Clone, Default)]
@@ -216,7 +216,7 @@ fn test_collection_derive() {
                 }
             }
             impl Member for done {
-                type Collection = todo;
+                type CollectionHandler = todo;
                 type Data = bool;
             }
             #[derive(Clone, Default)]
@@ -227,7 +227,7 @@ fn test_collection_derive() {
                 }
             }
             impl Member for description {
-                type Collection = todo;
+                type CollectionHandler = todo;
                 type Data = Option<String>;
             }
 
@@ -238,7 +238,7 @@ fn test_collection_derive() {
                 }
             }
             impl Member for id {
-                type Collection = todo;
+                type CollectionHandler = todo;
                 type Data = <SingleIncremintalInt as Id>::Data;
             }
         }
