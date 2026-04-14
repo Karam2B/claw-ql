@@ -1,0 +1,12 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index ed76c5f..9f7000b 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -9,6 +9,7 @@ compile_error!(
+     "sqlite-preupdate-hook requires either 'sqlite' or 'sqlite-unbundled' to be enabled"
+ );
+ 
++pub use sqlx_core::executor_2;
+ pub use sqlx_core::acquire::Acquire;
+ pub use sqlx_core::arguments::{Arguments, IntoArguments};
+ pub use sqlx_core::column::Column;

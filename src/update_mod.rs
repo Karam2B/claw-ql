@@ -10,10 +10,10 @@
 /// Some(None) with None
 #[derive(Default, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 #[allow(non_camel_case_types)]
-pub enum update<T> {
+pub enum Update<T> {
     #[default]
-    keep,
-    set(T),
+    Keep,
+    Set(T),
 }
 
 #[cfg(feature = "serde")]
@@ -29,9 +29,9 @@ mod impl_deserialize {
         ser::SerializeTupleStruct,
     };
 
-    use super::update;
+    use super::Update;
 
-    impl<T: Serialize> Serialize for update<T> {
+    impl<T: Serialize> Serialize for Update<T> {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
@@ -39,10 +39,10 @@ mod impl_deserialize {
             let mut worker = serializer.serialize_tuple_struct("optiona_update", 2)?;
 
             match self {
-                update::keep => {
+                Update::Keep => {
                     worker.serialize_field("keep")?;
                 }
-                update::set(some) => {
+                Update::Set(some) => {
                     worker.serialize_field("set")?;
                     worker.serialize_field(some)?;
                 }
@@ -52,7 +52,7 @@ mod impl_deserialize {
         }
     }
 
-    impl<'de, T> Deserialize<'de> for update<T>
+    impl<'de, T> Deserialize<'de> for Update<T>
     where
         T: Deserialize<'de>,
     {
@@ -70,10 +70,10 @@ mod impl_deserialize {
     where
         T: Deserialize<'de>,
     {
-        type Value = update<T>;
+        type Value = Update<T>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("update_option")
+            formatter.write_str("either ['set', T] or ['keep']")
         }
 
         #[inline]
@@ -81,7 +81,7 @@ mod impl_deserialize {
         where
             E: de::Error,
         {
-            Ok(update::keep)
+            Ok(Update::Keep)
         }
 
         #[inline]
@@ -89,14 +89,14 @@ mod impl_deserialize {
         where
             E: de::Error,
         {
-            Ok(update::keep)
+            Ok(Update::Keep)
         }
 
         fn visit_some<D>(self, deser: D) -> Result<Self::Value, D::Error>
         where
             D: Deserializer<'de>,
         {
-            HelperDeser::<update<T>>::deserialize(deser).map(|e| return e.0)
+            HelperDeser::<Update<T>>::deserialize(deser).map(|e| return e.0)
         }
 
         fn __private_visit_untagged_option<D>(self, deserializer: D) -> Result<Self::Value, ()>
@@ -104,7 +104,7 @@ mod impl_deserialize {
             D: Deserializer<'de>,
         {
             match T::deserialize(deserializer) {
-                Ok(ok) => Ok(update::set(ok)),
+                Ok(ok) => Ok(Update::Set(ok)),
                 Err(_err) => Err(()),
             }
         }
@@ -112,13 +112,13 @@ mod impl_deserialize {
 
     struct HelperDeser<T>(T);
 
-    impl<'de, T: Deserialize<'de>> Deserialize<'de> for HelperDeser<update<T>> {
+    impl<'de, T: Deserialize<'de>> Deserialize<'de> for HelperDeser<Update<T>> {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: Deserializer<'de>,
         {
             deserializer
-                .deserialize_tuple_struct("update_option", 2, LastVisitor(PhantomData))
+                .deserialize_tuple_struct("update_option helper deser", 2, LastVisitor(PhantomData))
                 .map(|e| HelperDeser(e))
         }
     }
@@ -126,10 +126,10 @@ mod impl_deserialize {
     struct LastVisitor<T>(PhantomData<T>);
 
     impl<'de, T: Deserialize<'de>> Visitor<'de> for LastVisitor<T> {
-        type Value = update<T>;
+        type Value = Update<T>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("update_option")
+            formatter.write_str("either ['set', T] or ['keep'] ok")
         }
         fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
         where
@@ -147,7 +147,7 @@ mod impl_deserialize {
                     None => {}
                 }
 
-                return Ok(update::keep);
+                return Ok(Update::Keep);
             }
 
             if first == "set" {
@@ -158,12 +158,14 @@ mod impl_deserialize {
                 }
 
                 return Ok(match seq.next_element::<T>()? {
-                    Some(ok) => update::set(ok),
+                    Some(ok) => Update::Set(ok),
                     None => return Err(de::Error::invalid_length(1, &"len should be exactly 2")),
                 });
             }
 
-            return Err(de::Error::custom("has to be either \"set\" or \"keep\""));
+            return Err(de::Error::custom(
+                "first element has to be either \"set\" or \"keep\"",
+            ));
         }
     }
 }

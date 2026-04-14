@@ -2,77 +2,89 @@
 
 use crate::links::{LinkedToBase, LinkedViaId};
 
-#[derive(Clone)]
-#[allow(non_camel_case_types)]
-pub struct optional_to_many<Id, F, T> {
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub struct OptionalToMany<Id, F, T> {
     pub foriegn_key: Id,
     pub from: F,
     pub to: T,
 }
 
-impl<Id, F, T> LinkedViaId for optional_to_many<Id, F, T> {}
+impl<Id, F, T> LinkedViaId for OptionalToMany<Id, F, T> {}
 
-impl<Id, F, T> LinkedToBase for optional_to_many<Id, F, T> {
+impl<Id, F, T> LinkedToBase for OptionalToMany<Id, F, T> {
     type Base = F;
 }
 
 mod impl_on_migrate {
+    use std::marker::PhantomData;
+
     use crate::{
-        collections::{Collection, Id},
+        collections::{Collection, SingleColumnId},
         expressions::{
-            col_def, foriegn_key, id_constraint, on_delete_set_null, sqlx_type, table_as_expression,
+            col_def, foriegn_key, on_delete_set_null, standard_naming_conventions::ForeignKeyName,
         },
-        links::relation_optional_to_many::optional_to_many,
+        extentions::common_expressions::TableNameExpression,
+        links::relation_optional_to_many::OptionalToMany,
         on_migrate::OnMigrate,
+        query_builder::functional_expr::ManyPossible,
         statements::AddColumn,
     };
 
-    impl<F: Collection + Clone, T: Collection<Id: Id<SqlIdent: ToString>>> OnMigrate
-        for optional_to_many<String, F, T>
+    impl<Key, F, T> OnMigrate for OptionalToMany<Key, F, T>
+    where
+        Key: AsRef<str>,
+        F: Collection + Clone,
+        T: Collection<Id: SingleColumnId> + Clone,
+        F: TableNameExpression,
+        T: TableNameExpression,
+        Key: Clone,
     {
         type Statements = AddColumn<
-            table_as_expression<F>,
+            F::TableNameExpression,
             col_def<
-                String,
-                sqlx_type<Option<i64>>,
-                (id_constraint<String, foriegn_key<(on_delete_set_null,)>>,),
+                ForeignKeyName<Key, T::TableNameExpression>,
+                Option<i64>,
+                foriegn_key<ManyPossible<(on_delete_set_null,)>>,
             >,
         >;
         fn statments(&self) -> Self::Statements {
             AddColumn {
-                table: table_as_expression(self.from.clone()),
+                table: self.from.table_name_expression(),
                 col_def: col_def {
-                    name: self.foriegn_key.to_string(),
-                    ty: sqlx_type::default(),
-                    constraints: (id_constraint(
-                        format!("fk_{}", self.foriegn_key),
-                        foriegn_key {
-                            references_table: self.to.table_name().to_string(),
-                            references_col: self.to.id().ident().to_string(),
-                            ons: (on_delete_set_null,),
-                        },
-                    ),),
+                    name: ForeignKeyName {
+                        key: self.foriegn_key.clone(),
+                        to: self.to.table_name_expression(),
+                    },
+                    ty: PhantomData,
+                    constraints: foriegn_key {
+                        references_table: self.to.table_name().to_string(),
+                        references_col: self.to.id().as_ref().to_string(),
+                        ons: ManyPossible((on_delete_set_null,)),
+                    },
                 },
             }
         }
     }
 }
 
+#[claw_ql_macros::skip]
+// to be refactored
 mod impl_fetch_one {
     use sqlx::{ColumnIndex, Database, Row, Type};
 
     use crate::{
         collections::{Collection, SingleIncremintalInt},
-        expressions::{left_join, scoped_column, table},
+        expressions::left_join,
         extentions::Members,
-        from_row::{FromRowAlias, pre_alias},
-        links::relation_optional_to_many::optional_to_many,
-        operations::{CollectionOutput, Operation, fetch_one::LinkFetchOne},
+        from_row::{FromRowAlias, two_alias},
+        links::relation_optional_to_many::OptionalToMany,
+        operations::{CollectionOutput, Operation},
     };
 
-    impl<S, F, T> LinkFetchOne<S> for optional_to_many<String, F, T>
+    impl<Id, S, F, T> LinkFetchOne<S> for OptionalToMany<Id, F, T>
     where
-        T: Collection<Id = SingleIncremintalInt> + Members<S>,
+        Id: AsRef<str>,
+        T: Collection<Id: SingleColumnId> + Members,
         T: for<'r> FromRowAlias<'r, <S as Database>::Row, FromRowData = T::Data>,
         F: Collection,
         S: Database,
@@ -83,16 +95,17 @@ mod impl_fetch_one {
 
         type Wheres = ();
 
-        fn non_aggregating_select_items(&self) -> Vec<scoped_column<String, String>> {
-            let mut base = vec![
-                table(self.to.table_name().to_string()).col("id".to_string()), // many fields of to
-            ];
+        fn non_aggregating_select_items(&self) -> Vec<link_select_item<String, String>> {
+            let mut base = vec![link_select_item::new(
+                self.to.table_name().to_string(),
+                "id".to_string(),
+            )];
 
             base.extend(
                 self.to
                     .members_names()
                     .into_iter()
-                    .map(|e| table(self.to.table_name().to_string()).col(e)),
+                    .map(|e| link_select_item::new(self.to.table_name().to_string(), e)),
             );
 
             base
@@ -102,7 +115,12 @@ mod impl_fetch_one {
                 ft: self.to.table_name().to_string(),
                 fc: "id".to_string(),
                 lt: self.from.table_name().to_string(),
-                lc: self.foriegn_key.clone(),
+                lc: format!(
+                    "fk_{}_{}_{}",
+                    self.from.table_name_lower_case(),
+                    self.to.table_name_lower_case(),
+                    self.foriegn_key.as_ref()
+                ),
             }
         }
         fn wheres(&self) -> Self::Wheres {}
@@ -111,18 +129,27 @@ mod impl_fetch_one {
 
         type SubOp = ();
 
-        fn sub_op(&self, row: pre_alias<<S as sqlx::Database>::Row>) -> (Self::SubOp, Self::Inner)
+        fn sub_op(&self, row: two_alias<<S as sqlx::Database>::Row>) -> (Self::SubOp, Self::Inner)
         where
             S: sqlx::Database,
         {
-            let id: Option<i64> = row.0.get(format!("{}id", row.1).as_str());
+            // two_alias.try_get()
+            // panic!("debug_row: {:?}", crate::debug_row::DebugRow(row.0));
+            let id: Option<i64> = row.0.get(
+                format!(
+                    "{}{}id",
+                    row.1,
+                    row.2.map(|e| e.to_string()).unwrap_or_default()
+                )
+                .as_str(),
+            );
 
             if let Some(id) = id {
                 return (
                     (),
                     Some(CollectionOutput {
                         id: id,
-                        attributes: self.to.pre_alias(row).unwrap(),
+                        attributes: self.to.two_alias(row).unwrap(),
                     }),
                 );
             } else {
@@ -142,155 +169,339 @@ mod impl_fetch_one {
     }
 }
 
-pub mod impl_dynamic_link {
-    use std::collections::HashMap;
-
-    use serde::{Deserialize, Serialize};
+mod optional_to_many_items_names {
+    use core::fmt;
 
     use crate::{
-        collections::CollectionBasic,
-        links::{CollectionsStore, DynamicLink, relation_optional_to_many::optional_to_many},
+        collections::{self, Collection, CollectionId},
+        database_extention::DatabaseExt,
+        extentions::common_expressions::{
+            StrAliased,
+            find_place_for_this::{DynamicCol, MembersInDynamicOperation},
+        },
+        from_row::{
+            FromRowAlias, FromRowData, TryFromRowAlias, swich_to_base_id::pre_alias_to_base_id,
+        },
+        query_builder::{
+            IsOpExpression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat,
+        },
     };
 
-    pub struct OptionalToManyLinks<DynamicBase> {
-        pub all: Vec<optional_to_many<String, DynamicBase, DynamicBase>>,
-    }
+    // "from" id exists in the sql statement, and I want attributes and id of "to"
+    #[derive(Clone, Debug)]
 
-    #[derive(Deserialize)]
-    pub struct RelationOnRequest {
-        to: String,
-        #[serde(default = "set_def")]
-        id: String,
+    pub struct OptionaToManyItems<FromId, ToId, ToAttributes> {
+        pub from_id: FromId,
+        pub to_id: ToId,
+        pub to_attributes: ToAttributes,
     }
-
-    #[derive(Serialize)]
-    pub struct RelationNotFound {
-        pub expected_id: String,
-        pub expected_from: String,
-        pub expected_to: String,
-    }
-
-    fn set_def() -> String {
-        "default".to_string()
-    }
-
-    impl<
-        DynamicBase: CollectionBasic + Clone + CollectionsStore<Store = HashMap<String, DynamicBase>>,
-        S: 'static,
-    > DynamicLink<DynamicBase, S> for OptionalToManyLinks<DynamicBase>
+    impl<S, Fi, Ti, Ta> MembersInDynamicOperation<S> for OptionaToManyItems<Fi, Ti, Ta>
+    where
+        Fi: MembersInDynamicOperation<S>,
+        Ti: MembersInDynamicOperation<S>,
+        Ta: MembersInDynamicOperation<S>,
+        // for from_this_to_that
+        Ti: CollectionId + FromRowData,
+        Ta: Collection<Id = Ti> + FromRowData<RData = Ta::Data>,
+        Fi: CollectionId + FromRowData,
     {
-        type OnRequest = optional_to_many<String, DynamicBase, DynamicBase>;
+        type RData = (
+            <Fi as CollectionId>::IdData,
+            Option<(<Ti as CollectionId>::IdData, Ta::Data)>,
+        );
 
-        type OnRequestInput = RelationOnRequest;
-
-        type OnRequestError = RelationNotFound;
-
-        type CreateLinkOk = ();
-
-        type CreateLinkInput = ();
-
-        type CreateLinkError = ();
-
-        type ModifyLinkOk = ();
-
-        type ModifyLinkInput = ();
-
-        type ModifyLinkError = ();
-
-        fn on_request(
-            &self,
-            base: DynamicBase,
-            input: Self::OnRequestInput,
-        ) -> Result<Self::OnRequest, Self::OnRequestError> {
-            self.all
-                .iter()
-                .find(|e| {
-                    e.foriegn_key == input.id
-                        && e.from.table_name_lower_case() == base.table_name_lower_case()
-                        && e.to.table_name_lower_case() == input.to
-                })
-                .cloned()
-                .ok_or_else(|| RelationNotFound {
-                    expected_id: input.id,
-                    expected_from: base.table_name_lower_case().to_string(),
-                    expected_to: input.to,
-                })
+        fn from_this_to_that(val: serde_json::Map<String, serde_json::Value>) -> Self::RData {
+            let _ = val;
+            std::todo!()
         }
+        fn into_dynamic_cols(&self) -> Vec<DynamicCol> {
+            let mut all = vec![];
 
-        fn create_link(
-            &self,
-            _: &HashMap<String, DynamicBase>,
-            _: Self::CreateLinkInput,
-        ) -> Result<Self::CreateLinkOk, Self::CreateLinkError> {
+            let table_name = Collection::table_name(&self.to_attributes).to_string();
+
+            all.extend(
+                self.to_id
+                    .into_dynamic_cols()
+                    .into_iter()
+                    .map(|e| DynamicCol {
+                        table: table_name.clone(),
+                        col: e.col,
+                    }),
+            );
+            all.extend(
+                self.to_attributes
+                    .into_dynamic_cols()
+                    .into_iter()
+                    .map(|e| DynamicCol {
+                        table: table_name.clone(),
+                        col: e.col,
+                    }),
+            );
+
+            all
+        }
+    }
+
+    impl<F, Ti, Ta> StrAliased for OptionaToManyItems<F, Ti, Ta>
+    where
+        F: StrAliased,
+        Ti: StrAliased,
+        Ta: StrAliased,
+    {
+        type StrAliased = OptionaToManyItems<F::StrAliased, Ti::StrAliased, Ta::StrAliased>;
+        fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
+            OptionaToManyItems {
+                from_id: self.from_id.str_aliased(alias),
+                to_id: self.to_id.str_aliased(alias),
+                to_attributes: self.to_attributes.str_aliased(alias),
+            }
+        }
+    }
+
+    impl<FromId, ToId, ToAttributes> IsOpExpression for OptionaToManyItems<FromId, ToId, ToAttributes> {
+        fn is_op(&self) -> bool {
+            true
+        }
+    }
+
+    impl<'q, S, FromId, ToId, ToAttributes> ManyExpressions<'q, S>
+        for OptionaToManyItems<FromId, ToId, ToAttributes>
+    where
+        S: DatabaseExt,
+        FromId: ManyExpressions<'q, S>,
+        ToId: ManyExpressions<'q, S>,
+        ToAttributes: ManyExpressions<'q, S>,
+    {
+        fn expression(
+            self,
+            start: &'static str,
+            join: &'static str,
+            ctx: &mut StatementBuilder<'q, S>,
+        ) where
+            S: DatabaseExt,
+        {
+            // from is already added, I just want to add `self.to` and `self.to_attributes`
+            ManyFlat((self.to_id, self.to_attributes)).expression(start, join, ctx);
+        }
+    }
+
+    impl<FromId, To> FromRowData for OptionaToManyItems<FromId, To::Id, To>
+    where
+        FromId: CollectionId,
+        To: FromRowData + Collection,
+        To::Id: FromRowData,
+    {
+        type RData = (
+            FromId::IdData,
+            Option<(<To::Id as CollectionId>::IdData, To::Data)>,
+        );
+    }
+
+    impl<'r, R, FromId, To> FromRowAlias<'r, R> for OptionaToManyItems<FromId, To::Id, To>
+    where
+        FromId: CollectionId + FromRowAlias<'r, R, RData = <FromId as CollectionId>::IdData>,
+        To: Collection,
+        To: FromRowAlias<'r, R, RData = <To as Collection>::Data>,
+        To::Id: TryFromRowAlias<'r, R, RData = <To::Id as CollectionId>::IdData>,
+        To::Data: fmt::Debug,
+        FromId::IdData: fmt::Debug,
+        <To::Id as CollectionId>::IdData: fmt::Debug,
+        R: sqlx::Row,
+        for<'q> &'q str: sqlx::ColumnIndex<R>,
+        i64: sqlx::Type<R::Database> + sqlx::Decode<'r, R::Database>,
+        FromId: fmt::Debug,
+    {
+        fn no_alias(&self, row: &'r R) -> Result<Self::RData, crate::from_row::FromRowError> {
             todo!()
         }
 
-        fn modify_link(
+        fn pre_alias(
             &self,
-            _: &HashMap<String, DynamicBase>,
-            _: Self::ModifyLinkInput,
-        ) -> Result<Self::ModifyLinkOk, Self::ModifyLinkError> {
+            row: crate::from_row::pre_alias<'r, R>,
+        ) -> Result<Self::RData, crate::from_row::FromRowError>
+        where
+            R: sqlx::Row,
+        {
+            let found = self.to_id.try_pre_alias(row.clone())?;
+            let found = if let Some(found) = found {
+                Some((found, self.to_attributes.pre_alias(row.clone())?))
+            } else {
+                None
+            };
+
+            // panic!("debug: {:?}", self.from);
+
+            Ok((self.from_id.pre_alias(pre_alias_to_base_id(row))?, found))
+        }
+
+        fn post_alias(
+            &self,
+            row: crate::from_row::post_alias<'r, R>,
+        ) -> Result<Self::RData, crate::from_row::FromRowError>
+        where
+            R: sqlx::Row,
+        {
+            todo!()
+        }
+
+        fn two_alias(
+            &self,
+            row: crate::from_row::two_alias<'r, R>,
+        ) -> Result<Self::RData, crate::from_row::FromRowError>
+        where
+            R: sqlx::Row,
+        {
             todo!()
         }
     }
 }
 
-#[cfg(feature = "skip_without_comment")]
-mod old_api_waiting_refactoring {
-    impl<S, From, To> DeleteOneFragment<S> for optional_to_many<From, To>
-    where
-        From: Collection<S, Data: Sync + Send>,
-        To: Collection<S, Data: Sync + Send>,
-        S: QueryBuilder + Accept<i64>,
-        for<'s> &'s str: ColumnIndex<S::Row>,
-        SelectSt<S>: Execute<S>,
-        S::Fragment: Send,
-        S::Context1: Send,
-        i64: for<'d> sqlx::Decode<'d, S> + Type<S>,
+pub mod join_expression {
+    use crate::{
+        database_extention::DatabaseExt,
+        query_builder::{Expression, OpExpression, StatementBuilder},
+    };
+
+    pub struct JoinExpression<ForeignTable, ForeignColumn, LocalTable, LocalColumn> {
+        pub join_type: &'static str,
+        pub foreign_table: ForeignTable,
+        pub foreign_column: ForeignColumn,
+        pub local_table: LocalTable,
+        pub local_column: LocalColumn,
+    }
+
+    impl<ForeignTable, ForeignColumn, LocalTable, LocalColumn> OpExpression
+        for JoinExpression<ForeignTable, ForeignColumn, LocalTable, LocalColumn>
     {
-        type Output = Option<CollectionOutput<To::Data>>;
+    }
 
-        type Inner = Option<CollectionOutput<To::Data>>;
+    impl<'q, S, Ft, Fc, Lt, Lc> Expression<'q, S> for JoinExpression<Ft, Fc, Lt, Lc>
+    where
+        S: DatabaseExt,
+        Ft: Expression<'q, S> + Clone,
+        Fc: Expression<'q, S>,
+        Lt: Expression<'q, S>,
+        Lc: Expression<'q, S>,
+    {
+        fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+            ctx.syntax(&self.join_type);
+            self.foreign_table.clone().expression(ctx);
+            ctx.syntax(" ON ");
+            self.local_table.expression(ctx);
+            ctx.syntax(".");
+            self.local_column.expression(ctx);
+            ctx.syntax(" = ");
+            self.foreign_table.expression(ctx);
+            ctx.syntax(".");
+            self.foreign_column.expression(ctx);
+        }
+    }
+}
 
-        async fn first_sup_op<'this, E: for<'q> Executor<'q, Database = S> + Clone>(
-            &'this mut self,
-            data: &'this mut Self::Inner,
-            exec: E,
-            id: i64,
-        ) {
-            use sqlx::Row;
-            let mut st = SelectSt::init(self.from.table_name());
-            self.to.on_select(&mut st);
-            st.join(left_join {
-                local_column: self.foriegn_key.clone(),
-                foriegn_column: "id".to_string(),
-                foriegn_table: self.to.table_name().to_string(),
-            });
-            let alias = format!("{}_id", self.to.table_name());
-            st.select(col("id").table(self.to.table_name()).alias(&alias));
-            st.where_(col("id").table(self.from.table_name()).eq(id));
+mod impl_link_fetch_many {
 
-            *data = st
-                .fetch_optional(exec, |r| {
-                    Ok(CollectionOutput {
-                        attr: self.to.from_row_scoped(&r),
-                        id: r.get(&*alias),
-                    })
-                })
-                .await
-                .unwrap();
+    use crate::{
+        collections::{Collection, CollectionId, SingleColumnId},
+        expressions::standard_naming_conventions::ForeignKeyName,
+        extentions::common_expressions::{Identifier, TableNameExpression},
+        from_row::FromRowData,
+        links::relation_optional_to_many::{
+            OptionalToMany, join_expression::JoinExpression,
+            optional_to_many_items_names::OptionaToManyItems,
+        },
+        operations::{
+            CollectionOutput, OperationOutput,
+            fetch_many::{LinkFetchMany, LinkFetchManyTakeId},
+        },
+    };
+
+    impl<Key, F, T> LinkFetchMany for OptionalToMany<Key, F, T>
+    where
+        Key: Clone + AsRef<str>,
+        T: Collection<Id: SingleColumnId + Identifier> + TableNameExpression + Clone,
+        F: Collection + TableNameExpression + Clone,
+    {
+        type Output = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>;
+
+        type SelectItems = OptionaToManyItems<F::Id, T::Id, T>;
+
+        fn non_aggregating_select_items(&self) -> Self::SelectItems {
+            OptionaToManyItems {
+                from_id: self.from.id(),
+                to_id: self.to.id(),
+                to_attributes: self.to.clone(),
+            }
         }
 
-        fn returning(&self) -> Vec<String> {
-            vec![]
+        type Join = JoinExpression<
+            T::TableNameExpression,
+            <T::Id as Identifier>::Identifier,
+            F::TableNameExpression,
+            ForeignKeyName<Key, T::TableNameExpression>,
+        >;
+
+        fn non_duplicating_join(&self) -> Self::Join {
+            JoinExpression {
+                join_type: "LEFT JOIN",
+                foreign_table: self.to.table_name_expression(),
+                foreign_column: self.to.id().identifier(),
+                local_table: self.from.table_name_expression(),
+                local_column: ForeignKeyName {
+                    key: self.foriegn_key.clone(),
+                    to: self.to.table_name_expression(),
+                },
+            }
         }
 
-        fn from_row(&mut self, _data: &mut Self::Inner, _row: &S::Row) {
-            /* no-op */
-        }
+        type Wheres = ();
 
-        fn take(self, data: Self::Inner) -> Self::Output {
-            data
+        fn wheres(&self) -> Self::Wheres {}
+
+        type PostOperation = ();
+
+        fn post_select(&self) -> Self::PostOperation
+        where
+            Self::SelectItems: crate::from_row::FromRowData,
+        {
+        }
+    }
+
+    impl<Key, F, T> LinkFetchManyTakeId<F::Id> for OptionalToMany<Key, F, T>
+    where
+        Self: LinkFetchMany<
+            Output = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>,
+        >,
+        Self::PostOperation: OperationOutput,
+        Self::SelectItems: FromRowData<
+            RData = (
+                <F::Id as CollectionId>::IdData,
+                Option<(<T::Id as CollectionId>::IdData, T::Data)>,
+            ),
+        >,
+        <F::Id as CollectionId>::IdData: PartialEq,
+        F: Collection,
+        T: Collection,
+        <F::Id as CollectionId>::IdData: ::core::fmt::Debug + Clone,
+    {
+        fn take(
+            &self,
+            into: &<F::Id as CollectionId>::IdData,
+            res: &mut Vec<(
+                <F::Id as CollectionId>::IdData,
+                Option<(<T::Id as CollectionId>::IdData, T::Data)>,
+            )>,
+            _: &mut <Self::PostOperation as OperationOutput>::Output,
+        ) -> Self::Output {
+            for (i, each) in res.iter_mut().enumerate() {
+                if each.0 == *into {
+                    let (_done_in_comparison, option) = res.remove(i);
+                    return option.map(|(to_id, to)| CollectionOutput {
+                        id: to_id,
+                        attributes: to,
+                    });
+                }
+            }
+            None
         }
     }
 }

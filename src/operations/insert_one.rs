@@ -1,158 +1,197 @@
-use sqlx::{ColumnIndex, Database, Decode, Executor, Row, Type};
-
 use crate::{
-    collections::{Collection, HasHandler, Id, SingleIncremintalInt},
+    collections::{Collection, SingleIncremintalInt},
     database_extention::DatabaseExt,
-    expressions::table,
-    extentions::Members,
-    links::Link,
-    operations::{LinkedOutput, Operation},
-    query_builder::{ManyExpressions, QueryBuilder},
-    row_utils::RowToJson,
-    singlton_default::SingltonDefault,
-    statements::insert_one_statement::{InsertStatement, values_for_insert},
+    extentions::common_expressions::OnInsert,
+    from_row::row_helpers::OneRowHelper,
+    links::{Link, relation_optional_to_many::OptionalToMany, set_id_mod::SetIdSpec},
+    operations::{LinkedOutput, Operation, SafeOperation},
+    query_builder::{Bind, ManyExpressions, StatementBuilder, functional_expr::ManyFlat},
+    sqlx_error_handling::HandleSqlxResult,
+    statements::insert_statement::{InsertStatement, One},
     use_executor,
 };
-
-pub struct InsertOne<Handler, Entry, Links> {
-    pub handler: Handler,
-    pub entry: Entry,
-    pub links: Links,
-}
-
-impl<Entry, Links> InsertOne<Entry::Handler, Entry, Links>
-where
-    Entry: HasHandler,
-    Entry::Handler: SingltonDefault + Clone,
-{
-    pub fn new(entry: Entry, links: Links) -> Self {
-        let handler = Entry::Handler::singlton_default().clone();
-        InsertOne {
-            handler,
-            entry,
-            links,
-        }
-    }
-}
+use sqlx::{ColumnIndex, Database, Type};
 
 pub trait LinkInsertOne<S> {
     type PreOp;
-    type Resume;
-    fn pre_op(self) -> (Self::PreOp, Self::Resume);
+    fn pre_op(&self) -> Self::PreOp;
 
-    fn current_table(o: <Self::PreOp as Operation<S>>::Output) -> Vec<String>
+    type InsertExtentionIdents;
+    type InsertExtentionValues;
+    fn insert_extention(
+        &self,
+        output: <Self::PreOp as Operation<S>>::Output,
+    ) -> (Self::InsertExtentionIdents, Self::InsertExtentionValues)
     where
         Self::PreOp: Operation<S>;
-    type FromRow;
-    type SubOp;
-    fn from_row(&self, row: &S::Row) -> (Self::FromRow, Self::SubOp)
-    where
-        S: Database;
+
+    type PostOp;
+    fn post_op(&self, id: i64) -> Self::PostOp;
     type Output;
-    fn take(
-        self,
-        from_row: Self::FromRow,
-        sub_op: <Self::SubOp as Operation<S>>::Output,
-    ) -> Self::Output
+    fn output(&self, output: <Self::PostOp as Operation<S>>::Output) -> Self::Output
     where
-        Self::SubOp: Operation<S>,
-        S: Database;
+        Self::PostOp: Operation<S>;
 }
 
-pub mod returning_clause {
-    use crate::{
-        database_extention::DatabaseExt,
-        query_builder::{Expression, OpExpression, QueryBuilder, syntax::comma_join},
-    };
+impl<S> LinkInsertOne<S> for () {
+    type PreOp = ();
 
-    #[allow(non_camel_case_types)]
-    pub struct returning(pub Vec<String>);
+    fn pre_op(&self) -> Self::PreOp {}
 
-    impl OpExpression for returning {}
-    impl<'q, S: DatabaseExt> Expression<'q, S> for returning {
-        fn expression(mut self, ctx: &mut QueryBuilder<'q, S>) {
-            let pop = self.0.pop();
-            for each in self.0 {
-                ctx.sanitize(&each);
-                ctx.syntax(&comma_join);
-            }
-            if let Some(last) = pop {
-                ctx.sanitize(&last);
-            }
-        }
+    type InsertExtentionIdents = ();
+    type InsertExtentionValues = ();
+
+    fn insert_extention(
+        &self,
+        _: <Self::PreOp as Operation<S>>::Output,
+    ) -> (Self::InsertExtentionIdents, Self::InsertExtentionValues)
+    where
+        Self::PreOp: Operation<S>,
+    {
+        ((), ())
+    }
+
+    type PostOp = ();
+
+    fn post_op(&self, _: i64) -> Self::PostOp {}
+
+    type Output = ();
+
+    fn output(&self, _: <Self::PostOp as Operation<S>>::Output) -> Self::Output
+    where
+        Self::PostOp: Operation<S>,
+    {
     }
 }
 
-impl<S, Handler, Entry, Links> Operation<S> for InsertOne<Handler, Entry, Links>
-where
-    S: DatabaseExt,
-    Handler: Send,
-    Handler: Members<S>,
-    Entry: HasHandler<Handler = Handler> + Send,
-    Entry: for<'q> ManyExpressions<'q, S>,
-    Handler: Collection<Data = Entry, Id = SingleIncremintalInt>,
-    for<'c> &'c mut <S as sqlx::Database>::Connection: Executor<'c, Database = S>,
-    Links: Sync + Send,
-    Links: Link<Handler, Spec: Send> + Send,
-    <Links as Link<Handler>>::Spec:
-        LinkInsertOne<S, Output: Send, FromRow: Send, SubOp: Send + Operation<S, Output: Send>>,
-    i64: for<'q> Decode<'q, S> + Type<S>,
-    usize: ColumnIndex<S::Row>,
-    // remove later
-    S::Row: RowToJson,
-    String: for<'q> Decode<'q, S> + Type<S>,
-{
-    type Output = LinkedOutput<
-        <<Entry::Handler as Collection>::Id as Id>::Data,
-        (),
-        <<Links as Link<Handler>>::Spec as LinkInsertOne<S>>::Output,
-    >;
-    async fn exec_operation(self, pool: sqlx::Pool<S>) -> Self::Output
+impl<From, To, S> LinkInsertOne<S> for SetIdSpec<OptionalToMany<String, From, To>, i64> {
+    type PreOp = ();
+
+    fn pre_op(&self) -> Self::PreOp {}
+
+    type InsertExtentionIdents = Vec<String>;
+    type InsertExtentionValues = Bind<i64>;
+
+    fn insert_extention(
+        &self,
+        _: <Self::PreOp as Operation<S>>::Output,
+    ) -> (Vec<String>, Self::InsertExtentionValues)
     where
-        S: sqlx::Database,
+        Self::PreOp: Operation<S>,
     {
-        let query_builder = QueryBuilder::new(InsertStatement {
-            table_name: table(self.handler.table_name()),
-            identifiers: self.handler.members_names(),
-            values: crate::statements::insert_one_statement::OneDefault(values_for_insert(
-                self.entry,
-            )),
-            returning: returning_clause::returning(vec!["id".to_string()]),
+        (vec![self.og_spec.foriegn_key.clone()], Bind(self.input))
+    }
+
+    type PostOp = ();
+
+    fn post_op(&self, _: i64) -> Self::PostOp {}
+
+    type Output = ();
+
+    fn output(&self, _: <Self::PostOp as Operation<S>>::Output) -> Self::Output
+    where
+        Self::PostOp: Operation<S>,
+    {
+    }
+}
+
+pub struct InsertOne<Handler, Data, Links> {
+    pub handler: Handler,
+    pub data: Data,
+    pub links: Links,
+}
+
+#[derive(Debug)]
+pub enum InsertOneError<T> {
+    ValidationError(T),
+}
+
+impl<H, L> SafeOperation for InsertOne<H, H::DataInput, L>
+where
+    H: OnInsert,
+    L: Link<H>,
+{
+    type Error = InsertOneError<H::DataError>;
+    type Ok = InsertOne<H, H::InsertExpression, L::Spec>;
+    fn safety_check(self) -> Result<Self::Ok, Self::Error> {
+        let data = match self.handler.validate_on_insert(self.data) {
+            Ok(data) => data,
+            Err(e) => return Err(InsertOneError::ValidationError(e)),
+        };
+        let links = self.links.spec(&self.handler);
+        Ok(InsertOne {
+            handler: self.handler,
+            data,
+            links,
+        })
+    }
+}
+
+impl<S, H, L> Operation<S> for InsertOne<H, H::InsertExpression, L>
+where
+    H: Collection<Id = SingleIncremintalInt> + Send,
+    H: OnInsert<InsertExpression: Send + ManyExpressions<'static, S>>,
+    S: DatabaseExt,
+    usize: ColumnIndex<S::Row>,
+    i64: Type<S> + for<'q> sqlx::Decode<'q, S>,
+    for<'c> &'c mut S::Connection: sqlx::Executor<'c, Database = S>,
+    S::Connection: sqlx::Connection<Database = S>,
+    L: LinkInsertOne<S>
+        + Send
+        + LinkInsertOne<
+            S,
+            PreOp: Operation<S>,
+            InsertExtentionIdents: Send + ManyExpressions<'static, S>,
+            InsertExtentionValues: Send + ManyExpressions<'static, S>,
+            PostOp: Operation<S>,
+            Output: Send,
+        >,
+    H: ManyExpressions<'static, S>,
+    H: Send,
+{
+    type Output = LinkedOutput<i64, (), L::Output>;
+    async fn exec_operation(self, conn: &mut <S>::Connection) -> Self::Output
+    where
+        S: Database,
+    {
+        let pre_op = self.links.pre_op().exec_operation(&mut *conn).await;
+        let (idents, values) = self.links.insert_extention(pre_op);
+
+        let qb = StatementBuilder::<'_, S>::new(InsertStatement {
+            table_name: self.handler.table_name().to_string(),
+            identifiers: ManyFlat((idents, self.handler)),
+            values: One(ManyFlat((values, self.data))),
+            returning: vec!["id"],
         });
 
-        let spec = self.links.spec(&self.handler);
+        let id = use_executor!(fetch_one(&mut *conn, qb))
+            .unwrap_sqlx_error::<S>()
+            .from_row::<(i64,)>()
+            .unwrap()
+            .0;
 
-        println!("{}", query_builder.stmt());
+        let s = self.links.post_op(id).exec_operation(&mut *conn).await;
 
-        let row = use_executor!(fetch_one(&pool, query_builder)).expect("bug: claw_ql must clear all sqlx's error, it is hard to know where this error was originated!");
-
-        println!("{}", row.to_json());
-
-        let (from_row, sub_op) = spec.from_row(&row);
-
-        let sub_op = sub_op.exec_operation(pool.clone()).await;
-
-        let links = spec.take(from_row, sub_op);
-
-        let id: i64 = row.get(0);
-
-        return LinkedOutput {
+        LinkedOutput {
             id,
             attributes: (),
-            links,
-        };
+            links: self.links.output(s),
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::InsertOne;
-    use super::Operation;
-    use crate::from_row::FromRowAlias;
-    use crate::from_row::pre_alias;
-    use crate::links::set_new_mod::set_new;
-    use crate::test_module::*;
-    use crate::{connect_in_memory::ConnectInMemory, test_module::Todo};
+    use crate::connect_in_memory::ConnectInMemory;
+    use crate::from_row::row_helpers::AliasRowHelper;
+    use crate::links::set_id_mod::set_id;
+    use crate::operations::Operation;
+    use crate::operations::SafeOperation;
+    use crate::test_module;
+    use crate::test_module::Category;
+    use crate::test_module::Todo;
+    use crate::test_module::category;
     use sqlx::Row;
     use sqlx::Sqlite;
 
@@ -174,25 +213,35 @@ mod test {
                 category_id INTEGER,
                 FOREIGN KEY (category_id) REFERENCES Category(id)
             );
-            
+            INSERT INTO Category (title) VALUES ('category_1');
             ",
         )
         .execute(&pool)
         .await
         .unwrap();
 
-        let _ = InsertOne::new(
-            Todo {
-                title: "first_todo".to_string(),
-                done: true,
-                description: Some("description_1".to_string()),
-            },
-            set_new(Category {
-                title: "category_1".to_string(),
-            }),
+        let mut tx = pool.begin().await.unwrap();
+
+        Operation::<Sqlite>::exec_operation(
+            InsertOne {
+                handler: test_module::todo,
+                data: Todo {
+                    title: "first_todo".to_string(),
+                    done: true,
+                    description: Some("description_1".to_string()),
+                },
+                links: set_id {
+                    to: category,
+                    id: 1,
+                },
+            }
+            .safety_check()
+            .unwrap(),
+            tx.as_mut(),
         )
-        .exec_operation(pool.clone())
         .await;
+
+        tx.commit().await.unwrap();
 
         // move to query
         let row = sqlx::query(
@@ -208,7 +257,7 @@ mod test {
         .await
         .unwrap();
 
-        let result = todo.pre_alias(pre_alias(&row, "todo_")).unwrap();
+        let result = row.row_pre_alias(&test_module::todo, "todo_").unwrap();
 
         pretty_assertions::assert_eq!(
             result,
@@ -221,9 +270,9 @@ mod test {
 
         let category_id: i64 = row.get("category_id");
 
-        pretty_assertions::assert_eq!(category_id, 0,);
+        pretty_assertions::assert_eq!(category_id, 1);
 
-        let result = category.pre_alias(pre_alias(&row, "category_")).unwrap();
+        let result = row.row_pre_alias(&category, "category_").unwrap();
 
         pretty_assertions::assert_eq!(
             result,

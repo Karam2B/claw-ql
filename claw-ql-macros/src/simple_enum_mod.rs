@@ -1,5 +1,3 @@
-use std::ops::Not;
-
 use convert_case::Casing;
 use proc_macro_error::abort;
 use proc_macro2::TokenStream;
@@ -19,6 +17,7 @@ pub fn main(input: TokenStream) -> TokenStream {
     #[derive(Default)]
     struct Variants {
         units: Vec<syn::Ident>,
+        units2: Vec<syn::Ident>,
         ones: Vec<(syn::Ident, syn::Type)>,
     }
 
@@ -47,7 +46,7 @@ pub fn main(input: TokenStream) -> TokenStream {
                 syn::Fields::Unnamed(fields_unnamed) => {
                     abort!(
                         fields_unnamed.span(),
-                        "unnamed fields has to to contain one field"
+                        "unnamed fields has to have one field"
                     );
                 }
             }
@@ -57,6 +56,7 @@ pub fn main(input: TokenStream) -> TokenStream {
     let mut v = Variants::default();
     v.visit_item_enum_mut(&mut input);
     let units = v.units;
+    let units2 = v.units2;
     let ones_ident = v
         .ones
         .iter()
@@ -87,6 +87,7 @@ pub fn main(input: TokenStream) -> TokenStream {
                         fn from(value: #this) -> Self {
                             match value {
                                 #(#this::#units(v) => Self::#units(v)),*
+                                #(#this::#units2() => Self::#units2()),*
                                 #(#this::#ones_ident(v) => Self::#ones_ident(v)),*
                             }
                         }

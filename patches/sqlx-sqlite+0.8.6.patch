@@ -1,0 +1,212 @@
+diff --git a/src/connection/handle.rs b/src/connection/handle.rs
+index 60fbe17..00dac29 100644
+--- a/src/connection/handle.rs
++++ b/src/connection/handle.rs
+@@ -13,7 +13,7 @@ use crate::{statement::unlock_notify, SqliteError};
+ /// Managed handle to the raw SQLite3 database handle.
+ /// The database handle will be closed when this is dropped and no `ConnectionHandleRef`s exist.
+ #[derive(Debug)]
+-pub(crate) struct ConnectionHandle(NonNull<sqlite3>);
++pub struct ConnectionHandle(NonNull<sqlite3>);
+ 
+ // A SQLite3 handle is safe to send between threads, provided not more than
+ // one is accessing it at the same time. This is upheld as long as [SQLITE_CONFIG_MULTITHREAD] is
+diff --git a/src/connection/mod.rs b/src/connection/mod.rs
+index b94ad91..5120fc5 100644
+--- a/src/connection/mod.rs
++++ b/src/connection/mod.rs
+@@ -43,7 +43,7 @@ pub(crate) mod intmap;
+ mod preupdate_hook;
+ pub(crate) mod serialize;
+ 
+-mod worker;
++pub(crate) mod worker;
+ 
+ /// A connection to an open [Sqlite] database.
+ ///
+@@ -57,7 +57,7 @@ mod worker;
+ /// or get an error otherwise.
+ pub struct SqliteConnection {
+     optimize_on_close: OptimizeOnClose,
+-    pub(crate) worker: ConnectionWorker,
++    pub worker: ConnectionWorker,
+     pub(crate) row_channel_size: usize,
+ }
+ 
+@@ -104,10 +104,10 @@ unsafe impl Send for CommitHookHandler {}
+ pub(crate) struct RollbackHookHandler(NonNull<dyn FnMut() + Send + 'static>);
+ unsafe impl Send for RollbackHookHandler {}
+ 
+-pub(crate) struct ConnectionState {
+-    pub(crate) handle: ConnectionHandle,
++pub struct ConnectionState {
++    pub handle: ConnectionHandle,
+ 
+-    pub(crate) statements: Statements,
++    pub statements: Statements,
+ 
+     log_settings: LogSettings,
+ 
+@@ -173,7 +173,7 @@ impl ConnectionState {
+     }
+ }
+ 
+-pub(crate) struct Statements {
++pub struct Statements {
+     // cache of semi-persistent statements
+     cached: StatementCache<VirtualStatement>,
+     // most recent non-persistent statement
+diff --git a/src/connection/worker.rs b/src/connection/worker.rs
+index 00a4c29..dcda6d5 100644
+--- a/src/connection/worker.rs
++++ b/src/connection/worker.rs
+@@ -29,16 +29,16 @@ use super::serialize::{deserialize, serialize, SchemaName, SqliteOwnedBuf};
+ //       OS resource usage. Low priority because a high concurrent load for SQLite3 is very
+ //       unlikely.
+ 
+-pub(crate) struct ConnectionWorker {
+-    command_tx: flume::Sender<(Command, tracing::Span)>,
++pub struct ConnectionWorker {
++    pub(crate) command_tx: flume::Sender<(Command, tracing::Span)>,
+     /// Mutex for locking access to the database.
+-    pub(crate) shared: Arc<WorkerSharedState>,
++    pub shared: Arc<WorkerSharedState>,
+ }
+ 
+-pub(crate) struct WorkerSharedState {
++pub struct WorkerSharedState {
+     transaction_depth: AtomicUsize,
+     cached_statements_size: AtomicUsize,
+-    pub(crate) conn: Mutex<ConnectionState>,
++    pub conn: Mutex<ConnectionState>,
+ }
+ 
+ impl WorkerSharedState {
+@@ -51,7 +51,7 @@ impl WorkerSharedState {
+     }
+ }
+ 
+-enum Command {
++pub(crate) enum Command {
+     Prepare {
+         query: Box<str>,
+         tx: oneshot::Sender<Result<SqliteStatement<'static>, Error>>,
+diff --git a/src/lib.rs b/src/lib.rs
+index adc049f..a8c4c7c 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -39,6 +39,114 @@
+ // invariants.
+ #![allow(unsafe_code)]
+ 
++mod impl_executor_2 {
++    use std::future::Future;
++    use std::pin::pin;
++
++    use crate::{Sqlite, SqliteArguments, SqliteConnection, SqliteQueryResult, SqliteRow};
++
++    use futures_util::{TryFutureExt, TryStreamExt};
++    use sqlx_core::database::Database;
++    use sqlx_core::executor::Execute;
++    use sqlx_core::executor_2::Executor2;
++    use sqlx_core::Either;
++
++    // for ref, include old trait
++    #[allow(unused)]
++    use sqlx_core::executor::Executor as ExecutorOld;
++
++    impl Executor2 for &'_ mut SqliteConnection {
++        type Database = Sqlite;
++
++        fn execute<'e, E: 'e + Execute<'e, Self::Database>>(
++            self,
++            _: E,
++        ) -> futures_core::future::BoxFuture<
++            'e,
++            Result<<Self::Database as Database>::QueryResult, sqlx_core::Error>,
++        > {
++            todo!()
++        }
++
++        fn fetch_all<'e, E: 'e + Execute<'e, Self::Database>>(
++            self,
++            _: E,
++        ) -> futures_core::future::BoxFuture<
++            'e,
++            Result<Vec<<Self::Database as Database>::Row>, sqlx_core::Error>,
++        > {
++            todo!()
++        }
++
++        fn fetch_optional<'e, E: 'e + Execute<'e, Self::Database>>(
++            self,
++            mut query: E,
++        ) -> futures_core::future::BoxFuture<
++            'e,
++            Result<Option<<Self::Database as Database>::Row>, sqlx_core::Error>,
++        > {
++            let sql = query.sql();
++            let arguments = match query.take_arguments() {
++                Ok(ok) => ok,
++                Err(_) => todo!(),
++            };
++            // prepare self
++            let self_execute =
++                self.worker
++                    .execute_fix(sql, arguments, self.row_channel_size, false, Some(1));
++            Box::pin(async move {
++                let mut stream = pin!(self_execute
++                    .map_ok(flume::Receiver::into_stream)
++                    .try_flatten_stream());
++
++                while let Some(res) = stream.try_next().await? {
++                    if let Either::Right(row) = res {
++                        return Ok(Some(row));
++                    }
++                }
++
++                Ok(None)
++            })
++        }
++    }
++
++    impl crate::connection::worker::ConnectionWorker {
++        pub(crate) fn execute_fix(
++            &mut self,
++            query: &str,
++            args: Option<SqliteArguments<'_>>,
++            chan_size: usize,
++            persistent: bool,
++            limit: Option<usize>,
++        ) -> impl Future<
++            Output = Result<
++                flume::Receiver<Result<Either<SqliteQueryResult, SqliteRow>, sqlx_core::Error>>,
++                sqlx_core::Error,
++            >,
++        >
++               + 'static
++               + use<'_> {
++            let (tx, rx) = flume::bounded(chan_size);
++            let before_move = self.command_tx.send_async((
++                Command::Execute {
++                    query: query.into(),
++                    arguments: args.map(SqliteArguments::into_static),
++                    persistent,
++                    tx,
++                    limit,
++                },
++                tracing::Span::current(),
++            ));
++            async move {
++                before_move
++                    .await
++                    .map_err(|_| sqlx_core::Error::WorkerCrashed)?;
++                Ok(rx)
++            }
++        }
++    }
++}
++
+ #[macro_use]
+ extern crate sqlx_core;
+ 

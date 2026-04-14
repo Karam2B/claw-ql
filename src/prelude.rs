@@ -1,5 +1,7 @@
 #![allow(unexpected_cfgs)]
 
+#[doc(hidden)]
+// used for claw_wl_macros to simplify macro code
 pub mod on_migrate_derive {
     pub use crate::{
         collections::Collection,
@@ -10,6 +12,8 @@ pub mod on_migrate_derive {
     };
 }
 
+#[doc(hidden)]
+// used for claw_wl_macros to simplify macro code
 pub mod from_row_alias {
     pub use crate::from_row::*;
     pub use sqlx::ColumnIndex;
@@ -18,42 +22,38 @@ pub mod from_row_alias {
     pub use sqlx::Row;
     pub use sqlx::Type;
 }
+
+#[doc(hidden)]
+// used for claw_wl_macros to simplify macro code
 pub mod sql {
     pub use crate::operations::Operation;
-    pub use crate::tuple;
-    pub use crate::valid_syntax::is_valid_syntax;
-    pub use crate::valid_syntax::temp::*;
+    pub use crate::query_builder::functional_expr::ManyPossible;
 
     // migrate
     pub use crate::on_migrate::OnMigrate;
-    pub use crate::operations::execute_expression::expression_to_operation;
-
-    // fetch one
-    pub use crate::operations::fetch_one::FetchOne;
-
-    pub use crate::operations::insert_one::InsertOne;
+    pub use crate::operations::execute_expression::ExpressionAsOperation;
 
     pub trait AliasAndExpr<A, E> {
         fn aliase_and_expr(alias: A, expr: E) -> Self;
     }
 }
 
+#[doc(hidden)]
+// used for claw_wl_macros to simplify macro code
 pub mod macro_derive_collection {
     pub use crate::collections::Collection;
     pub use crate::collections::CollectionBasic;
     pub use crate::collections::HasHandler;
-    pub use crate::collections::Id;
+    pub use crate::collections::CollectionId;
     pub use crate::collections::Member;
-    pub use crate::collections::MemberBasic;
     pub use crate::collections::SingleIncremintalInt;
     pub use crate::database_extention::DatabaseExt;
     pub use crate::expressions::member_as_expression;
     pub use crate::extentions::Members;
     pub use crate::query_builder::Expression;
-    pub use crate::query_builder::QueryBuilder;
-    pub use crate::query_builder::SqlSanitize;
+    pub use crate::query_builder::StatementBuilder;
     pub use crate::query_builder::functional_expr::BoxedExpression;
-    pub use crate::update_mod::update;
+    pub use crate::update_mod::Update;
     pub use core::future::Future;
     pub use core::marker::PhantomData;
     #[cfg(feature = "serde")]
@@ -68,6 +68,8 @@ pub mod macro_derive_collection {
 }
 
 #[cfg(feature = "inventory")]
+#[doc(hidden)]
+// used for claw_wl_macros to simplify macro code
 pub mod inventory {
     pub use crate::inventory::*;
     pub use crate::links::relation::Relation;

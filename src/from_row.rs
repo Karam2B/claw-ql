@@ -1,39 +1,214 @@
-use sqlx::Row;
+use sqlx::{ColumnIndex, Decode, Row, Type};
+
+pub mod swich_to_base_id {
+    use sqlx::Row;
+
+    use crate::from_row::{post_alias, pre_alias, two_alias};
+
+    pub fn pre_alias_to_base_id<'r, R: Row>(pre_alias: pre_alias<'r, R>) -> pre_alias<'r, R> {
+        pre_alias::new(pre_alias.row, "i")
+    }
+    pub fn two_alias_to_base_id<'r, R: Row>(two_alias: two_alias<'r, R>) -> two_alias<'r, R> {
+        two_alias::new(two_alias.row, "i")
+    }
+    pub fn post_alias_to_base_id<'r, R: Row>(post_alias: post_alias<'r, R>) -> post_alias<'r, R> {
+        post_alias::new(post_alias.row, "i")
+    }
+}
 
 #[allow(non_camel_case_types)]
-pub struct pre_alias<'r, R: Row>(pub &'r R, pub &'static str);
+pub struct pre_alias<'r, R: Row> {
+    pub(crate) row: &'r R,
+    pub(crate) alias: &'static str,
+}
+
+impl<'r, R: Row> Clone for pre_alias<'r, R> {
+    fn clone(&self) -> Self {
+        Self {
+            row: self.row,
+            alias: self.alias,
+        }
+    }
+}
+
+impl<'r, R: Row> pre_alias<'r, R> {
+    pub fn new(row: &'r R, alias: &'static str) -> Self {
+        Self { row, alias }
+    }
+    pub fn try_get<T>(&self, name: &str) -> Result<T, sqlx::Error>
+    where
+        T: Type<R::Database> + Decode<'r, R::Database>,
+        for<'q> &'q str: ColumnIndex<R>,
+    {
+        Row::try_get(self.row, format!("{}{}", self.alias, name).as_str())
+    }
+    #[track_caller]
+    pub fn get<T>(&self, name: &str) -> T
+    where
+        T: Type<R::Database> + Decode<'r, R::Database>,
+        for<'q> &'q str: ColumnIndex<R>,
+    {
+        self.try_get(name).unwrap()
+    }
+}
 
 #[allow(non_camel_case_types)]
-pub struct post_alias<'r, R: Row>(pub &'r R, pub &'static str);
+pub struct two_alias<'r, R: Row> {
+    pub(crate) row: &'r R,
+    pub(crate) str_alias: &'static str,
+    // only Vec<T> and tuples, can initiate this with Some(usize)
+    pub(crate) num_alias: Option<usize>,
+}
+
+impl<'r, R: Row> Clone for two_alias<'r, R> {
+    fn clone(&self) -> Self {
+        Self {
+            row: self.row,
+            str_alias: self.str_alias,
+            num_alias: self.num_alias,
+        }
+    }
+}
+
+impl<'r, R: Row> two_alias<'r, R> {
+    pub fn new(row: &'r R, name: &'static str) -> Self {
+        Self {
+            row,
+            str_alias: name,
+            num_alias: None,
+        }
+    }
+    pub fn try_get<T>(&self, name: &str) -> Result<T, sqlx::Error>
+    where
+        T: Type<R::Database> + Decode<'r, R::Database>,
+        for<'q> &'q str: ColumnIndex<R>,
+    {
+        Row::try_get(
+            self.row,
+            format!(
+                "{}{}{}",
+                self.str_alias,
+                self.num_alias.map(|e| e.to_string()).unwrap_or_default(),
+                name,
+            )
+            .as_str(),
+        )
+    }
+    #[track_caller]
+    pub fn get<T>(&self, name: &str) -> T
+    where
+        T: Type<R::Database> + Decode<'r, R::Database>,
+        for<'q> &'q str: ColumnIndex<R>,
+    {
+        self.try_get(name).unwrap()
+    }
+}
+
+#[allow(non_camel_case_types)]
+pub struct post_alias<'r, R: Row> {
+    pub(crate) row: &'r R,
+    pub(crate) alias: &'static str,
+}
+
+impl<'r, R: Row> Clone for post_alias<'r, R> {
+    fn clone(&self) -> Self {
+        Self {
+            row: self.row,
+            alias: self.alias,
+        }
+    }
+}
+
+impl<'r, R: Row> post_alias<'r, R> {
+    pub fn new(row: &'r R, alias: &'static str) -> Self {
+        Self { row, alias }
+    }
+    pub fn try_get<T>(&self, name: &str) -> Result<T, sqlx::Error>
+    where
+        T: Type<R::Database> + Decode<'r, R::Database>,
+        for<'q> &'q str: ColumnIndex<R>,
+    {
+        Row::try_get(self.row, format!("{}{}", name, self.alias).as_str())
+    }
+    #[track_caller]
+    pub fn get<T>(&self, name: &str) -> T
+    where
+        T: Type<R::Database> + Decode<'r, R::Database>,
+        for<'q> &'q str: ColumnIndex<R>,
+    {
+        self.try_get(name).unwrap()
+    }
+}
 
 #[derive(Debug)]
 pub enum FromRowError {
     MismatchType,
-    NotFoundName(String),
+    ColumnNotFound(String),
 }
 
 impl From<sqlx::Error> for FromRowError {
     fn from(value: sqlx::Error) -> Self {
         match value {
-            sqlx::Error::ColumnNotFound(name) => FromRowError::NotFoundName(name),
+            sqlx::Error::ColumnNotFound(name) => FromRowError::ColumnNotFound(name),
             _ => panic!(
-                "either: 1. incorrect impl of FromRowAlias, 2. uncatchable error like database disconnection"
+                "{value:?}, either: 1. incorrect impl of FromRowAlias, 2. uncatchable error like database disconnection"
             ),
         }
     }
 }
 
-pub trait FromRowAlias<'r, R> {
-    type FromRowData;
-    fn no_alias(&self, row: &'r R) -> Result<Self::FromRowData, FromRowError>;
-    fn pre_alias(&self, row: pre_alias<'r, R>) -> Result<Self::FromRowData, FromRowError>
+pub trait FromRowData {
+    type RData;
+}
+pub trait FromRowAlias<'r, R>: FromRowData {
+    // used in operation with a returning clause
+    fn no_alias(&self, row: &'r R) -> Result<Self::RData, FromRowError>;
+    // used in operation that have local field belong to different links and collections
+    fn pre_alias(&self, row: pre_alias<'r, R>) -> Result<Self::RData, FromRowError>
     where
         R: Row;
-    fn post_alias(&self, row: post_alias<'r, R>) -> Result<Self::FromRowData, FromRowError>
+    // Not used anywhere in my code, I think of deleting this function
+    fn post_alias(&self, row: post_alias<'r, R>) -> Result<Self::RData, FromRowError>
     where
         R: Row;
-    fn row_no_alias(row: &'r R, this: &Self) -> Result<Self::FromRowData, FromRowError> {
-        this.no_alias(row)
+    // used in links, where `Vec<T>` and tuples use an Option<usize>
+    fn two_alias(&self, row: two_alias<'r, R>) -> Result<Self::RData, FromRowError>
+    where
+        R: Row;
+}
+
+pub trait TryFromRowAlias<'r, R>: FromRowData {
+    fn try_no_alias(&self, row: &'r R) -> Result<Option<Self::RData>, FromRowError>;
+    fn try_pre_alias(&self, row: pre_alias<'r, R>) -> Result<Option<Self::RData>, FromRowError>
+    where
+        R: Row;
+    fn try_two_alias(&self, row: two_alias<'r, R>) -> Result<Option<Self::RData>, FromRowError>
+    where
+        R: Row;
+    fn try_post_alias(&self, row: post_alias<'r, R>) -> Result<Option<Self::RData>, FromRowError>
+    where
+        R: Row;
+}
+
+impl FromRowData for () {
+    type RData = ();
+}
+
+impl<'r, R> FromRowAlias<'r, R> for ()
+where
+    R: Row,
+{
+    fn no_alias(&self, _: &'r R) -> Result<Self::RData, FromRowError> {
+        Ok(())
+    }
+    fn pre_alias(&self, _: pre_alias<'r, R>) -> Result<Self::RData, FromRowError> {
+        Ok(())
+    }
+    fn post_alias(&self, _: post_alias<'r, R>) -> Result<Self::RData, FromRowError> {
+        Ok(())
+    }
+    fn two_alias(&self, _: two_alias<'r, R>) -> Result<Self::RData, FromRowError> {
+        Ok(())
     }
 }
 
@@ -52,6 +227,12 @@ pub mod row_helpers {
             handler: &Handler,
             pre_alias_str: &'static str,
         ) -> Result<Self::Output, FromRowError>;
+        fn row_two_alias(
+            &'r self,
+            handler: &Handler,
+            pre_alias_str: &'static str,
+            pre_alias_num: Option<usize>,
+        ) -> Result<Self::Output, FromRowError>;
         fn row_post_alias(
             &'r self,
             handler: &Handler,
@@ -64,23 +245,35 @@ pub mod row_helpers {
         Handler: FromRowAlias<'r, Row_>,
         Row_: Row + Sized + 'r,
     {
-        type Output = Handler::FromRowData;
-        fn row_no_alias(&'r self, handler: &Handler) -> Result<Handler::FromRowData, FromRowError> {
+        type Output = Handler::RData;
+        fn row_no_alias(&'r self, handler: &Handler) -> Result<Handler::RData, FromRowError> {
             handler.no_alias(self)
+        }
+        fn row_two_alias(
+            &'r self,
+            handler: &Handler,
+            pre_alias_str: &'static str,
+            pre_alias_num: Option<usize>,
+        ) -> Result<Self::Output, FromRowError> {
+            handler.two_alias(super::two_alias {
+                row: self,
+                str_alias: pre_alias_str,
+                num_alias: pre_alias_num,
+            })
         }
         fn row_pre_alias(
             &'r self,
             handler: &Handler,
             pre_alias_str: &'static str,
-        ) -> Result<Handler::FromRowData, FromRowError> {
-            handler.pre_alias(pre_alias(self, pre_alias_str))
+        ) -> Result<Handler::RData, FromRowError> {
+            handler.pre_alias(pre_alias::new(self, pre_alias_str))
         }
         fn row_post_alias(
             &'r self,
             handler: &Handler,
             post_alias_str: &'static str,
-        ) -> Result<Handler::FromRowData, FromRowError> {
-            handler.post_alias(post_alias(self, post_alias_str))
+        ) -> Result<Handler::RData, FromRowError> {
+            handler.post_alias(post_alias::new(self, post_alias_str))
         }
     }
 
@@ -127,7 +320,7 @@ pub mod collection_to_impl_from_row {
     use crate::{
         collections::Collection,
         from_row::{FromRowAlias, FromRowError},
-        singlton_default::SingltonDefault,
+        singleton::Singleton,
     };
 
     pub struct CollectionToImplFromRow<Handler: Collection>(pub Handler::Data);
@@ -136,12 +329,12 @@ pub mod collection_to_impl_from_row {
     where
         Handler: Collection,
         R: Row,
-        Handler: SingltonDefault + FromRowAlias<'r, R, FromRowData = <Handler as Collection>::Data>,
+        Handler: Singleton + FromRowAlias<'r, R, RData = <Handler as Collection>::Data>,
     {
         fn from_row(row: &'r R) -> Result<Self, sqlx::Error> {
-            match Handler::singlton_default().no_alias(row) {
+            match Handler::singleton().no_alias(row) {
                 Ok(s) => Ok(CollectionToImplFromRow(s)),
-                Err(FromRowError::NotFoundName(name)) => {
+                Err(FromRowError::ColumnNotFound(name)) => {
                     return Err(sqlx::Error::ColumnNotFound(name));
                 }
                 Err(_) => panic!("unmatched error"),
@@ -175,7 +368,7 @@ mod test {
         .await
         .unwrap();
 
-        let s = category.pre_alias(pre_alias(&row, "cat_")).unwrap();
+        let s = category.pre_alias(pre_alias::new(&row, "cat_")).unwrap();
 
         assert_eq!(
             s,
@@ -184,7 +377,7 @@ mod test {
             },
         );
 
-        let s = category.post_alias(post_alias(&row, "_")).unwrap();
+        let s = category.post_alias(post_alias::new(&row, "_")).unwrap();
 
         assert_eq!(
             s,

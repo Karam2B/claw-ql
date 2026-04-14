@@ -1,4 +1,3 @@
-#![cfg(feature = "skip_without_comment")]
 pub struct IVec<T: ?Sized> {
     pub inner: Vec<Box<T>>,
 }
@@ -77,6 +76,7 @@ fn main() {
     // sulotion
     // const if true { ivec.push(a) }
     // but how to mark push method to be callable in const-if's
+    // this is unsupported by the rust's syntax
 
     let tvec = ivec.finish();
 

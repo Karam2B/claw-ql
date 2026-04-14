@@ -1,5 +1,7 @@
 #![warn(unused_must_use)]
 
+use std::collections::HashMap;
+
 // pub mod date_mod;
 // pub mod group_by;
 // pub mod relation_many_to_many;
@@ -12,7 +14,16 @@ pub mod set_new_mod;
 
 pub trait Link<Base> {
     type Spec;
-    fn spec(self, base: &Base) -> Self::Spec;
+    fn spec(self) -> Self::Spec;
+}
+
+#[derive(Clone)]
+pub struct DefaultRelationKey;
+
+impl AsRef<str> for DefaultRelationKey {
+    fn as_ref(&self) -> &str {
+        "_def"
+    }
 }
 
 /// link back Link::Spec to Base
@@ -27,14 +38,26 @@ pub trait CollectionsStore {
     type Store;
 }
 
-pub trait DynamicLink<DynamicBase: CollectionsStore, S> {
+pub struct Issue {
+    pub desc: String,
+}
+
+#[cfg(feature = "inventory")]
+const _: () = {
+    // DynamicLink should be depricated because I'm not interested in creating DynamicJsonClient for not
+    // but I will keep it for potention DynamicJsonClient
+    use crate::inventory::*;
+    todo!()
+};
+
+pub trait DynamicLink<DynamicBase> {
     type OnRequest;
     type OnRequestInput;
     type OnRequestError;
 
     fn on_request(
         &self,
-        base: DynamicBase,
+        base: &DynamicBase,
         input: Self::OnRequestInput,
     ) -> Result<Self::OnRequest, Self::OnRequestError>;
 
@@ -43,8 +66,8 @@ pub trait DynamicLink<DynamicBase: CollectionsStore, S> {
     type CreateLinkError;
 
     fn create_link(
-        &self,
-        store: &DynamicBase::Store,
+        &mut self,
+        store: &HashMap<String, DynamicBase>,
         input: Self::CreateLinkInput,
     ) -> Result<Self::CreateLinkOk, Self::CreateLinkError>;
 
@@ -53,45 +76,8 @@ pub trait DynamicLink<DynamicBase: CollectionsStore, S> {
     type ModifyLinkError;
 
     fn modify_link(
-        &self,
-        store: &DynamicBase::Store,
+        &mut self,
+        store: &HashMap<String, DynamicBase>,
         input: Self::ModifyLinkInput,
     ) -> Result<Self::ModifyLinkOk, Self::ModifyLinkError>;
-}
-
-mod functional_impls {
-    use crate::links::Link;
-    use paste::paste;
-
-    macro_rules! implt {
-    ( $([$t:ident, $part:literal])*) => {
-        #[allow(unused)]
-        impl<$($t,)* Base> Link<Base> for ($($t,)*)
-        where
-            $($t: Link<Base>,)*
-        {
-            type Spec = ( $($t::Spec,)* );
-            fn spec(self, base: &Base) -> Self::Spec {
-                ( $(paste!(self.$part).spec(base),)* )
-            }
-        }
-    };
-}
-
-    implt!();
-    implt!([T0, 0]);
-    implt!([T0, 0] [T1, 1]);
-    implt!([T0, 0] [T1, 1] [T2, 2]);
-    implt!([T0, 0] [T1, 1] [T2, 2] [T3, 3]);
-
-    impl<Base, T> Link<Base> for Vec<T>
-    where
-        T: Link<Base>,
-    {
-        type Spec = Vec<T::Spec>;
-
-        fn spec(self, base: &Base) -> Self::Spec {
-            self.into_iter().map(|e| e.spec(base)).collect()
-        }
-    }
 }

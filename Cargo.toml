@@ -34,18 +34,23 @@ tower = { version = "0.5.2" }
 hyper = { version = "1.6.0" }
 inventory = { version = "0.3.20" }
 
+[package.metadata.patch]
+crates = ["sqlx", "sqlx-core", "sqlx-sqlite"]
+
+[patch.crates-io]
+sqlx = {path = './target/patch/sqlx-0.8.6'}
+sqlx-core = {path = './target/patch/sqlx-core-0.8.6'}
+sqlx-sqlite = {path = './target/patch/sqlx-sqlite-0.8.6'}
+
 [features]
-default = ["sqlite", "trace", "http"]
-nightly_rust = []
+default = ["fix_executor", "sqlite", "trace", "http"]
+# need to apply patches or for sqlx to change add/fix Executor trait
+fix_executor = []
+nightly_rust_specialization = []
+nightly_rust_const_impl = []
 inventory = ["dep:inventory", "claw-ql-macros/inventory"]
-unstable_id_trait = ["claw-ql-macros/experimental_id_trait"]
 http = ["serde", "dep:tower-service", "dep:hyper", "dep:axum", "tokio/full"]
 serde = ["dep:serde_json", "dep:serde", "claw-ql-macros/serde"]
 trace = ["dep:tracing"]
 sqlite = ["sqlx/sqlite"]
 skip_without_comments = []
-unstable = []
-
-[[example]]
-name= "id_concept"
-required-features = ["unstable_id_trait"]

@@ -1,19 +1,78 @@
 use serde::Serialize;
-use sqlx::{Database, Pool};
+use sqlx::Database;
 
-pub mod fetch_one;
+// pub mod delete_by_id;
 // pub mod delete_one;
-pub mod insert_one;
-pub mod update_one;
-// pub mod fetch_many;
+pub mod fetch_many;
+// pub mod fetch_one;
+// pub mod insert_one;
 // pub mod update_one;
 
-pub trait Operation<S>: Send {
-    type Output: Send;
-    fn exec_operation(self, pool: Pool<S>) -> impl Future<Output = Self::Output> + Send
+pub trait OperationOutput {
+    type Output;
+}
+pub trait Operation<S>: OperationOutput<Output: Send> + Send {
+    fn exec_operation(self, pool: &mut S::Connection) -> impl Future<Output = Self::Output> + Send
     where
         S: Database,
         Self: Sized;
+}
+
+/// to be removed in favor of macros
+///
+/// User-facing check, validation, and transormation.
+/// Needed to execute Operation without bugs.
+///
+/// panics or compile error for `Operation` trait is considered a bug.
+/// you might forgot to call `safety_check` before calling `exec_operation` or
+/// there is a bug in this crate's code
+///
+/// most of the time these checks can be known inside const context,
+/// since `const_trait_impl` is not stable yet, you have to run these at runtime.
+/// for now you can use the macro `sql` which mimics this trait using const_blocks.
+///
+/// example of that is when you try to  check wither a 'where clause'
+/// specifies any unique filters, if you have tuple of (T0,T1), there is no
+/// way to check if EITHER T0 or T1 is a unique filter, that would be
+/// equivalent of this hypothetical rust
+///
+/// code:
+/// ```no_run
+///     impl<T0,T1> SafeOperation
+///     for SelectOneAndOnlyOne<Wheres = (T0,T1)>
+///     where   
+///         (T0: AssertUniqueFilter) or (T1: AssertUniqueFilter),
+///     {}
+/// ```
+///
+/// or just simply using `const_trait_impl`
+///
+/// ```no_run
+///     impl<T0, T1> const SafeOperation for SelectOneAndOnlyOne<Wheres = (T0,T1)>
+///     where
+///         T0: [const] UniqueFilter + [const] Destruct,
+///         T1: [const] UniqueFilter + [const] Destruct,
+///     {
+///         fn safety_check(self) -> Result<Self::Ok, Self::Error> {
+///             if self.wheres.0.is_unique() || self.wheres.1.is_unique() {
+///                 return Ok(self.0);
+///             }
+///             Err(Self::Error::NonUniqueOperation)
+///         }
+///     }
+/// ```
+///
+/// if the the checks are "inevitably non-const", consider if the implementation of `Operation`
+/// can have an output of `Option<T>` or `Result<T, _>`, if so, no need to
+/// implement `SafeOperation`
+///
+/// in this crate `NeedCheck` is used to force you to use `SafeOperation`
+/// before using `Operation` impls by making `Ok = NeedCheck<T>`, and
+/// implementing Operation for `NeedCheck<T>`
+pub trait SafeOperation {
+    type Error;
+    type Ok;
+    fn safety_check(self) -> Result<Self::Ok, Self::Error>;
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -55,327 +114,132 @@ impl<I, C> From<CollectionOutput<I, C>> for IdOutput<I> {
     }
 }
 
-pub use functional_impls::BoxedOperation;
-
 mod functional_impls {
-    #![allow(unused)]
-    #![deny(unused_must_use)]
-    use crate::operations::insert_one::LinkInsertOne;
-    use futures::FutureExt;
-    use std::{any::Any, pin::Pin};
+    use crate::operations::{Operation, OperationOutput};
+    use sqlx::Database;
 
-    use crate::expressions::scoped_column;
-    use crate::from_row::pre_alias;
-    use crate::operations::{Operation, fetch_one::LinkFetchOne};
-    use crate::query_builder::functional_expr::ManyImplPossible;
-    use paste::paste;
-    use sqlx::{Database, Executor, Pool};
-
-    pub trait BoxedOperation<S: Database>: Send {
-        fn exec_p(
-            self: Box<Self>,
-            pool: Pool<S>,
-        ) -> Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>
-        where
-            Self: 'static;
-    }
-
-    impl<T, S> BoxedOperation<S> for T
+    impl<T> OperationOutput for Vec<T>
     where
-        T: Send + Operation<S, Output: Send> + 'static,
-        S: Database,
+        T: OperationOutput,
     {
-        fn exec_p(
-            self: Box<Self>,
-            pool: Pool<S>,
-        ) -> Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>> {
-            let p = pool.clone();
-            Box::pin(async move {
-                Operation::exec_operation(*self, p)
-                    .map(|f| Box::new(f) as Box<dyn Any + Send>)
-                    .await
-            })
-        }
-    }
-
-    impl<S> Operation<S> for Box<dyn BoxedOperation<S> + Send> {
-        type Output = Box<dyn Any + Send>;
-        fn exec_operation(self, pool: Pool<S>) -> impl Future<Output = Self::Output> + Send
-        where
-            S: Database,
-        {
-            BoxedOperation::exec_p(self, pool)
-        }
+        type Output = Vec<T::Output>;
     }
 
     impl<S, T> Operation<S> for Vec<T>
     where
         T: Operation<S, Output: Send> + Send,
     {
-        type Output = Vec<T::Output>;
-
-        async fn exec_operation(self, pool: sqlx::Pool<S>) -> Self::Output
+        async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output
         where
             S: sqlx::Database,
         {
             let mut v = vec![];
             for each in self {
-                v.push(each.exec_operation(pool.clone()).await);
+                v.push(each.exec_operation(pool).await);
             }
             v
         }
     }
 
-    impl<T, S> LinkFetchOne<S> for Vec<T>
+    impl OperationOutput for () {
+        type Output = ();
+    }
+
+    impl<S: Database> Operation<S> for () {
+        async fn exec_operation(self, _: &mut S::Connection) -> Self::Output {
+            ()
+        }
+    }
+}
+
+pub mod boxed_operation {
+    use crate::operations::{Operation, OperationOutput};
+    use futures::{Future, FutureExt};
+    use sqlx::Database;
+    use std::{any::Any, pin::Pin};
+
+    pub trait BoxedOperation<S: Database>: Send {
+        fn exec_boxed<'c>(
+            self: Box<Self>,
+            pool: &'c mut S::Connection,
+        ) -> Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send + 'c>>;
+    }
+
+    impl<T, S> BoxedOperation<S> for T
     where
-        T: LinkFetchOne<S>,
-        T::Joins: IntoIterator,
-        T::Wheres: IntoIterator,
+        T: Send + Operation<S> + 'static,
+        S: Database,
     {
-        type Joins = Vec<<T::Joins as IntoIterator>::Item>;
-
-        type Wheres = Vec<<T::Wheres as IntoIterator>::Item>;
-
-        fn non_aggregating_select_items(&self) -> Vec<scoped_column<String, String>> {
-            let mut items = vec![];
-            for each in self {
-                items.extend(each.non_aggregating_select_items());
-            }
-            items
+        fn exec_boxed<'c>(
+            self: Box<Self>,
+            pool: &'c mut S::Connection,
+        ) -> Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send + 'c>> {
+            Box::pin(async {
+                Operation::exec_operation(*self, pool)
+                    .map(|f| Box::new(f) as Box<dyn Any + Send>)
+                    .await
+            })
         }
+    }
 
-        fn non_duplicating_joins(&self) -> Self::Joins {
-            let mut joins = vec![];
-            for each in self {
-                joins.extend(each.non_duplicating_joins());
-            }
-            joins
-        }
+    impl<S> OperationOutput for Box<dyn BoxedOperation<S> + Send> {
+        type Output = Box<dyn Any + Send>;
+    }
 
-        fn wheres(&self) -> Self::Wheres {
-            let mut wheres = vec![];
-            for each in self {
-                wheres.extend(each.wheres());
-            }
-            wheres
-        }
-
-        type Inner = Vec<T::Inner>;
-
-        type SubOp = Vec<T::SubOp>;
-
-        fn sub_op(
-            &self,
-            row: crate::from_row::pre_alias<'_, <S as sqlx::Database>::Row>,
-        ) -> (Self::SubOp, Self::Inner)
-        where
-            S: sqlx::Database,
-        {
-            let mut sup_op = vec![];
-            let mut inner = vec![];
-
-            for each in self {
-                let each = each.sub_op(pre_alias(row.0, row.1));
-                sup_op.push(each.0);
-                inner.push(each.1);
-            }
-            (sup_op, inner)
-        }
-
-        type Output = Vec<T::Output>;
-
-        fn take(
+    impl<S> Operation<S> for Box<dyn BoxedOperation<S> + Send> {
+        fn exec_operation(
             self,
-            extend: <Self::SubOp as crate::operations::Operation<S>>::Output,
-            inner: Self::Inner,
-        ) -> Self::Output {
-            let mut this = self.into_iter();
-            let mut extend = extend.into_iter();
-            let mut inner = inner.into_iter();
-
-            let mut out = vec![];
-
-            loop {
-                match (this.next(), extend.next(), inner.next()) {
-                    (Some(this), Some(extend), Some(inner)) => {
-                        out.push(this.take(extend, inner));
-                    }
-                    (None, None, None) => break,
-                    _ => {
-                        panic!("bug: unmatched lenght ")
-                    }
-                }
-            }
-
-            out
+            pool: &mut S::Connection,
+        ) -> impl Future<Output = Self::Output> + Send
+        where
+            S: Database,
+        {
+            BoxedOperation::exec_boxed(self, pool)
         }
     }
-
-    macro_rules! implt {
-    ( $([$t:ident, $part:literal])*) => {
-
-
-
-impl<S, $($t,)* > Operation<S> for ($($t,)*)
-where
-    $($t: Operation<S>,)*
-{
-    type Output = (
-        $($t::Output,)*
-    );
-
-    async fn exec_operation(self, pool: sqlx::Pool<S>) -> Self::Output
-    where
-        S: sqlx::Database,
-    {
-        ($(
-            paste!(self.$part).exec_operation(pool.clone()).await,
-        )*)
-    }
-}
-
-impl <$($t,)* S> LinkFetchOne<S> for ($($t,)*)
-where
-    $($t: LinkFetchOne<S, SubOp: Operation<S>>,)*
-{
-    type Joins = (
-        $(ManyImplPossible<$t::Joins>,)*
-    );
-
-    type Wheres = (
-        $(ManyImplPossible<$t::Wheres>,)*
-    );
-
-    fn non_aggregating_select_items(&self) -> Vec<scoped_column<String, String>> {
-        let mut items = vec![];
-        $(
-            items.extend(paste!(self.$part.non_aggregating_select_items()));
-        )*
-        items
-    }
-
-    fn non_duplicating_joins(&self) -> Self::Joins {
-        ($(ManyImplPossible {
-            start: "",
-            join: ", ",
-            expressions: paste!(self.$part.non_duplicating_joins()),
-        },)*)
-    }
-
-    fn wheres(&self) -> Self::Wheres {
-        ($(ManyImplPossible {
-            start: "",
-            join: ", ",
-            expressions: paste!(self.$part.wheres()),
-        },)*)
-    }
-
-    type Inner = (
-        $($t::Inner,)*
-    );
-
-    type SubOp = (
-        $($t::SubOp,)*
-    );
-
-    fn sub_op(
-        &self,
-        row: pre_alias<'_, <S as sqlx::Database>::Row>,
-    ) -> (Self::SubOp, Self::Inner)
-    where
-        S: sqlx::Database,
-    {
-        $(paste!{
-            let [<each_ $part>] = self.$part.sub_op(pre_alias(row.0, row.1));
-        })*
-
-        (
-            ($(paste!{[<each_ $part>]}.0,)*),
-            ($(paste!{[<each_ $part>]}.1,)*)
-        )
-    }
-
-    type Output = (
-        $($t::Output,)*
-    );
-
-    fn take(
-        self,
-        extend: <Self::SubOp as crate::operations::Operation<S>>::Output,
-        inner: Self::Inner,
-    ) -> Self::Output {
-        (
-            $(
-                paste!(self.$part.take(extend.$part, inner.$part)),
-            )*
-        )
-    }
-}
-// impl <$($t,)*> LinkInsertOne for ($($t,)*)
-// where
-//     $($t: LinkInsertOne,)*
-// {
-//     fn current_table_cols(&self) -> Vec<String> {
-//         todo!()
-//     }
-//     type FromRow = ();
-//     type SubOp = ();
-//     fn from_row<S>(&self, _row: &S::Row) -> (Self::FromRow, Self::SubOp)
-//     where
-//         S: Database,
-//     {
-//         todo!()
-//     }
-//     type Output = ();
-//     fn take<S>(
-//         self,
-//         _from_row: Self::FromRow,
-//         _sub_op: <Self::SubOp as Operation<S>>::Output,
-//     ) -> Self::Output
-//     where
-//         Self::SubOp: Operation<S>,
-//         S: Database,
-//     {
-//         todo!()
-//     }
-// }
-    };
-}
-
-    implt!();
-    implt!([T0, 0]);
-    implt!([T0, 0] [T1, 1]);
-    implt!([T0, 0] [T1, 1] [T2, 2]);
-    implt!([T0, 0] [T1, 1] [T2, 2] [T3, 3]);
 }
 
 pub mod execute_expression {
     use crate::database_extention::DatabaseExt;
-    use crate::use_executor;
+    use crate::execute::Executable;
+    use crate::fix_executor::ExecutorTrait;
+    use crate::operations::OperationOutput;
     use crate::{
         operations::Operation,
-        query_builder::{Expression, QueryBuilder},
+        query_builder::{Expression, StatementBuilder},
     };
-    use sqlx::{Database, Executor, Pool};
+    use sqlx::Database;
 
-    #[allow(non_camel_case_types)]
-    pub struct expression_to_operation<E>(pub E);
+    pub struct ExpressionAsOperation<E>(pub E);
 
-    impl<S, E> Operation<S> for expression_to_operation<E>
+    impl<E: Send> OperationOutput for ExpressionAsOperation<E> {
+        type Output = ();
+    }
+
+    impl<S, E> Operation<S> for ExpressionAsOperation<E>
     where
         E: for<'q> Expression<'q, S>,
         E: Send,
         S: DatabaseExt,
-        for<'c> &'c mut <S as sqlx::Database>::Connection: Executor<'c, Database = S>,
+        S: ExecutorTrait,
     {
-        type Output = ();
-        async fn exec_operation(self, pool: Pool<S>) -> Self::Output
+        async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output
         where
             S: Database,
         {
-            let mut qb = QueryBuilder::default();
+            let mut qb = StatementBuilder::default();
             self.0.expression(&mut qb);
-            use_executor!(execute(&pool, qb)).unwrap();
+
+            let (stmt, arg) = qb.unwrap();
+            S::execute(
+                pool,
+                Executable {
+                    string: stmt.as_str(),
+                    arguments: arg,
+                },
+            )
+            .await
+            .unwrap();
         }
     }
 }

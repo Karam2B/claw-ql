@@ -1,13 +1,10 @@
 use crate::query_builder::OpExpression;
 
-// waiting for second rewrite !!
 pub mod create_table_statement;
-// pub mod delete_st;
-// pub mod insert_one_st;
-pub mod insert_one_statement;
+pub mod delete_statement;
+pub mod insert_statement;
 pub mod select_statement;
 pub mod update_statement;
-// pub mod update_st;
 
 pub trait Inverse {
     type InverseStatement;
@@ -47,29 +44,25 @@ impl<Table, ColDef> OpExpression for AddColumn<Table, ColDef> {}
 mod impl_for_sqlx_fo {
     use crate::{
         database_extention::DatabaseExt,
-        query_builder::{Expression, QueryBuilder, syntax::end_of_statement},
-        sql_syntax,
+        query_builder::{Expression, StatementBuilder},
         statements::AddColumn,
     };
     use sqlx::Sqlite;
-
-    sql_syntax!(alter_table = "ALTER TABLE ");
-    sql_syntax!(add_column = " ADD COLUMN ");
 
     impl<'q, Table, ColDef> Expression<'q, Sqlite> for AddColumn<Table, ColDef>
     where
         Table: Expression<'q, Sqlite> + 'q,
         ColDef: Expression<'q, Sqlite> + 'q,
     {
-        fn expression(self, ctx: &mut QueryBuilder<'q, Sqlite>)
+        fn expression(self, ctx: &mut StatementBuilder<'q, Sqlite>)
         where
             Sqlite: DatabaseExt,
         {
-            ctx.syntax(&alter_table);
+            ctx.syntax("ALTER TABLE ");
             self.table.expression(ctx);
-            ctx.syntax(&add_column);
+            ctx.syntax("ADD COLUMN ");
             self.col_def.expression(ctx);
-            ctx.syntax(&end_of_statement);
+            ctx.syntax(";");
         }
     }
 }

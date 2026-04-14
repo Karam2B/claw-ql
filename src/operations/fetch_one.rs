@@ -1,38 +1,61 @@
-#![allow(unused)]
 use crate::collections::{Collection, Id, SingleIncremintalInt};
 use crate::database_extention::DatabaseExt;
-use crate::execute::Executable;
-use crate::expressions::{col, scoped_column, table};
+use crate::expressions::ColAs;
 use crate::extentions::Members;
-use crate::from_row::{FromRowAlias, pre_alias};
-use crate::links::{self, Link};
+use crate::from_row::{FromRowAlias, pre_alias, two_alias};
+use crate::links::Link;
+use crate::operations::fetch_one::base_member_mod::BaseMember;
 use crate::operations::{LinkedOutput, Operation};
-use crate::query_builder::functional_expr::{ManyFlat, ManyImplPossible};
-use crate::query_builder::{Expression, ManyExpressions, QueryBuilder};
+use crate::query_builder::functional_expr::ManyFlat;
+use crate::query_builder::{ManyExpressions, StatementBuilder};
 use crate::statements::select_statement::SelectStatement;
 use crate::use_executor;
-use axum::serve::Listener;
-use sqlx::{ColumnIndex, Database, Decode, Pool, Type};
+use sqlx::{ColumnIndex, Database, Decode, Type};
 use sqlx::{Executor, Row};
 
 pub struct FetchOne<From, Links, Wheres> {
     pub base: From,
-    // extendable
     pub wheres: Wheres,
-    // extendable and generate data
     pub links: Links,
+}
+
+mod base_member_mod {
+    use crate::database_extention::DatabaseExt;
+    use crate::query_builder::Expression;
+    use crate::query_builder::OpExpression;
+    use crate::query_builder::StatementBuilder;
+
+    pub struct BaseMember<T, C> {
+        pub table: T,
+        pub column: C,
+    }
+    impl<T, C> OpExpression for BaseMember<T, C> {}
+    impl<'q, S, T, C> Expression<'q, S> for BaseMember<T, C>
+    where
+        S: DatabaseExt,
+        T: AsRef<str> + 'q,
+        C: AsRef<str> + 'q,
+    {
+        fn expression(self, arg: &mut StatementBuilder<'q, S>) {
+            arg.sanitize(self.table.as_ref());
+            arg.syntax(&".");
+            arg.sanitize(self.column.as_ref());
+            arg.syntax(&" AS ");
+            let as_ = format!("b{}", self.column.as_ref());
+            arg.sanitize(as_.as_str());
+        }
+    }
 }
 
 impl<S: Database, Base, Links, Wheres> Operation<S> for FetchOne<Base, Links, Wheres>
 where
     S: DatabaseExt,
+    for<'q> &'q str: ColumnIndex<S::Row>,
     Base: Collection<Data: Send, Id = SingleIncremintalInt> + 'static,
     <Base::Id as Id>::Data: for<'q> Decode<'q, S> + Type<S>,
-    for<'q> &'q str: ColumnIndex<S::Row>,
-    Base: Members<S>,
+    Base: Members,
     Wheres: ManyExpressions<'static, S>,
     Base: for<'r> FromRowAlias<'r, S::Row, FromRowData = Base::Data>,
-    // fetch_optional
     for<'c> &'c mut <S as sqlx::Database>::Connection: Executor<'c, Database = S>,
     Links: Link<Base>,
     Links::Spec: Send
@@ -55,87 +78,47 @@ where
         >,
     >;
 
-    async fn exec_operation(self, pool: Pool<S>) -> Self::Output
+    async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output
     where
         S: Database,
     {
-        // let mut query_builder = QueryBuilder::<'_, S>::default();
-
         let link_spec = self.links.spec(&self.base);
         let link_extend_stmt = link_spec.non_aggregating_select_items();
         let link_extend_joins = link_spec.non_duplicating_joins();
         let link_extend_wheres = link_spec.wheres();
 
-        let query_builder = QueryBuilder::<'_, S>::new(SelectStatement {
+        let query_builder = StatementBuilder::<'_, S>::new(SelectStatement {
             select_items: ManyFlat((
-                table(self.base.table_name().to_string())
-                    .col("id")
-                    .pre_alias("local_"),
+                ColAs {
+                    table: self.base.table_name().to_string(),
+                    column: "id",
+                    _as: "local_id",
+                },
                 self.base
                     .members_names()
                     .into_iter()
-                    .map(|e| {
-                        table(self.base.table_name().to_string())
-                            .col(e)
-                            .pre_alias("base_")
+                    .map(|e| BaseMember {
+                        table: self.base.table_name().to_string(),
+                        column: e,
                     })
                     .collect::<Vec<_>>(),
-                link_extend_stmt
-                    .into_iter()
-                    .map(|e| e.pre_alias("link_"))
-                    .collect::<Vec<_>>(),
+                link_extend_stmt,
             )),
             from: self.base.table_name().to_string(),
             joins: link_extend_joins,
-            wheres: ManyFlat((link_extend_wheres, self.wheres)),
+            wheres: ManyFlat((
+                //
+                link_extend_wheres,
+                self.wheres,
+            )),
+            group_by: (),
             order: (),
             limit: (),
         });
-        /*
 
-        let main_statement = SelectStatement {
-            select_items: ManyFlat::<((), ())>(
-                (table(self.base.table_name().to_string())
-                    .col("id")
-                    .pre_alias("local_"),
-            ),
-            /*
+        let stmt = query_builder.stmt().to_string();
 
-            ,
-            ManyImplPossible {
-                expressions: self
-                    .base
-                    .members_names()
-                    .into_iter()
-                    .map(|e| {
-                        table(self.base.table_name().to_string())
-                            .col(e)
-                            .pre_alias("base_")
-                    })
-                    .collect::<Vec<_>>(),
-                start: "",
-                join: ", ",
-            },
-            ManyImplPossible {
-                expressions: link_extend_stmt
-                    .into_iter()
-                    .map(|e| e.pre_alias("link_"))
-                    .collect::<Vec<_>>(),
-                start: "",
-                join: ", ",
-            },
-             */
-            from: table(self.base.table_name().to_string()),
-            joins: link_extend_joins,
-            wheres: ManyFlat((link_extend_wheres, self.wheres)),
-            order: (),
-            limit: (),
-        };
-
-        Expression::expression(main_statement, &mut query_builder);
-         */
-
-        let s = use_executor!(fetch_optional(&pool, query_builder));
+        let s = use_executor!(fetch_optional(&mut *pool, query_builder));
 
         let s = match s {
             Err(sqlx::Error::RowNotFound) | Ok(None) => return None,
@@ -143,43 +126,109 @@ where
                 panic!(
                     "bug: claw_ql must clear all sqlx's error, 
 it is hard to know where this error was originated!
-error: {:?}",
+error: {:?}
+stmt: {stmt}",
                     err
                 )
             }
             Ok(Some(ok)) => ok,
         };
 
-        let (sub_op, inner) = link_spec.sub_op(pre_alias(&s, "link_"));
+        let (sub_op, inner) = link_spec.sub_op(two_alias(&s, "l", None, ()));
 
-        let sub_op = sub_op.exec_operation(pool.clone()).await;
+        let sub_op = sub_op.exec_operation(pool).await;
 
         Some(LinkedOutput {
             id: Row::get(&s, "local_id"),
             attributes: self
                 .base
-                .pre_alias(pre_alias(&s, "base_"))
+                .pre_alias(pre_alias(&s, "b"))
                 .expect("bug: sqlx errors should ruled out by claw_ql"),
             links: link_spec.take(sub_op, inner),
         })
     }
 }
 
+#[allow(non_camel_case_types)]
+pub struct link_select_item<Table, Column> {
+    pub table: Table,
+    pub column: Column,
+    /// only used by Vec<T> and tuples
+    pub(crate) num: Option<usize>,
+}
+
+mod link_select_item_impls {
+    use crate::database_extention::DatabaseExt;
+    use crate::expressions::scoped_column;
+    use crate::operations::fetch_one::link_select_item;
+    use crate::query_builder::Expression;
+    use crate::query_builder::OpExpression;
+    use crate::query_builder::StatementBuilder;
+
+    impl<Table, Column> link_select_item<Table, Column> {
+        pub fn new_scoped(scoped_column: scoped_column<Table, Column>) -> Self {
+            Self {
+                table: scoped_column.table,
+                column: scoped_column.column,
+                num: None,
+            }
+        }
+        pub fn new(table_: Table, column: Column) -> Self {
+            Self {
+                table: table_,
+                column,
+                num: None,
+            }
+        }
+    }
+
+    impl<T, C> OpExpression for link_select_item<T, C> {}
+
+    impl<'q, S, T, C> Expression<'q, S> for link_select_item<T, C>
+    where
+        Self: 'q,
+        S: DatabaseExt,
+        T: AsRef<str> + 'q,
+        C: AsRef<str> + 'q,
+    {
+        fn expression(self, arg: &mut StatementBuilder<'q, S>) {
+            let alias = format!(
+                "l{}{}",
+                self.num.map(|num| num.to_string()).unwrap_or_default(),
+                self.column.as_ref(),
+            );
+
+            arg.sanitize(self.table.as_ref());
+            arg.syntax(&".");
+            arg.sanitize(self.column.as_ref());
+            arg.syntax(&" AS ");
+            arg.sanitize(alias.as_str());
+        }
+    }
+}
+
+/// you can assume that all collections have an alias "local_id" of type `SingleIncremintalInt`
 pub trait LinkFetchOne<S> {
     type Joins;
     type Wheres;
 
-    fn non_aggregating_select_items(&self) -> Vec<scoped_column<String, String>>;
-    /// joins has to be non duplicating in order to be extendable
-    /// otherwise I have to rewrite the code that uses this struct
+    /// select items has to be non aggregating in order to be extendable.
     ///
-    /// example of duplicating joins is optional_to_many RIGHT JOIN
+    /// example of aggregating select items is COUNT(*).
+    ///
+    /// use FetchAggregate instead.
+    fn non_aggregating_select_items(&self) -> Vec<link_select_item<String, String>>;
+    /// joins has to be non duplicating in order to be extendable
+    ///
+    /// example of duplicating joins is one-to-many relationship executed via a RIGHT JOIN on "many"-side table.
+    ///
+    /// to support duplicating joins, `FetchOne` needs to be refactored, which I think unnecessary, use sup_op instead.
     fn non_duplicating_joins(&self) -> Self::Joins;
     fn wheres(&self) -> Self::Wheres;
 
     type Inner;
     type SubOp: Operation<S>;
-    fn sub_op(&self, row: pre_alias<'_, <S as Database>::Row>) -> (Self::SubOp, Self::Inner)
+    fn sub_op(&self, row: two_alias<'_, <S as Database>::Row>) -> (Self::SubOp, Self::Inner)
     where
         S: Database;
 
@@ -189,6 +238,36 @@ pub trait LinkFetchOne<S> {
         extend: <Self::SubOp as Operation<S>>::Output,
         inner: Self::Inner,
     ) -> Self::Output;
+}
+
+mod impl_for_tuples {
+    use super::*;
+    use crate::from_row::two_alias;
+    impl<S> LinkFetchOne<S> for ()
+    where
+        S: Database,
+    {
+        type Joins = ();
+        type Wheres = ();
+        fn non_aggregating_select_items(&self) -> Vec<link_select_item<String, String>> {
+            vec![]
+        }
+        fn non_duplicating_joins(&self) -> Self::Joins {
+            ()
+        }
+        fn wheres(&self) -> Self::Wheres {
+            ()
+        }
+        type Inner = ();
+        type SubOp = ();
+        fn sub_op(&self, _: two_alias<'_, <S as Database>::Row>) -> (Self::SubOp, Self::Inner) {
+            ((), ())
+        }
+        type Output = ();
+        fn take(self, _: <Self::SubOp as Operation<S>>::Output, _: Self::Inner) -> Self::Output {
+            ()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -208,6 +287,7 @@ mod test {
     #[tokio::test]
     async fn test_fetch_one() {
         let pool = Sqlite::connect_in_memory().await;
+        let mut tx = pool.begin().await.unwrap();
 
         Executor::execute(
             &pool,
@@ -226,15 +306,15 @@ mod test {
                     category_id INTEGER,
                     FOREIGN KEY (category_id) REFERENCES Category(id)
                 );
-                
+
                 INSERT INTO Category (id, title)
                     VALUES
                         (1, 'category_1');
-                        
-                INSERT INTO Todo 
+
+                INSERT INTO Todo
                     (id, title, done, description, category_id)
                     VALUES
-                        (1, 'first_todo', true, 'description_1', NULL), 
+                        (1, 'first_todo', true, 'description_1', NULL),
                         (2, 'second_todo', false, NULL, 1);
                         ",
                 arguments: Default::default(),
@@ -243,18 +323,20 @@ mod test {
         .await
         .unwrap();
 
-        let fetch_one = FetchOne {
-            base: todo,
-            wheres: col_eq {
-                col: scoped_column {
-                    table: "Todo".to_string(),
-                    column: "title".to_string(),
+        let fetch_one = Operation::<Sqlite>::exec_operation(
+            FetchOne {
+                base: todo,
+                wheres: col_eq {
+                    col: scoped_column {
+                        table: "Todo".to_string(),
+                        column: "title".to_string(),
+                    },
+                    eq: "second_todo",
                 },
-                eq: "second_todo",
+                links: category,
             },
-            links: category,
-        }
-        .exec_operation(pool)
+            tx.as_mut(),
+        )
         .await;
 
         pretty_assertions::assert_eq!(
@@ -274,5 +356,124 @@ mod test {
                 }),
             })
         );
+    }
+}
+
+mod functional_impls {
+    impl<S> LinkFetchOne<S> for ()
+    where
+        S: Database,
+    {
+        type Joins = ();
+        type Wheres = ();
+        fn non_aggregating_select_items(&self) -> Vec<link_select_item<String, String>> {
+            vec![]
+        }
+        fn non_duplicating_joins(&self) -> Self::Joins {
+            ()
+        }
+        fn wheres(&self) -> Self::Wheres {
+            ()
+        }
+        type Inner = ();
+        type SubOp = ();
+        fn sub_op(&self, _: two_alias<'_, <S as Database>::Row>) -> (Self::SubOp, Self::Inner) {
+            ((), ())
+        }
+        type Output = ();
+        fn take(self, _: <Self::SubOp as Operation<S>>::Output, _: Self::Inner) -> Self::Output {
+            ()
+        }
+    }
+    impl<T, S> LinkFetchOne<S> for Vec<T>
+    where
+        T: LinkFetchOne<S>,
+        T::Joins: IntoIterator,
+        T::Wheres: IntoIterator,
+    {
+        type Joins = ManyFlat<Vec<<T::Joins as IntoIterator>::Item>>;
+
+        type Wheres = ManyFlat<Vec<<T::Wheres as IntoIterator>::Item>>;
+
+        fn non_aggregating_select_items(&self) -> Vec<link_select_item<String, String>> {
+            let mut items = vec![];
+            for (index, each) in self.iter().enumerate() {
+                let mut each = each.non_aggregating_select_items();
+                each.iter_mut().for_each(|e| e.num = Some(index));
+                items.extend(each);
+            }
+            items
+        }
+
+        fn non_duplicating_joins(&self) -> Self::Joins {
+            let mut joins = vec![];
+            for each in self {
+                joins.extend(each.non_duplicating_joins());
+            }
+            ManyFlat(joins)
+        }
+
+        fn wheres(&self) -> Self::Wheres {
+            let mut wheres = vec![];
+            for each in self {
+                wheres.extend(each.wheres());
+            }
+            ManyFlat(wheres)
+        }
+
+        type Inner = Vec<T::Inner>;
+
+        type SubOp = Vec<T::SubOp>;
+
+        fn sub_op(
+            &self,
+            row: crate::from_row::two_alias<'_, <S as sqlx::Database>::Row>,
+        ) -> (Self::SubOp, Self::Inner)
+        where
+            S: sqlx::Database,
+        {
+            let mut sup_op = vec![];
+            let mut inner = vec![];
+
+            if row.2.is_some() {
+                panic!("vec<T> should not be nested")
+            }
+
+            for (index, each) in self.iter().enumerate() {
+                let each = each.sub_op(two_alias(row.0, row.1, Some(index), ()));
+                sup_op.push(each.0);
+                inner.push(each.1);
+            }
+
+            (sup_op, inner)
+        }
+
+        type Output = Vec<T::Output>;
+
+        fn take(
+            self,
+            extend: <Self::SubOp as crate::operations::Operation<S>>::Output,
+            inner: Self::Inner,
+        ) -> Self::Output {
+            let mut this = self.into_iter();
+            let mut extend = extend.into_iter();
+            let mut inner = inner.into_iter();
+
+            let mut out = vec![];
+
+            loop {
+                match (this.next(), extend.next(), inner.next()) {
+                    (Some(this), Some(extend), Some(inner)) => {
+                        out.push(this.take(extend, inner));
+                    }
+                    (None, None, None) => break,
+                    _ => {
+                        panic!("bug: unmatched lenght ")
+                    }
+                }
+            }
+
+            out
+        }
     }
 }

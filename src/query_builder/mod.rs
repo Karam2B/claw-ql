@@ -1,26 +1,30 @@
 #![allow(non_camel_case_types)]
 #![allow(unexpected_cfgs)]
 
-use sqlx::{Encode, Type};
+use std::marker::PhantomData;
 
-use crate::{
-    database_extention::DatabaseExt,
-    query_builder::functional_expr::{BoxedExpression, StaticExpression},
-};
+use sqlx::{Database, Encode, Type};
+
+use crate::database_extention::DatabaseExt;
 pub mod functional_expr;
 pub mod sanitize;
-pub mod syntax;
 
-pub struct QueryBuilder<'q, S>
+pub mod essential_syntax {
+    // I have these, because bad LSP can be confused by paranthesis inside strings
+    pub const OPEN_PARANTHESIS: &str = "(";
+    pub const CLOSE_PARANTHESIS: &str = ")";
+}
+
+pub struct StatementBuilder<'q, S>
 where
     S: DatabaseExt,
 {
-    stmt: String,
+    pub(crate) stmt: String,
     count: usize,
     arg: S::Arguments<'q>,
 }
 
-impl<'q, S: DatabaseExt> QueryBuilder<'q, S> {
+impl<'q, S: DatabaseExt> StatementBuilder<'q, S> {
     pub fn stmt(&self) -> &str {
         &self.stmt
     }
@@ -35,11 +39,25 @@ impl<'q, S: DatabaseExt> QueryBuilder<'q, S> {
 
         this
     }
+    pub fn new_no_data<Expr>(expr: Expr) -> Option<String>
+    where
+        Expr: Expression<'q, S>,
+    {
+        let mut this = Self::default();
+
+        expr.expression(&mut this);
+
+        if this.count == 0 {
+            Some(this.stmt)
+        } else {
+            None
+        }
+    }
 }
 
-impl<'q, S: DatabaseExt> Default for QueryBuilder<'q, S> {
+impl<'q, S: DatabaseExt> Default for StatementBuilder<'q, S> {
     fn default() -> Self {
-        QueryBuilder {
+        StatementBuilder {
             stmt: String::new(),
             count: 0,
             arg: S::Arguments::default(),
@@ -47,21 +65,13 @@ impl<'q, S: DatabaseExt> Default for QueryBuilder<'q, S> {
     }
 }
 
-pub trait SqlSanitize<S> {
-    fn to_sql(&self, strs: &mut String) {
-        panic!()
-    }
-}
-
-pub trait SqlSyntax {
-    fn to_sql(&self, str: &mut String);
-}
-
 /// assert is not Expression is not empty
 /// prevent downstream crate from `impl Expression<LocalType> for ForiegnTypes`
 pub trait OpExpression {}
 
-/// Representing an sql string/expression/statement that is not empty
+/// Representing an sql string/expression/statement that is not empty.
+///
+/// Possibly non-operational expressions implements `PossibleExpression`, multiple expressions implements `ManyExpressions`, both traits are extentions of this trait (will be automatically implemented for all types that implement `Expression`).
 ///
 /// # Type Generics `S`
 /// representing types that implement `sqlx::Database` like `Sqlite` and `MySQL`
@@ -105,14 +115,15 @@ pub trait OpExpression {}
 ///     }
 /// ```
 ///
-/// the only reason why there is lifetime in expression interface is: because in Sqlite you can send a string reference to an in-memory-database (instead of serializing the ref to and owned String and sending it over the netword like MySQL and PostgreQL)
+/// the only reason why there is lifetime in expression interface is: because in Sqlite you can send a string reference to an in-memory-database (instead of serializing the ref to an owned String and sending it over the netword like MySQL and PostgreQL), so you would have to wait for the lifetime (impl Expression<Sqlite, 'q> for &'q str) to be droped before you can mutate or move the referenced string
 ///
-/// in fact all impelentation of `sqlx::Encode` (used internally by `QueryBuilder::bind`) are static expect for `impl<'s> Encode<'s, Sqlite> for &'s`
+/// in fact all impelentation of `sqlx::Encode` (used internally by `QueryBuilder::bind`) are static expect for `impl<'s> Encode<'s, Sqlite> for &'s str`
 ///
 /// this lifetime itroduce restriction on all references made between `holding_lifetime` and `lifetime_droped`
 ///
+/// Don't feel the need to abstract over this lifetime, look for statics instead of introducing a new lifetime (i.e. where T: Expression<'static, S>), especially when you are building over-the-netword backends where everything is static anyway, lifetime here is to have a perfect API that I don't need to refactor later.
 pub trait Expression<'q, S>: OpExpression + 'q {
-    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+    fn expression(self, ctx: &mut StatementBuilder<'q, S>)
     where
         S: DatabaseExt;
 }
@@ -122,7 +133,7 @@ impl<'q, S> Expression<'q, S> for String
 where
     S: DatabaseExt,
 {
-    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+    fn expression(self, ctx: &mut StatementBuilder<'q, S>)
     where
         S: DatabaseExt,
     {
@@ -136,7 +147,7 @@ where
     's: 'q,
     S: DatabaseExt,
 {
-    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+    fn expression(self, ctx: &mut StatementBuilder<'q, S>)
     where
         S: DatabaseExt,
     {
@@ -144,18 +155,34 @@ where
     }
 }
 
-pub struct ExpressionAsBind<T>(pub T);
-impl<T> OpExpression for ExpressionAsBind<T> {}
-impl<'q, S, T> Expression<'q, S> for ExpressionAsBind<T>
+pub struct Bind<T>(pub T);
+impl<T> OpExpression for Bind<T> {}
+impl<'q, S, T> Expression<'q, S> for Bind<T>
 where
     S: sqlx::Database,
     T: 'q + sqlx::Type<S> + sqlx::Encode<'q, S>,
 {
-    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+    fn expression(self, ctx: &mut StatementBuilder<'q, S>)
     where
         S: DatabaseExt,
     {
         ctx.bind(self.0);
+    }
+}
+
+pub struct SyntaxAsType<T>(pub PhantomData<T>);
+
+impl<T> OpExpression for SyntaxAsType<T> {}
+impl<'q, S, T: 'q> Expression<'q, S> for SyntaxAsType<T>
+where
+    S: DatabaseExt,
+    T: sqlx::Type<S> + 'q,
+{
+    fn expression(self, ctx: &mut StatementBuilder<'q, S>)
+    where
+        S: Database,
+    {
+        ctx.type_as_syntax::<T>();
     }
 }
 
@@ -164,51 +191,111 @@ pub trait IsOpExpression {
 }
 
 pub trait PossibleExpression<'q, S>: IsOpExpression + 'q {
-    fn expression_starting<Start: SqlSyntax + ?Sized>(
-        self,
-        start: &Start,
-        ctx: &mut QueryBuilder<'q, S>,
-    ) where
+    fn expression_starting(self, start: &'static str, ctx: &mut StatementBuilder<'q, S>)
+    where
         S: DatabaseExt;
-    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+    fn expression(self, ctx: &mut StatementBuilder<'q, S>)
     where
         S: DatabaseExt;
 }
 
-pub trait ToStaticExpressions<S> {
-    fn to_static_expr(self) -> Vec<Box<dyn StaticExpression<S> + Send>>
+pub struct PossibleImplExpression<T>(T);
+impl<T> PossibleImplExpression<T>
+where
+    T: IsOpExpression,
+{
+    pub fn new(expr: T) -> Result<Self, ()> {
+        if expr.is_op() {
+            Ok(Self(expr))
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl<T> OpExpression for PossibleImplExpression<T> {}
+impl<'q, S, T> Expression<'q, S> for PossibleImplExpression<T>
+where
+    T: PossibleExpression<'q, S> + 'q,
+{
+    fn expression(self, ctx: &mut StatementBuilder<'q, S>)
     where
-        Self: Sized;
+        S: DatabaseExt,
+    {
+        self.0.expression(ctx);
+    }
 }
 
 pub trait ManyExpressions<'q, S>: IsOpExpression + 'q {
-    fn to_expr(self) -> Vec<Box<dyn BoxedExpression<'q, S> + 'q>>
+    fn expression(self, start: &'static str, join: &'static str, ctx: &mut StatementBuilder<'q, S>)
     where
-        Self: Sized;
-    fn expression<Start: SqlSyntax + ?Sized, Join: SqlSyntax + ?Sized>(
-        self,
-        start: &Start,
-        join: &Join,
-        ctx: &mut QueryBuilder<'q, S>,
+        S: DatabaseExt;
+}
+
+pub trait ManyBoxedExpressions<S> {
+    fn is_op(&self) -> bool;
+    fn boxed_expression<'q>(
+        self: Box<Self>,
+        start: &'static str,
+        join: &'static str,
+        ctx: &mut StatementBuilder<'q, S>,
     ) where
         S: DatabaseExt;
 }
 
-impl<'q, S> ManyExpressions<'q, S> for () {
-    fn to_expr(self) -> Vec<Box<dyn BoxedExpression<'q, S> + 'q>>
-    where
-        Self: Sized,
-    {
-        vec![]
+impl<S, T> ManyBoxedExpressions<S> for T
+where
+    T: for<'q> ManyExpressions<'q, S> + Send,
+{
+    fn is_op(&self) -> bool {
+        T::is_op(self)
     }
-    fn expression<Start: SqlSyntax + ?Sized, Join: SqlSyntax + ?Sized>(
-        self,
-        _: &Start,
-        _: &Join,
-        _: &mut QueryBuilder<'q, S>,
+    fn boxed_expression<'q>(
+        self: Box<Self>,
+        start: &'static str,
+        join: &'static str,
+        ctx: &mut StatementBuilder<'q, S>,
     ) where
         S: DatabaseExt,
     {
+        self.expression(start, join, ctx);
+    }
+}
+
+impl<S> IsOpExpression for Box<dyn ManyBoxedExpressions<S> + Send> {
+    fn is_op(&self) -> bool {
+        ManyBoxedExpressions::is_op(&**self)
+    }
+}
+
+impl<'q, S: 'q> ManyExpressions<'q, S> for Box<dyn ManyBoxedExpressions<S> + Send> {
+    fn expression(self, start: &'static str, join: &'static str, ctx: &mut StatementBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+        self.boxed_expression(start, join, ctx);
+    }
+}
+
+impl<'q, S> ManyExpressions<'q, S> for () {
+    fn expression(self, _: &'static str, _: &'static str, _: &mut StatementBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+    }
+}
+
+impl<'q, S, T> ManyExpressions<'q, S> for Option<T>
+where
+    T: 'q + ManyExpressions<'q, S>,
+{
+    fn expression(self, start: &'static str, join: &'static str, ctx: &mut StatementBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+        if let Some(this) = self {
+            this.expression(start, join, ctx);
+        }
     }
 }
 
@@ -216,19 +303,8 @@ impl<'q, S, T> ManyExpressions<'q, S> for T
 where
     T: Expression<'q, S> + 'q,
 {
-    fn to_expr(self) -> Vec<Box<dyn BoxedExpression<'q, S> + 'q>>
+    fn expression(self, start: &'static str, _: &'static str, ctx: &mut StatementBuilder<'q, S>)
     where
-        Self: Sized,
-    {
-        vec![Box::new(self)]
-    }
-
-    fn expression<Start: SqlSyntax + ?Sized, Join: SqlSyntax + ?Sized>(
-        self,
-        start: &Start,
-        _: &Join,
-        ctx: &mut QueryBuilder<'q, S>,
-    ) where
         S: DatabaseExt,
     {
         ctx.syntax(start);
@@ -236,7 +312,7 @@ where
     }
 }
 
-impl<'q, S> QueryBuilder<'q, S>
+impl<'q, S> StatementBuilder<'q, S>
 where
     S: DatabaseExt,
 {
@@ -251,16 +327,293 @@ where
     }
 
     pub fn sanitize(&mut self, display: &str) {
+        S::sanitize_start(&mut self.stmt);
         S::sanitize(display, &mut self.stmt);
+        S::sanitize_end(&mut self.stmt);
     }
 
     /// push str that is known to not cause sql injection,
-    pub fn syntax<D: SqlSyntax + ?Sized>(&mut self, str: &D) {
-        str.to_sql(&mut self.stmt);
+    ///
+    /// the type for the syntax is `&'static str`, because
+    /// it is less likely to be created by a network request
+    /// (unless you maliciously leak a string like `String::from(from_network).leak()`)
+    /// that is fine because sql injection targets bad code and not malicious code
+    pub fn syntax(&mut self, str: &'static str) {
+        self.stmt.push_str(str);
+    }
+
+    pub fn type_as_syntax<T: Type<S>>(&mut self) {
+        use sqlx::TypeInfo;
+        self.stmt.push_str(T::type_info().name());
     }
 
     pub fn unwrap(self) -> (String, S::Arguments<'q>) {
         (self.stmt, self.arg)
+    }
+}
+
+pub use sanitize_and_build_3::SanitizeMany;
+mod sanitize_and_build_3 {
+    use crate::{
+        database_extention::DatabaseExt,
+        query_builder::{Expression, OpExpression, StatementBuilder},
+        tuple_trait::{Tuple, TupleSpec},
+    };
+
+    pub struct SanitizeAndBuild<'expression_mut_context, 'expression_parameter, S: DatabaseExt>(
+        &'expression_mut_context mut StatementBuilder<'expression_parameter, S>,
+    );
+
+    impl<'c, 'a, 'q, S> TupleSpec<usize> for SanitizeAndBuild<'a, 'q, S>
+    where
+        S: DatabaseExt,
+    {
+        type Output = ();
+
+        fn on_each<const LAST_INDEX: usize, const INDEX: usize>(
+            &mut self,
+            member: usize,
+        ) -> Self::Output {
+            S::sanitize(member.to_string().as_str(), &mut self.0.stmt);
+        }
+    }
+
+    impl<'c, 'a, 'q, S> TupleSpec<&'c str> for SanitizeAndBuild<'a, 'q, S>
+    where
+        S: DatabaseExt,
+    {
+        type Output = ();
+
+        fn on_each<const LAST_INDEX: usize, const INDEX: usize>(
+            &mut self,
+            member: &'c str,
+        ) -> Self::Output {
+            S::sanitize(member, &mut self.0.stmt);
+        }
+    }
+
+    impl<'a, 'q, S> TupleSpec<String> for SanitizeAndBuild<'a, 'q, S>
+    where
+        S: DatabaseExt,
+    {
+        type Output = ();
+
+        fn on_each<const LAST_INDEX: usize, const INDEX: usize>(
+            &mut self,
+            member: String,
+        ) -> Self::Output {
+            S::sanitize(member.as_str(), &mut self.0.stmt);
+        }
+    }
+
+    impl<'q, S> StatementBuilder<'q, S>
+    where
+        S: DatabaseExt,
+    {
+        pub fn sanitize_strings<'a, T>(&mut self, data: T)
+        where
+            T: for<'s> Tuple<SanitizeAndBuild<'s, 'q, S>>,
+        {
+            S::sanitize_start(&mut self.stmt);
+            T::on_all_only_mut(data, SanitizeAndBuild(self));
+            S::sanitize_end(&mut self.stmt);
+        }
+    }
+
+    pub struct SanitizeMany<T>(pub T);
+
+    impl<T> OpExpression for SanitizeMany<T> {}
+    impl<'q, S, T> Expression<'q, S> for SanitizeMany<T>
+    where
+        T: 'q,
+        T: for<'a> Tuple<SanitizeAndBuild<'a, 'q, S>>,
+        S: DatabaseExt,
+    {
+        fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+            ctx.sanitize_strings(self.0);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::{
+            database_extention::DatabaseExt,
+            query_builder::{Expression, OpExpression, StatementBuilder},
+        };
+        use sqlx::Sqlite;
+
+        pub struct TestSanitizeAndBuild<'q>(&'q str);
+
+        impl OpExpression for TestSanitizeAndBuild<'_> {}
+        impl<'q, 'a, S> Expression<'q, S> for TestSanitizeAndBuild<'a>
+        where
+            'a: 'q,
+            S: DatabaseExt,
+        {
+            fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+                let local = String::from("sdf");
+                ctx.sanitize_strings((self.0, "world", local.as_str()));
+            }
+        }
+
+        #[test]
+        fn main() {
+            let borrow = String::from("hello");
+            let str = StatementBuilder::<Sqlite>::new(TestSanitizeAndBuild(&borrow))
+                .unwrap()
+                .0;
+
+            assert_eq!(str, "\"helloworld\"");
+        }
+    }
+}
+
+#[claw_ql_macros::skip]
+mod sanitize_and_build_2 {
+
+    use crate::{
+        database_extention::DatabaseExt,
+        query_builder::StatementBuilder,
+        tuple_trait::{Tuple, TupleSpec},
+    };
+
+    pub struct SanitizeAndBuild<'expression_mut_context, 'expression_parameter, S: DatabaseExt>(
+        &'expression_mut_context mut StatementBuilder<'expression_parameter, S>,
+    );
+
+    impl<'a, 'q, S> TupleSpec<&'q str> for SanitizeAndBuild<'a, 'q, S>
+    where
+        S: DatabaseExt,
+    {
+        type Output = ();
+
+        fn on_each<const LAST_INDEX: usize, const INDEX: usize>(
+            &mut self,
+            member: &'q str,
+        ) -> Self::Output {
+            S::sanitize(member, &mut self.0.stmt);
+        }
+    }
+
+    impl<'q, S> StatementBuilder<'q, S>
+    where
+        S: DatabaseExt,
+    {
+        pub fn sanitize_strings<T>(&mut self, data: T)
+        where
+            T: for<'s> Tuple<SanitizeAndBuild<'s, 'q, S>>,
+        {
+            S::sanitize_start(&mut self.stmt);
+            T::on_all_only_mut(data, SanitizeAndBuild(self));
+            S::sanitize_end(&mut self.stmt);
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::{
+            database_extention::DatabaseExt,
+            query_builder::{Expression, OpExpression, StatementBuilder},
+        };
+        use sqlx::Sqlite;
+
+        pub struct TestSanitizeAndBuild<'q>(&'q str);
+
+        impl OpExpression for TestSanitizeAndBuild<'_> {}
+        impl<'q, S> Expression<'q, S> for TestSanitizeAndBuild<'q>
+        where
+            S: DatabaseExt,
+        {
+            fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+                ctx.sanitize_strings((self.0, "world"));
+            }
+        }
+
+        #[test]
+        fn main() {
+            let borrow = String::from("hello");
+            let str = StatementBuilder::<Sqlite>::new(TestSanitizeAndBuild(&borrow))
+                .unwrap()
+                .0;
+
+            assert_eq!(str, "\"helloworld\"");
+        }
+    }
+}
+
+#[claw_ql_macros::skip]
+mod sanitize_and_build {
+    use std::marker::PhantomData;
+
+    use crate::{
+        database_extention::DatabaseExt,
+        query_builder::StatementBuilder,
+        tuple_trait::{TupleLast, TupleLastSpec},
+    };
+
+    pub struct SanitizeAndBuild<'q, S>(&'q mut String, PhantomData<S>);
+
+    impl<'q, S> TupleLastSpec<&'static str, &'static str> for SanitizeAndBuild<'q, S>
+    where
+        S: DatabaseExt,
+    {
+        type Output = ();
+        type LastOutput = ();
+
+        fn on_each<const LAST_INDEX: usize, const INDEX: usize>(
+            &mut self,
+            member: &'static str,
+        ) -> Self::Output {
+            S::sanitize(member, &mut self.0);
+        }
+
+        fn on_last<const INDEX: usize>(mut self, member: &'static str) -> Self::LastOutput {
+            S::sanitize(member, &mut self.0);
+            S::sanitize_end(&mut self.0);
+        }
+    }
+
+    impl<'q, S> StatementBuilder<'q, S>
+    where
+        S: DatabaseExt,
+    {
+        pub fn sanitize_strings<T>(&mut self, data: T)
+        where
+            T: for<'s> TupleLast<SanitizeAndBuild<'s, S>>,
+        {
+            S::sanitize_start(&mut self.stmt);
+            T::on_all(data, SanitizeAndBuild(&mut self.stmt, PhantomData));
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::{
+            database_extention::DatabaseExt,
+            query_builder::{Expression, OpExpression, StatementBuilder},
+        };
+        use sqlx::Sqlite;
+
+        pub struct TestSanitizeAndBuild;
+
+        impl OpExpression for TestSanitizeAndBuild {}
+        impl<'q, S> Expression<'q, S> for TestSanitizeAndBuild
+        where
+            S: DatabaseExt,
+        {
+            fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+                ctx.sanitize_strings(("hello", "world"));
+            }
+        }
+
+        #[test]
+        fn main() {
+            let str = StatementBuilder::<Sqlite>::new(TestSanitizeAndBuild)
+                .unwrap()
+                .0;
+
+            assert_eq!(str, "\"helloworld\"");
+        }
     }
 }
 
@@ -335,13 +688,15 @@ mod mut_query_builder {
             fn fragment_to_string(ctx: &mut Self::Context, fragment: Self::Fragment) -> String;
         }
 
-        pub trait ExpressionToFragment<'q, T>: QueryBuilder {
-            fn expression_to_fragment(&mut self, expression: T)
-            -> <Self as QueryBuilder>::Fragment;
+        pub trait ExpressionToFragment<'q, T>: StatementBuilder {
+            fn expression_to_fragment(
+                &mut self,
+                expression: T,
+            ) -> <Self as StatementBuilder>::Fragment;
         }
 
         // trait to extend sqlx's Encode trait -- adapted to fit the need of this library
-        pub trait EncodeExtention<'q, T>: QueryBuilder {
+        pub trait EncodeExtention<'q, T>: StatementBuilder {
             fn encode(
                 &mut self,
                 val: T,
@@ -349,8 +704,8 @@ mod mut_query_builder {
         }
 
         pub trait Buildable: Sized {
-            type QueryBuilder: QueryBuilder;
-            fn build(self) -> (String, <Self::QueryBuilder as QueryBuilder>::Output);
+            type QueryBuilder: StatementBuilder;
+            fn build(self) -> (String, <Self::QueryBuilder as StatementBuilder>::Output);
         }
 
         pub trait Expression<'q, Q> {
@@ -359,7 +714,7 @@ mod mut_query_builder {
                 query_builder: &mut Q,
             ) -> impl FnOnce(&mut Q::Context) -> String + 'q + use<'q, Q, Self>
             where
-                Q: QueryBuilder;
+                Q: StatementBuilder;
         }
 
         pub trait MutExpression<'q, S> {
@@ -481,7 +836,7 @@ mod mut_query_builder {
 
             impl<'q, Q, T> Expression<'q, Q> for hardcode<T>
             where
-                Q: QueryBuilder + SanitzingMechanisim,
+                Q: StatementBuilder + SanitzingMechanisim,
                 T: SanitizeAndHardcode<Q::SanitzingMechanisim> + 'q,
             {
                 fn expression(
@@ -489,7 +844,7 @@ mod mut_query_builder {
                     ctx: &mut Q,
                 ) -> impl FnOnce(&mut <Q>::Context) -> String + 'q + use<'q, Q, T>
                 where
-                    Q: QueryBuilder,
+                    Q: StatementBuilder,
                 {
                     move |_| self.0.sanitize()
                 }
@@ -533,7 +888,7 @@ mod mut_query_builder {
                 }
             }
 
-            impl<'q, S: Database> QueryBuilder for direct_bind<'q, S> {
+            impl<'q, S: Database> StatementBuilder for direct_bind<'q, S> {
                 type Fragment = String;
                 type Context = ();
                 type SqlxDb = S;
@@ -571,7 +926,7 @@ mod mut_query_builder {
                 E: Expression<'q, Self>,
                 S: Database,
             {
-                fn expression_to_fragment(&mut self, t: E) -> <Self as QueryBuilder>::Fragment {
+                fn expression_to_fragment(&mut self, t: E) -> <Self as StatementBuilder>::Fragment {
                     t.expression(self)(&mut ())
                 }
             }
@@ -642,7 +997,7 @@ mod mut_query_builder {
                 }
             }
 
-            impl<S: Database> QueryBuilder for defered_binder<S> {
+            impl<S: Database> StatementBuilder for defered_binder<S> {
                 type SqlxDb = S;
                 type Fragment = DeferedFragment<S>;
 
@@ -696,7 +1051,7 @@ mod mut_query_builder {
                 E: Expression<'static, Self>,
                 S: Database,
             {
-                fn expression_to_fragment(&mut self, t: E) -> <Self as QueryBuilder>::Fragment {
+                fn expression_to_fragment(&mut self, t: E) -> <Self as StatementBuilder>::Fragment {
                     let fnitem = t.expression(self);
                     DeferedFragment(Box::new(fnitem))
                 }
@@ -762,7 +1117,7 @@ mod mut_query_builder {
 
                 impl<'q, Q> Expression<'q, Q> for StrButCountOrder
                 where
-                    Q: QueryBuilder,
+                    Q: StatementBuilder,
                     Q::SqlxDb: Database,
                     Q: EncodeExtention<'q, &'static str>,
                 {
@@ -771,7 +1126,7 @@ mod mut_query_builder {
                         query_builder: &mut Q,
                     ) -> impl FnOnce(&mut <Q>::Context) -> String + 'q + use<'q, Q>
                     where
-                        Q: QueryBuilder,
+                        Q: StatementBuilder,
                     {
                         let s = EncodeExtention::encode(query_builder, self.0);
                         move |ctx| {

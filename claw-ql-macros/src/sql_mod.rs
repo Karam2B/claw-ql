@@ -1,3 +1,7 @@
+//! why this macro?
+//! 1. familiar syntax to Sql
+//! 2. using const_blocks until impl_const is stable
+//! 3. help report error in a better way (current way is trait-stack which I hate)
 #![allow(unused)]
 #![warn(unused_must_use)]
 #![allow(non_camel_case_types)]
@@ -51,7 +55,7 @@ pub mod kws {
 }
 use kws::*;
 
-trait MyParse: Sized {
+trait ScopedParse: Sized {
     type Scope<'a>;
     fn parse_scope<'a>(scope: Self::Scope<'a>, input: ParseStream) -> syn::Result<Self>;
     // AI pay attention: never suggest 'a to be used with ParseStream
@@ -94,7 +98,7 @@ pub mod fetch_one {
     use proc_macro_error::abort;
     use syn::Ident;
 
-    use crate::sql_mod::MyParse;
+    use crate::sql_mod::ScopedParse;
     use crate::sql_mod::kws::*;
     use crate::sql_mod::link_mod::LinkSegment;
     use crate::sql_mod::wheres_mod::WhereScope;
@@ -106,7 +110,7 @@ pub mod fetch_one {
         links: LinkSegment,
     }
 
-    impl MyParse for FetchOne {
+    impl ScopedParse for FetchOne {
         type Scope<'a> = &'a mut HashMap<Ident, Ident>;
 
         fn parse_scope<'a>(
@@ -130,8 +134,8 @@ pub mod fetch_one {
                 abort!(base.span(), "aliase is used")
             }
 
-            let links = MyParse::parse(PhantomData::<LinkSegment>, (), input)?;
-            let wheres = MyParse::parse(
+            let links = ScopedParse::parse(PhantomData::<LinkSegment>, (), input)?;
+            let wheres = ScopedParse::parse(
                 PhantomData::<WhereSegment>,
                 WhereScope {
                     base: base.clone(),
@@ -173,7 +177,7 @@ pub mod insert {
     use syn::Ident;
     use syn::parse_quote;
 
-    use crate::sql_mod::MyParse;
+    use crate::sql_mod::ScopedParse;
     use crate::sql_mod::kws::*;
     use crate::sql_mod::link_mod::LinkSegment;
     use crate::sql_mod::wheres_mod::WhereScope;
@@ -184,7 +188,7 @@ pub mod insert {
         links: Vec<Expr>,
     }
 
-    impl MyParse for Insert {
+    impl ScopedParse for Insert {
         type Scope<'a> = &'a HashMap<Ident, Ident>;
 
         fn parse_scope<'a>(
@@ -230,7 +234,7 @@ pub mod migrate {
     use syn::Ident;
     use syn::parse::ParseStream;
 
-    use crate::sql_mod::MyParse;
+    use crate::sql_mod::ScopedParse;
     use crate::sql_mod::kws::*;
     use crate::sql_mod::link_mod::LinkSegment;
     use crate::sql_mod::wheres_mod::WhereScope;
@@ -240,7 +244,7 @@ pub mod migrate {
         expr: Expr,
     }
 
-    impl MyParse for Migrate {
+    impl ScopedParse for Migrate {
         type Scope<'a> = ();
 
         fn parse_scope<'a>(scope: Self::Scope<'a>, input: ParseStream) -> syn::Result<Self> {
@@ -332,13 +336,12 @@ pub fn main_statment_to_token(input: MainStatement) -> TokenStream {
     let with = &input.with;
     quote!({
         use ::claw_ql::prelude::sql::*;
-
-        Operation::exec_operation(#op, #with.clone())
+        Operation::exec_operation(#op, &mut #with)
     })
 }
 
 mod link_mod {
-    use crate::sql_mod::{MyParse, kws::LINK};
+    use crate::sql_mod::{ScopedParse, kws::LINK};
     use quote::{ToTokens, quote};
     use syn::Ident;
 
@@ -347,7 +350,7 @@ mod link_mod {
         inner: Vec<Ident>,
     }
 
-    impl MyParse for LinkSegment {
+    impl ScopedParse for LinkSegment {
         type Scope<'a> = ();
         fn parse_scope<'a>(
             scope: Self::Scope<'a>,
@@ -385,9 +388,10 @@ mod wheres_mod {
     use syn::token::Where;
     use syn::{Ident, token::Dot};
 
+    use crate::utils;
     use crate::{
-        local_lib::parse_parens,
-        sql_mod::{MyParse, kws::WHERE},
+        sql_mod::{ScopedParse, kws::WHERE},
+        utils::parse_parens,
     };
 
     pub struct WhereSegment {
@@ -398,7 +402,7 @@ mod wheres_mod {
         pub base: Ident,
         pub aliases: &'a HashMap<Ident, Ident>,
     }
-    impl MyParse for WhereSegment {
+    impl ScopedParse for WhereSegment {
         type Scope<'a> = WhereScope<'a>;
         fn parse_scope<'a>(
             scope: Self::Scope<'a>,
@@ -439,7 +443,7 @@ mod wheres_mod {
                     (members_mod, i1, i2)
                 };
 
-                let (_, input) = parse_parens(input)?;
+                let (_, input) = utils::parse_parens(input)?;
 
                 let expr = input.parse::<syn::Expr>()?;
 
@@ -461,7 +465,7 @@ mod wheres_mod {
     impl ToTokens for WhereSegment {
         fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
             let s = &self.ands;
-            tokens.extend(quote! ((#(#s,)*)))
+            tokens.extend(quote! ( ManyPossible((#(#s,)*))))
         }
     }
 }
@@ -499,7 +503,7 @@ mod tests {
                 infer_db(&pool),
             );
 
-            Operation::exec_operation(op, pool)
+            Operation::exec_operation(op, &mut pool)
         });
 
         pretty_assertions::assert_eq!(expect.to_string(), to_be.to_string());

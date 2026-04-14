@@ -1,6 +1,6 @@
 use crate::{
     database_extention::DatabaseExt,
-    query_builder::{Expression, ManyExpressions, OpExpression, QueryBuilder},
+    query_builder::{Expression, ManyExpressions, OpExpression, StatementBuilder},
 };
 
 pub struct CreateTable<Init, TableName, ColDefs> {
@@ -14,7 +14,7 @@ pub mod expressions {
 
     use crate::{
         database_extention::DatabaseExt,
-        query_builder::{Expression, OpExpression, QueryBuilder},
+        query_builder::{Expression, OpExpression, StatementBuilder},
     };
 
     pub struct create_table;
@@ -22,7 +22,7 @@ pub mod expressions {
     impl OpExpression for create_table {}
 
     impl<'q, S> Expression<'q, S> for create_table {
-        fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+        fn expression(self, ctx: &mut StatementBuilder<'q, S>)
         where
             S: DatabaseExt,
         {
@@ -35,7 +35,7 @@ pub mod expressions {
     impl OpExpression for create_if_not_exist {}
 
     impl<'q, S> Expression<'q, S> for create_if_not_exist {
-        fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+        fn expression(self, ctx: &mut StatementBuilder<'q, S>)
         where
             S: DatabaseExt,
         {
@@ -52,7 +52,7 @@ where
     Table: Expression<'q, S> + 'q,
     Columns: ManyExpressions<'q, S> + 'q,
 {
-    fn expression(self, ctx: &mut QueryBuilder<'q, S>)
+    fn expression(self, ctx: &mut StatementBuilder<'q, S>)
     where
         S: DatabaseExt,
     {
@@ -69,38 +69,6 @@ where
     }
 }
 
-mod impl_syntax_for_create_table {
-    use crate::{
-        collections::{Collection, Member, SingleIncremintalInt},
-        expressions::col_def_for_collection_member,
-        statements::create_table_statement::{
-            CreateTable,
-            expressions::{create_if_not_exist, create_table},
-        },
-        valid_syntax::{ColIdent, CreateTableHeader, TableIdent, ValidSyntax},
-    };
-
-    impl<Header, Table, Columns> ValidSyntax for CreateTable<Header, Table, Columns>
-    where
-        Header: CreateTableHeader,
-        Table: TableIdent,
-        Columns: ColIdent<Table>,
-    {
-    }
-
-    impl CreateTableHeader for create_if_not_exist {}
-    impl CreateTableHeader for create_table {}
-
-    impl<T> ColIdent<T> for SingleIncremintalInt where T: Collection<Id = Self> {}
-
-    impl<T, C0> ColIdent<T> for (C0,) where C0: ColIdent<T> {}
-
-    impl<Table, C> ColIdent<Table> for col_def_for_collection_member<C> where
-        C: Member<CollectionHandler = Table>
-    {
-    }
-}
-
 #[cfg(feature = "skip_without_comments")]
 mod old_dynamic_statement {
     #![allow(unused)]
@@ -111,7 +79,7 @@ mod old_dynamic_statement {
     };
 
     #[derive(Debug)]
-    pub struct CreateTableSt<S: QueryBuilder> {
+    pub struct CreateTableSt<S: StatementBuilder> {
         pub(crate) header: String,
         pub(crate) ident: (Option<String>, String),
         pub(crate) columns: Vec<(String, S::Fragment)>,
@@ -129,7 +97,7 @@ mod old_dynamic_statement {
         pub const create_table_if_not_exists: &'static str = "CREATE TABLE IF NOT EXISTS";
     }
 
-    impl<S: QueryBuilder> Buildable for CreateTableSt<S> {
+    impl<S: StatementBuilder> Buildable for CreateTableSt<S> {
         type QueryBuilder = S;
 
         fn build(self) -> (String, S::Output) {
@@ -172,7 +140,7 @@ mod old_dynamic_statement {
         }
     }
 
-    impl<Q: QueryBuilder + Default> CreateTableSt<Q> {
+    impl<Q: StatementBuilder + Default> CreateTableSt<Q> {
         pub fn init(header: &str, table: &str) -> Self {
             Self {
                 header: header.to_string(),

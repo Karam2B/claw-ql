@@ -23,12 +23,12 @@ where
 {
     type Spec = SetIdSpec<To::Spec, i64>;
 
-    fn spec(self, from: &From) -> Self::Spec
+    fn spec(self) -> Self::Spec
     where
         Self: Sized,
     {
         SetIdSpec {
-            og_spec: self.to.spec(from),
+            og_spec: self.to.spec(),
             input: self.id,
         }
     }

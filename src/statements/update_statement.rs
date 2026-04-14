@@ -1,11 +1,5 @@
 use crate::database_extention::DatabaseExt;
-use crate::query_builder::syntax::{and_join, comma_join, empty, end_of_statement};
-use crate::query_builder::{
-    Expression, ManyExpressions, OpExpression, PossibleExpression, QueryBuilder,
-};
-use crate::sql_syntax;
-use crate::statements::insert_one_statement::returning_join;
-use crate::statements::select_statement::where_join;
+use crate::query_builder::{Expression, ManyExpressions, OpExpression, StatementBuilder};
 
 pub struct UpdateStatement<TableName, Values, Wheres, Returning> {
     pub table_name: TableName,
@@ -19,9 +13,6 @@ impl<TableName, Values, Wheres, Returning> OpExpression
 {
 }
 
-sql_syntax!(update_start = "UPDATE ");
-sql_syntax!(set_join = " SET ");
-
 impl<'q, S, TableName, Values, Wheres, Returning> Expression<'q, S>
     for UpdateStatement<TableName, Values, Wheres, Returning>
 where
@@ -29,20 +20,16 @@ where
     TableName: Expression<'q, S> + 'q,
     Values: ManyExpressions<'q, S> + 'q,
     Wheres: ManyExpressions<'q, S> + 'q,
-    Returning: PossibleExpression<'q, S> + 'q,
+    Returning: ManyExpressions<'q, S> + 'q,
 {
-    fn expression(self, ctx: &mut QueryBuilder<'q, S>) {
-        ctx.syntax(&update_start);
+    fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+        ctx.syntax("UPDATE ");
         self.table_name.expression(ctx);
-        ctx.syntax(&set_join);
-        self.values.expression(&empty, &comma_join, ctx);
-        self.wheres.expression(&where_join, &and_join, ctx);
+        ctx.syntax(" SET ");
+        self.values.expression("", ", ", ctx);
+        self.wheres.expression(" WHERE ", " AND ", ctx);
+        self.returning.expression(" RETURNING ", ", ", ctx);
 
-        if self.returning.is_op() {
-            ctx.syntax(&returning_join);
-            self.returning.expression(ctx);
-        }
-
-        ctx.syntax(&end_of_statement);
+        ctx.syntax(";");
     }
 }

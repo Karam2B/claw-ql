@@ -1,424 +1,367 @@
-use hyper::StatusCode;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use serde_json::{Value, json, to_value};
-use sqlx::{ColumnIndex, Database, Decode, TypeInfo};
-use sqlx::{Encode, IntoArguments, Pool, Sqlite, Type};
-use std::{collections::HashMap, marker::PhantomData};
+use crate::collections::SingleIncremintalInt;
+use crate::database_extention::DatabaseExt;
+use crate::json_client::database_for_json_client::DatabaseForJsonClient;
+use crate::json_client::type_t_trait::TypeT;
+use crate::query_builder::Expression;
+use crate::query_builder::QueryBuilder;
+use crate::query_builder::functional_expr::ManyFlat;
+use convert_case::Case;
+use convert_case::Casing;
+use serde::{Deserialize, Serialize};
+use sqlx::Executor;
+use sqlx::IntoArguments;
+use std::ops::Not;
+use std::sync::Arc;
 
-use crate::collections::CollectionHandler;
-use crate::prelude::primary_key;
-use crate::prelude::stmt::CreateTableSt;
-use crate::statements::create_table_st::header;
-use crate::{BindItem, Buildable, ColumPositionConstraint};
-use crate::{
-    QueryBuilder,
-    json_client::{JsonClient, JsonCollection, axum_router_mod::HttpError},
-    migration::OnMigrate,
-    prelude::stmt::SelectSt,
-};
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AddCollectionBody {
-    pub name: String,
-    pub fields: HashMap<String, FieldInJson>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FieldInJson {
-    pub typeid: String,
-    pub optional: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AddCollectionRes {}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct CollectionExist(String);
-
-impl HttpError for CollectionExist {
-    fn status_code(&self) -> StatusCode {
-        StatusCode::CONFLICT
-    }
-    fn sub_code(&self) -> Option<&'static str> {
-        Some("collection_exist")
-    }
-    fn sub_message(&self) -> Option<String> {
-        Some(format!("collection {} exist", self.0))
-    }
-}
-
-pub struct DynamicField<S> {
-    pub name: String,
-    pub is_optional: bool,
-    pub type_info: Box<dyn LiqType<S>>,
-}
-
-impl<S> Clone for DynamicField<S> {
+impl<S> Clone for DynamicCollection<S> {
     fn clone(&self) -> Self {
         Self {
             name: self.name.clone(),
-            is_optional: self.is_optional,
-            type_info: self.type_info.clone_self(),
-        }
-    }
-}
-
-pub struct DynamicTypeConstraint(String);
-
-impl ColumPositionConstraint for DynamicTypeConstraint {}
-impl<S: QueryBuilder> BindItem<S> for DynamicTypeConstraint {
-    fn bind_item(
-        self,
-        ctx: &mut <S as QueryBuilder>::Context1,
-    ) -> impl FnOnce(&mut <S as QueryBuilder>::Context2) -> String + 'static + use<S> {
-        |s| "".to_string()
-    }
-}
-
-pub trait LiqType<S>: Send + Sync {
-    fn typeid(&self) -> String;
-    fn clone_self(&self) -> Box<dyn LiqType<S>>;
-    fn on_insert(
-        &self,
-        val: Value,
-        stmt: &mut crate::prelude::stmt::InsertOneSt<S>,
-        name: &str,
-    ) -> Result<(), String>
-    where
-        S: Database;
-
-    fn from_row_optional(&self, name: &str, row: &S::Row) -> Value
-    where
-        S: Database;
-    fn typeinfo(&self) -> TypeInfoS;
-}
-
-pub trait LiqTypeDeprecate<S> {
-    fn typeinfo(&self) -> TypeInfoS;
-}
-pub struct TypeInfoS {
-    is_null: bool,
-    is_void: bool,
-    name: String,
-}
-impl<S, T> LiqTypeDeprecate<S> for PhantomData<T>
-where
-    S: Database,
-    T: sqlx::Type<S>,
-{
-    fn typeinfo(&self) -> TypeInfoS {
-        use sqlx::TypeInfo;
-        let s = T::type_info();
-        let is_null = s.is_null();
-        let is_void = s.is_void();
-        let name = s.name();
-        TypeInfoS {
-            is_null,
-            is_void,
-            name: name.to_string(),
-        }
-    }
-}
-
-impl ColumPositionConstraint for TypeInfoS {}
-impl<S: QueryBuilder> BindItem<S> for TypeInfoS {
-    fn bind_item(
-        self,
-        ctx: &mut <S as QueryBuilder>::Context1,
-    ) -> impl FnOnce(&mut <S as QueryBuilder>::Context2) -> String + 'static + use<S> {
-        move |e| format!("{}", self.name)
-    }
-}
-// impl<S>
-
-pub trait SerializableAny {
-    fn typeid(&self) -> String;
-}
-
-impl SerializableAny for PhantomData<i32> {
-    fn typeid(&self) -> String {
-        "core::i32".to_string()
-    }
-}
-impl SerializableAny for PhantomData<bool> {
-    fn typeid(&self) -> String {
-        "core::boolean".to_string()
-    }
-}
-impl SerializableAny for PhantomData<String> {
-    fn typeid(&self) -> String {
-        "core::string".to_string()
-    }
-}
-
-// T here should never be Option<..>
-pub struct DynamicTypeWASMMod<S>(S);
-impl<S: Send + Sync> LiqType<S> for DynamicTypeWASMMod<S> {
-    fn typeid(&self) -> String {
-        todo!()
-    }
-
-    fn clone_self(&self) -> Box<dyn LiqType<S>> {
-        todo!()
-    }
-
-    fn on_insert(
-        &self,
-        val: Value,
-        stmt: &mut crate::prelude::stmt::InsertOneSt<S>,
-        name: &str,
-    ) -> Result<(), String>
-    where
-        S: Database,
-    {
-        todo!()
-    }
-
-    fn typeinfo(&self) -> TypeInfoS {
-        todo!()
-    }
-    fn from_row_optional(&self, name: &str, row: &<S>::Row) -> Value
-    where
-        S: Database,
-    {
-        todo!()
-    }
-}
-
-impl<S, T> LiqType<S> for PhantomData<T>
-where
-    for<'a> &'a str: ColumnIndex<S::Row>,
-    S: Database,
-    T: 'static
-        + for<'a> Decode<'a, S>
-        + Encode<'static, S>
-        + Type<S>
-        + Send
-        + Sync
-        + DeserializeOwned
-        + Serialize,
-    Self: SerializableAny,
-{
-    fn typeid(&self) -> String {
-        <Self as SerializableAny>::typeid(self)
-    }
-    fn clone_self(&self) -> Box<dyn LiqType<S>> {
-        Box::new(PhantomData::<T>)
-    }
-    fn on_insert(
-        &self,
-        val: Value,
-        stmt: &mut crate::prelude::stmt::InsertOneSt<S>,
-        name: &str,
-    ) -> Result<(), String>
-    where
-        S: Database,
-    {
-        let t = serde_json::from_value::<T>(val).map_err(|e| e.to_string())?;
-        stmt.col(name.to_string(), t);
-        Ok(())
-    }
-    fn typeinfo(&self) -> TypeInfoS {
-        use sqlx::TypeInfo;
-        let s = T::type_info();
-        let is_null = s.is_null();
-        let is_void = s.is_void();
-        let name = s.name();
-        TypeInfoS {
-            is_null,
-            is_void,
-            name: name.to_string(),
-        }
-    }
-    fn from_row_optional(&self, name: &str, row: &S::Row) -> Value
-    where
-        S: Database,
-    {
-        use sqlx::Row;
-
-        let ret: Option<T> = row
-            .try_get(name)
-            .expect("shouldn't typeing error be outruled at init-time");
-
-        let va = serde_json::to_value(ret).expect("shoudn't serializing error be outruled?");
-
-        va
-    }
-}
-
-pub struct DynamicCollection<S: QueryBuilder> {
-    pub name: String,
-    pub fields: Vec<DynamicField<S>>,
-}
-
-impl<S: QueryBuilder> Clone for DynamicCollection<S> {
-    fn clone(&self) -> Self {
-        Self {
-            name: self.name.clone(),
-            fields: self.fields.clone(),
-        }
-    }
-}
-
-impl OnMigrate<Sqlite> for DynamicCollection<Sqlite> {
-    fn custom_migrate_statements(&self) -> Vec<String> {
-        let mut stmt = CreateTableSt::<Sqlite>::init(header::create, &self.name);
-        stmt.column_def("id", primary_key::<Sqlite>());
-        for each in self.fields.iter() {
-            stmt.column_def(&each.name, each.type_info.typeinfo());
-        }
-        vec![Buildable::build(stmt).0]
-    }
-}
-
-// impl<S: QueryBuilder> CollectionBasic for DynamicCollection<S> {
-//     fn table_name(&self) -> &'static str {
-//         todo!()
-//     }
-
-//     fn table_name_lower_case(&self) -> &'static str {
-//         todo!()
-//     }
-
-//     fn members(&self) -> Vec<String> {
-//         todo!()
-//     }
-
-//     type LinkedData = DynamicCollection<S>;
-// }
-
-impl<S: QueryBuilder + Sync> JsonCollection<S> for DynamicCollection<S>
-where
-    for<'a> &'a str: ColumnIndex<S::Row>,
-{
-    fn clone_self(&self) -> Box<dyn JsonCollection<S>> {
-        let s = DynamicCollection::<S>::clone(self);
-        Box::new(s)
-    }
-    fn table_name_js(&self) -> &str {
-        &self.name
-    }
-
-    fn members_js(&self) -> Vec<String> {
-        self.fields.iter().map(|e| e.name.to_string()).collect()
-    }
-
-    fn on_select(&self, stmt: &mut crate::prelude::stmt::SelectSt<S>)
-    where
-        S: crate::QueryBuilder,
-    {
-        for field in self.fields.iter() {
-            stmt.select(
-                crate::prelude::col(&field.name)
-                    .table(&self.name)
-                    .alias(&format!("{}_{}", self.table_name_js(), field.name)),
-            );
-        }
-    }
-
-    fn on_insert(
-        &self,
-        this: serde_json::Value,
-        stmt: &mut crate::prelude::stmt::InsertOneSt<S>,
-    ) -> Result<(), String>
-    where
-        S: sqlx::Database,
-    {
-        let this_obj = this.as_object().ok_or("failed to parse to object")?;
-        for field in self.fields.iter() {
-            field.type_info.on_insert(
-                this_obj
-                    .get(&field.name)
-                    .cloned()
-                    .ok_or("err".to_string())?,
-                stmt,
-                &field.name,
-            )?;
-        }
-        todo!()
-    }
-
-    fn on_update(
-        &self,
-        this: serde_json::Value,
-        stmt: &mut crate::prelude::macro_derive_collection::UpdateSt<S>,
-    ) -> Result<(), String>
-    where
-        S: crate::QueryBuilder,
-    {
-        todo!()
-    }
-
-    fn from_row_noscope(&self, row: &<S>::Row) -> serde_json::Value
-    where
-        S: Database,
-    {
-        use sqlx::Row;
-        panic!("rows{:?}", row.columns());
-        for field in self.fields.iter() {
-            let typei = &field.type_info;
-            let ret = field.type_info.from_row_optional(&field.name, row);
-        }
-        todo!()
-    }
-
-    #[track_caller]
-    fn from_row_scoped(&self, row: &<S>::Row) -> serde_json::Value
-    where
-        S: Database,
-    {
-        use sqlx::Row;
-        let table_name = &self.name;
-        let mut map = serde_json::Map::default();
-        for field in self.fields.iter() {
-            let name = &field.name;
-            let typei = &field.type_info;
-            let ret = field
-                .type_info
-                .from_row_optional(&format!("{}_{name}", table_name), row);
-            let inserted = map.insert(field.name.clone(), ret);
-            if inserted.is_some() {
-                panic!("map should be empty")
-            }
-        }
-        serde_json::to_value(map).unwrap()
-    }
-}
-
-impl JsonClient<Sqlite> {
-    // #[axum::debug_handler]
-    pub async fn add_collection(&mut self, body: AddCollectionBody) -> Result<(), CollectionExist> {
-        let s = self.collections.get_mut(&body.name);
-        if s.is_some() {
-            return Err(CollectionExist(body.name));
-        }
-
-        // sqlx::query("CREATE TABLE {}")
-        let collection = DynamicCollection {
-            name: body.name.clone(),
-            fields: body
+            name_lower_case: self.name_lower_case.clone(),
+            fields: self
                 .fields
-                .into_iter()
-                .map(|(name, field_i)| DynamicField {
-                    name,
-                    is_optional: field_i.optional,
-                    type_info: self
-                        .type_extentions
-                        .get(&field_i.typeid)
-                        .expect("type must register before use")
-                        .clone_self(),
+                .iter()
+                .map(|e| DynamicField {
+                    name: e.name.clone(),
+                    is_optional: e.is_optional,
+                    type_info: e.type_info.clone_self(),
                 })
                 .collect(),
-        };
+        }
+    }
+}
 
-        let stmt = collection.custom_migrate_statements();
+mod dynamic_field_impl {
+    use std::ops::Not;
 
-        for each in stmt {
-            sqlx::query(&each).execute(&self.db).await.unwrap();
+    use super::*;
+    use crate::query_builder::Expression;
+    use crate::query_builder::OpExpression;
+    use crate::query_builder::QueryBuilder;
+    use sqlx::Sqlite;
+
+    impl OpExpression for DynamicField<TypeSpec> {}
+    impl<'q> Expression<'q, Sqlite> for DynamicField<TypeSpec> {
+        fn expression(self, arg: &mut QueryBuilder<'q, Sqlite>) {
+            arg.sanitize(self.name.as_str());
+            arg.syntax(&" ");
+
+            match self.type_info {
+                TypeSpec::String => arg.syntax(&"TEXT"),
+                TypeSpec::Boolean => arg.syntax(&"BOOLEAN"),
+            }
+            if self.is_optional.not() {
+                arg.syntax(&" NOT NULL");
+            }
+        }
+    }
+}
+
+mod sqlx_extention_impls {
+    use std::marker::PhantomData;
+
+    use crate::json_client::to_bind_trait::ToBind;
+
+    use super::DatabaseForJsonClient;
+    use sqlx::Sqlite;
+
+    impl DatabaseForJsonClient for Sqlite {
+        fn string_to_bind(str: String) -> Box<dyn ToBind<Self>> {
+            Box::new(str)
+        }
+        fn type_info_default() -> Self::TypeInfo {
+            todo!()
+        }
+        fn support_string() -> Box<dyn super::TypeT<Self> + Send + Sync> {
+            Box::new(PhantomData::<String>)
+        }
+        fn support_boolean() -> Box<dyn super::TypeT<Self> + Send + Sync> {
+            Box::new(PhantomData::<bool>)
+        }
+    }
+}
+
+pub mod dynamic_collection_impl {
+    use std::{collections::HashMap, ops::Not};
+
+    use claw_ql_macros::skip;
+    use convert_case::Case;
+    use serde::de;
+    use serde_json::from_value;
+    use sqlx::{Database, Encode, Type, encode};
+
+    use crate::{
+        collections::{Collection, ValidateCollection},
+        expressions::is_null::IsNull,
+        json_client::to_bind_trait::ToBind,
+        query_builder::{
+            IsOpExpression, ManyExpressions, OpExpression, SqlSyntax,
+            functional_expr::ManyBoxedExpressions,
+        },
+        update_mod::update,
+    };
+
+    pub struct Set<S>(String, Box<dyn ToBind<S> + Send>);
+
+    impl<S> OpExpression for Set<S> {}
+    impl<S: 'static> Expression<'static, S> for Set<S> {
+        fn expression(self, ctx: &mut QueryBuilder<'static, S>)
+        where
+            S: DatabaseExt,
+        {
+            ctx.sanitize(&self.0);
+            ctx.syntax(&" = ");
+            ctx.bind(self.1);
+        }
+    }
+
+    use super::*;
+
+    impl<S> DynamicCollection<S> {
+        pub fn validate_and_cast(
+            self,
+        ) -> Result<Arc<dyn JsonCollection<S> + Send + Sync>, AddCollectionError>
+        where
+            S: DatabaseExt,
+            DynamicCollection<S>: JsonCollection<S>,
+        {
+            if self.name.is_empty() || self.name.is_case(Case::Pascal).not() {
+                return Err(AddCollectionError::InvalidName(self.name));
+            }
+            Ok(Arc::new(self))
+        }
+    }
+
+    impl<S: Database> Collection for DynamicCollection<S> {
+        fn table_name(&self) -> &str {
+            &self.name
+        }
+        fn table_name_lower_case(&self) -> &str {
+            &self.name_lower_case
+        }
+        // type PartialInput = JsonValue;
+        // type PartialValidationError = DeserializeError;
+        type Partial = JsonPartial<S>;
+        // fn validate_partial(
+        //     &self,
+        //     input: Self::PartialInput,
+        // ) -> Result<Self::Partial, Self::PartialValidationError> {
+
+        // }
+
+        // type DataInput = JsonValue;
+        // type DataValidationError = DeserializeError;
+        type Data = JsonData<S>;
+        // fn validate_data(
+        //     &self,
+        //     input: Self::DataInput,
+        // ) -> Result<Self::Data, Self::DataValidationError> {
+
+        // }
+
+        type Id = SingleIncremintalInt;
+
+        fn id(&self) -> &Self::Id {
+            &SingleIncremintalInt
+        }
+    }
+
+    impl<S> JsonCollection<S> for DynamicCollection<S>
+    where
+        S: DatabaseForJsonClient,
+        // Vec<Box<dyn ToBind<S> + std::marker::Send>>: ManyExpressions<'static, S>,
+        // S: Database<TypeInfo: Type<S>> + DatabaseExt + 'static,
+    {
+        fn data_to_expression(
+            &self,
+            data: JsonValue,
+        ) -> Result<Box<dyn ManyBoxedExpressions<S> + Send>, DeserializeError> {
+            let mut v: Vec<Box<dyn ToBind<S> + Send>> = vec![];
+
+            let mut map = from_value::<HashMap<String, JsonValue>>(data)?;
+
+            for field in self.fields.iter() {
+                match (&field.is_optional, map.remove(&field.name)) {
+                    (true, None) => v.push(Box::new(())),
+                    (false, None) => {
+                        return Err(de::Error::custom("cannot find filed with name "));
+                    }
+                    (_, Some(value)) => {
+                        v.push(field.type_info.to_bind(value)?);
+                    }
+                }
+            }
+
+            Ok(Box::new(v))
         }
 
-        self.collections.insert(body.name, Box::new(collection));
+        fn partial_to_expressions(
+            &self,
+            data: JsonValue,
+        ) -> Result<Box<dyn ManyBoxedExpressions<S> + Send>, DeserializeError> {
+            let mut v: Vec<Set<S>> = vec![];
 
-        Ok(())
+            let mut map = from_value::<HashMap<String, update<JsonValue>>>(data)?;
+
+            for field in self.fields.iter() {
+                match map.remove(&field.name) {
+                    Some(update::keep) | None => {
+                        continue;
+                    }
+                    Some(update::set(set)) => {
+                        let boxxed = field.type_info.to_bind(set)?;
+                        v.push(Set(field.name.clone(), boxxed));
+                    }
+                }
+            }
+
+            Ok(Box::new(v))
+        }
+
+        fn table_name(&self) -> &str {
+            &self.name
+        }
+
+        fn table_name_lower_case(&self) -> &str {
+            &self.name_lower_case
+        }
+
+        fn from_row_two_alias<'r>(&self, row: crate::from_row::two_alias<'r, <S>::Row>) -> JsonValue
+        where
+            S: sqlx::Database,
+        {
+            panic!(
+                "as far as I know two alias are only used for links. \nrow: {:?}",
+                debug_row(row.0)
+            )
+        }
+
+        fn from_row_pre_alias<'r>(&self, row: crate::from_row::pre_alias<'r, <S>::Row>) -> JsonValue
+        where
+            S: sqlx::Database,
+        {
+            let mut obj = serde_json::Map::new();
+            for e in self.fields.iter() {
+                let jc = e.type_info.from_row(&format!("{}{}", row.1, e.name), row.0);
+                obj.insert(e.name.to_string(), jc);
+            }
+            obj.into()
+        }
+
+        fn members(&self) -> Vec<String> {
+            self.fields.iter().map(|e| e.name.to_string()).collect()
+        }
     }
+
+    #[skip]
+    impl JsonCollection<Sqlite> for DynamicCollection {
+        fn data_to_expression(
+            &self,
+            data: JsonValue,
+        ) -> Result<Box<dyn ManyBoxedExpressions<Sqlite> + Send>, DeserializeError> {
+            todo!()
+        }
+
+        fn partial_to_expressions(
+            &self,
+            partial: JsonValue,
+        ) -> Result<Box<dyn ManyBoxedExpressions<Sqlite> + Send>, DeserializeError> {
+            todo!()
+        }
+
+        fn table_name(&self) -> &str {
+            todo!()
+        }
+
+        fn table_name_lower_case(&self) -> &str {
+            todo!()
+        }
+
+        fn from_row_pre_alias<'r>(
+            &self,
+            row: crate::from_row::pre_alias<'r, SqliteRow>,
+        ) -> JsonValue {
+            todo!()
+        }
+
+        fn members(&self) -> Vec<String> {
+            todo!()
+        }
+
+        fn from_row_two_alias<'r>(
+            &self,
+            row: crate::from_row::two_alias<'r, <Sqlite as sqlx::Database>::Row>,
+        ) -> JsonValue
+        where
+            Sqlite: sqlx::Database,
+        {
+            todo!()
+        }
+    }
+
+    // impl CollectionBasic for DynamicCollection {
+    //     fn table_name(&self) -> &str {
+    //         todo!()
+    //     }
+    //     fn table_name_lower_case(&self) -> &str {
+    //         todo!()
+    //     }
+    // }
+
+    // impl Collection for DynamicCollection {
+    //     type Partial = ();
+    //     type Data = ();
+    //     type Id = SingleIncremintalInt;
+    //     fn id(&self) -> &Self::Id {
+    //         &SingleIncremintalInt
+    //     }
+    // }
+
+    // #[allow(unused)]
+    // impl<'r, R: Row> FromRowAlias<'r, R> for DynamicCollection {
+    //     type FromRowData = ();
+
+    //     fn no_alias(&self, row: &'r R) -> Result<Self::FromRowData, crate::from_row::FromRowError> {
+    //         todo!()
+    //     }
+
+    //     fn pre_alias(
+    //         &self,
+    //         row: crate::from_row::pre_alias<'r, R>,
+    //     ) -> Result<Self::FromRowData, crate::from_row::FromRowError>
+    //     where
+    //         R: Row,
+    //     {
+    //         todo!()
+    //     }
+
+    //     fn post_alias(
+    //         &self,
+    //         row: crate::from_row::post_alias<'r, R>,
+    //     ) -> Result<Self::FromRowData, crate::from_row::FromRowError>
+    //     where
+    //         R: Row,
+    //     {
+    //         todo!()
+    //     }
+
+    //     fn two_alias(
+    //         &self,
+    //         row: crate::from_row::two_alias<'r, R>,
+    //     ) -> Result<Self::FromRowData, crate::from_row::FromRowError>
+    //     where
+    //         R: Row,
+    //     {
+    //         todo!()
+    //     }
+    // }
+
+    // impl<S> Members<S> for DynamicCollection
+    // where
+    //     S: DatabaseExt,
+    // {
+    //     fn members_names(&self) -> Vec<String> {
+    //         todo!()
+    //     }
+    // }
 }

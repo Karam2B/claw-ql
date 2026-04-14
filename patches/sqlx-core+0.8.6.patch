@@ -1,0 +1,51 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index df4b2cc..f0bea2d 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -22,6 +22,46 @@
+ // <https://doc.rust-lang.org/unstable-book/language-features/doc-cfg.html>
+ #![cfg_attr(docsrs, feature(doc_cfg))]
+ 
++pub mod executor_2 {
++    use crate::database::Database;
++    use crate::executor::Execute;
++    use std::fmt;
++
++    pub trait Executor2: Send + fmt::Debug + Sized {
++        type Database: Database;
++
++        fn execute<'e, E>(
++            self,
++            query: E,
++        ) -> futures_core::future::BoxFuture<
++            'e,
++            Result<<Self::Database as Database>::QueryResult, crate::Error>,
++        >
++        where
++            E: 'e + Execute<'e, Self::Database>;
++
++        fn fetch_all<'e, E>(
++            self,
++            query: E,
++        ) -> futures_core::future::BoxFuture<
++            'e,
++            Result<Vec<<Self::Database as Database>::Row>, crate::Error>,
++        >
++        where
++            E: 'e + Execute<'e, Self::Database>;
++
++        fn fetch_optional<'e, E>(
++            self,
++            query: E,
++        ) -> futures_core::future::BoxFuture<
++            'e,
++            Result<Option<<Self::Database as Database>::Row>, crate::Error>,
++        >
++        where
++            E: 'e + Execute<'e, Self::Database>;
++    }
++}
++
+ #[macro_use]
+ pub mod ext;
+ 

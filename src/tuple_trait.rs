@@ -3,6 +3,14 @@ pub trait BuildTuple {
     fn into_bigger<N>(self, n: N) -> Self::Bigger<N>;
 }
 
+pub trait AsTuple {
+    const IS_STRUCT: bool = true;
+    const NAMES: &'static [&'static str];
+    type Tuple;
+    fn into_tuple(self) -> Self::Tuple;
+    fn from_tuple(tuple: Self::Tuple) -> Self;
+}
+
 pub trait Tuple<TupleSpec> {
     type Output;
     fn on_all_only_mut(self, tuple_spec: TupleSpec) -> Self::Output;
@@ -73,6 +81,18 @@ where
 macro_rules! implt {
     ($($num:literal)* size $size:literal) => {
         paste::paste!(
+            impl<$([<T $num>],)*> AsTuple for ($([<T $num>],)*)
+            {
+                type Tuple = Self;
+                const IS_STRUCT: bool = false;
+                const NAMES: &'static [&'static str] = &[$(stringify!($num),)*];
+                fn into_tuple(self) -> Self::Tuple {
+                    self
+                }
+                fn from_tuple(tuple: Self::Tuple) -> Self {
+                    tuple
+                }
+            }
             impl<$([<T $num>],)*> BuildTuple for ($([<T $num>],)*)
             {
                 type Bigger<N> = ($([<T $num>],)* N,);
@@ -194,7 +214,7 @@ mod basic_example {
     #![deny(unused_must_use)]
     #![allow(non_camel_case_types)]
 
-    use crate::tuple_trait::{Tuple, TupleAsRef, TupleSpec};
+    use crate::tuple_trait::{BuildTuple, Tuple, TupleAsRef, TupleSpec};
     use core::fmt;
     use std::marker::PhantomData;
 
@@ -221,6 +241,7 @@ mod basic_example {
 
         TupleAsRef::tuple_as_ref(&tuple).on_all_only_mut(join(&mut str));
 
+        // join didnt hold any lifetimes as I can move tuple
         let _ = tuple;
 
         assert_eq!(str.as_str(), "3, hello world, true")
@@ -229,7 +250,7 @@ mod basic_example {
     struct phantomize;
     impl<M> TupleSpec<&M> for phantomize {
         type Output = PhantomData<M>;
-        fn on_each<const LEN: usize, const INDEX: usize>(&mut self, member: &M) -> Self::Output {
+        fn on_each<const LEN: usize, const INDEX: usize>(&mut self, _: &M) -> Self::Output {
             PhantomData
         }
     }
@@ -244,5 +265,38 @@ mod basic_example {
             PhantomData<&str>,
             PhantomData<bool>,
         ) = tuple.tuple_as_ref().on_all_only_mut(phantomize);
+    }
+
+    struct Ctx<'b>(&'b mut String);
+    struct double_lifetime<'shallow, 'deep>(&'shallow mut Ctx<'deep>);
+
+    impl<'a, 'b> TupleSpec<&'b str> for double_lifetime<'a, 'b> {
+        type Output = ();
+
+        fn on_each<const LAST_INDEX: usize, const INDEX: usize>(
+            &mut self,
+            member: &'b str,
+        ) -> Self::Output {
+            self.0.0.push_str(member);
+        }
+    }
+
+    fn use_double_lifetime<'deep, T>(
+        //into: &'shllow mut Next<'deep> ,
+        ctx: &mut Ctx<'deep>,
+        this: &'deep str,
+    ) where
+        T: BuildTuple,
+        // eradicate one lifetime and abstract over the other.
+        //
+        // because not always that I can specify the lifetime
+        // of shallow (inside traits you cannot change signature of method)
+        // impl<'deep> Trait<'deep> for &'deep str {
+        //     fn method(self, ctx: &mut Ctx<'deep>)
+        // }
+        (&'static str,): for<'shllow> Tuple<double_lifetime<'shllow, 'deep>>,
+    {
+        let ctx = double_lifetime(ctx);
+        ("hello",).into_bigger(this).on_all_only_mut(ctx);
     }
 }

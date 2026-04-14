@@ -1,3 +1,4 @@
+#![allow(unexpected_cfgs)]
 #![cfg(feature = "skip_without_comment")]
 use claw_ql::Schema;
 use claw_ql::collections::CollectionHandler;
@@ -43,6 +44,7 @@ impl LinkData<course> for Relation<course, student> {
         }
     }
 }
+
 impl LinkData<student> for Relation<student, course> {
     type Spec = ManyToMany<student, course>;
 

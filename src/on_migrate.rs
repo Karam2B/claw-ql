@@ -4,6 +4,7 @@ pub trait OnMigrate {
 }
 
 // #[cfg(feature = "skip_without_comments")]
+#[claw_ql_macros::skip]
 pub mod dynamic_migrate {
     use std::pin::Pin;
 
@@ -12,8 +13,7 @@ pub mod dynamic_migrate {
     use crate::{
         database_extention::DatabaseExt,
         on_migrate::OnMigrate,
-        query_builder::{Expression, QueryBuilder},
-        use_executor,
+        query_builder::{Expression, StatementBuilder},
     };
 
     pub trait DynamicOnMigrate<S: Database> {
@@ -28,7 +28,7 @@ pub mod dynamic_migrate {
         for<'c> &'c mut <S as sqlx::Database>::Connection: Executor<'c, Database = S>,
     {
         fn migrate(&self, pool: Pool<S>) -> Pin<Box<dyn Future<Output = ()>>> {
-            let mut qb = QueryBuilder::default();
+            let mut qb = StatementBuilder::default();
             self.statments().expression(&mut qb);
 
             Box::pin(async move {
