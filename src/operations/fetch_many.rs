@@ -1,16 +1,13 @@
-use std::convert::Infallible;
-
 use crate::{
     collections::{Collection, CollectionId},
     database_extention::DatabaseExt,
     execute::Executable,
-    expressions::larger_than_or_equal::LargerThanOrEqual,
     extentions::common_expressions::{OnInsert, Scoped, StrAliased},
     fix_executor::ExecutorTrait,
     from_row::{FromRowAlias, FromRowData, pre_alias},
     operations::{LinkedOutput, Operation, OperationOutput},
     query_builder::{
-        Bind, Expression, IsOpExpression, ManyExpressions, PossibleExpression, StatementBuilder,
+        Bind, Expression, ManyExpressions, PossibleExpression, StatementBuilder,
         functional_expr::ManyFlat,
     },
     statements::select_statement::SelectStatement,
@@ -109,7 +106,7 @@ pub struct FetchMany<From, Links, Wheres, Order, FirstItem> {
 }
 
 pub trait LinkFetchMany {
-    type Output;
+    type Output: Default;
 
     type SelectItems;
     fn non_aggregating_select_items(&self) -> Self::SelectItems;
@@ -121,32 +118,26 @@ pub trait LinkFetchMany {
     fn wheres(&self) -> Self::Wheres;
 
     type PostOperation;
+    type OperationInput: Default;
+    type ForEach;
 
-    fn post_select(&self) -> Self::PostOperation
+    fn take(
+        &self,
+        item: <Self::SelectItems as FromRowData>::RData,
+        poi: &mut Self::OperationInput,
+    ) -> Self::ForEach
+    where
+        Self::SelectItems: FromRowData;
+    fn post_map(&self, item: Self::ForEach) -> Self::Output;
+
+    fn post_select(&self, poi: Self::OperationInput) -> Self::PostOperation
     where
         Self::SelectItems: FromRowData;
 }
 
-pub trait LinkFetchManyTakeId<BaseId>: LinkFetchMany {
-    fn take(
-        &self,
-        into: &BaseId::IdData,
-        select_items: &mut Vec<<Self::SelectItems as FromRowData>::RData>,
-        post_operation: &mut <Self::PostOperation as OperationOutput>::Output,
-    ) -> Self::Output
-    where
-        BaseId: CollectionId,
-        Self::SelectItems: FromRowData,
-        Self::PostOperation: OperationOutput;
-}
-
 mod functional_impls {
     use super::LinkFetchMany;
-    use crate::collections::CollectionId;
     use crate::from_row::FromRowData;
-    use crate::operations::OperationOutput;
-    use crate::operations::fetch_many::LinkFetchManyTakeId;
-    use crate::operations::fetch_many::functional_impls::select_items_supported_in_vec::VecCollection;
 
     impl LinkFetchMany for () {
         type Output = ();
@@ -162,25 +153,257 @@ mod functional_impls {
 
         type PostOperation = ();
 
-        fn post_select(&self) -> Self::PostOperation
+        type OperationInput = ();
+
+        type ForEach = ();
+
+        fn take(
+            &self,
+            _: <Self::SelectItems as FromRowData>::RData,
+            _: &mut Self::OperationInput,
+        ) -> Self::ForEach
+        where
+            Self::SelectItems: FromRowData,
+        {
+        }
+
+        fn post_map(&self, _: Self::ForEach) -> Self::Output {}
+
+        fn post_select(&self, _: Self::OperationInput) -> Self::PostOperation
         where
             Self::SelectItems: FromRowData,
         {
         }
     }
-    impl<I> LinkFetchManyTakeId<I> for () {
-        fn take(
-            &self,
-            _: &I::IdData,
-            _: &mut Vec<<Self::SelectItems as FromRowData>::RData>,
-            _: &mut <Self::PostOperation as OperationOutput>::Output,
-        ) -> Self::Output
-        where
-            I: CollectionId,
-            Self::PostOperation: OperationOutput,
-        {
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ManyOutput<T, Next> {
+    pub items: Vec<T>,
+    pub next_item: Option<Next>,
+}
+
+impl<B, L, W, O, F> OperationOutput for FetchMany<B, L, W, O, (<B::Id as CollectionId>::IdData, F)>
+where
+    B: Collection,
+    L: LinkFetchMany,
+{
+    type Output = ManyOutput<
+        LinkedOutput<<B::Id as CollectionId>::IdData, B::Data, L::Output>,
+        (<B::Id as CollectionId>::IdData, F),
+    >;
+}
+
+impl<S, Base, Links, Wheres, OrderBy, First> Operation<S>
+    for FetchMany<Base, Links, Wheres, OrderBy, (<Base::Id as CollectionId>::IdData, First)>
+where
+    S: DatabaseExt,
+    S: ExecutorTrait,
+    Base: Send,
+    OrderBy: Send,
+    First: Send,
+    Wheres: Send,
+    Wheres: for<'q> ManyExpressions<'q, S>,
+    Links: Send + LinkFetchMany<Output: Send> + LinkFetchManyTakeId<Base::Id>,
+    Links::Wheres: for<'q> ManyExpressions<'q, S>,
+    Links::SelectItems: Send + Clone + StrAliased<StrAliased: for<'q> ManyExpressions<'q, S>>,
+    Links::SelectItems: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
+    Links::Join: for<'q> ManyExpressions<'q, S>,
+    Links::PostOperation: Operation<S>,
+    Base: Collection<Data: Send, Id: Send>,
+    Base: StrAliased<StrAliased: for<'q> ManyExpressions<'q, S>>,
+    Base: FromRowData<RData = Base::Data>,
+    Base: for<'r> FromRowAlias<'r, S::Row>,
+    Base::Id: FromRowData<RData = <Base::Id as CollectionId>::IdData>,
+    Base::Id: for<'r> FromRowAlias<'r, S::Row>,
+    Base::Id: CollectionId<IdData: Send + for<'q> Encode<'q, S> + Type<S>>,
+    Base::Id: Scoped<Scoped: for<'q> Expression<'q, S>>,
+    Base::Id: StrAliased<StrAliased: for<'q> Expression<'q, S>>,
+    Links: LinkFetchMany<Output: Send>,
+    i64: for<'q> Encode<'q, S> + Type<S>,
+    OrderBy: OnInsert<InsertInput = First, InsertExpression: for<'q> PossibleExpression<'q, S>>,
+    OrderBy: for<'r> FromRowAlias<'r, S::Row, RData = First>,
+{
+    async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output {
+        // let db = S::singleton();
+        let id = self.base.id();
+        let link_items = self.links.non_aggregating_select_items();
+        let query_builder = StatementBuilder::<'_, S>::new(SelectStatement {
+            select_items: ManyFlat((
+                id.str_aliased("i"),
+                self.base.str_aliased("b"),
+                link_items.str_aliased("l"),
+            )),
+            from: self.base.table_name().to_string(),
+            joins: self.links.non_duplicating_join(),
+            group_by: (),
+            // order: self.cursor_order_by.clone(),
+            order: (),
+            wheres: ManyFlat((
+                self.wheres,
+                // self.cursor_first_item.map(|(id, first)| LargerThanOrEqual {
+                //     id: ManyFlat((self.cursor_order_by.clone(), self.base.id().scoped())),
+                //     values: ManyFlat((Bind(first), Bind(id))),
+                // }),
+                self.links.wheres(),
+            )),
+            limit: Bind(self.limit),
+        });
+
+        let (stmt, arg) = query_builder.unwrap();
+        println!("stmt: {}", stmt);
+        let mut s = S::fetch_all(
+            &mut *pool,
+            Executable {
+                string: &stmt,
+                arguments: arg,
+            },
+        )
+        .await
+        .unwrap();
+
+        let has_more = if s.len() == (self.limit + 1) as usize {
+            let last = s
+                .pop()
+                .expect("bug: len is usize + 1, should have last item to pop");
+            let next = self
+                .cursor_order_by
+                .pre_alias(pre_alias::new(&last, "b"))
+                .unwrap();
+            let id = id.pre_alias(pre_alias::new(&last, "i")).unwrap();
+            Some((id, next))
+        } else {
+            None::<(<Base::Id as CollectionId>::IdData, First)>
+        };
+
+        let m = [2].into_iter().map(|_| None::<()>);
+        let m: Option<()> = m.collect();
+        let _ = m;
+
+        let mut poi = Default::default();
+
+        let all = s.into_iter().map(|e| {
+            let id = id.pre_alias(pre_alias::new(&e, "i")).unwrap();
+            let link = link_items.pre_alias(pre_alias::new(&e, "l")).unwrap();
+            let link = self.links.take(link, &mut poi);
+            return LinkedOutput {
+                id,
+                attributes: self.base.pre_alias(pre_alias::new(&e, "b")).unwrap(),
+                links: link,
+            };
+        });
+
+        // hmm, I suspected this line of code to fail, let me just panic
+        (|| panic!("sneaky panic"))();
+
+        let po = self.links.post_select(poi).exec_operation(&mut *pool).await;
+
+        let all = all
+            .map(|e| LinkedOutput {
+                id: e.id,
+                attributes: e.attributes,
+                links: self.links.post_map(e.links),
+            })
+            .collect::<Vec<_>>();
+
+        ManyOutput {
+            items: all,
+            next_item: has_more,
         }
     }
+}
+
+#[cfg(test)]
+#[claw_ql_macros::skip]
+mod test {
+    use sqlx::{Sqlite, query};
+
+    use crate::{
+        connect_in_memory::ConnectInMemory,
+        operations::{
+            LinkedOutput, Operation, SafeOperation,
+            fetch_many::{FetchMany, ManyOutput},
+        },
+        test_module::{self, Todo, todo_members},
+    };
+
+    #[tokio::test]
+    async fn main() {
+        let mut conn = Sqlite::connect_in_memory_2().await;
+
+        query(
+            "
+        CREATE TABLE Todo (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            done BOOLEAN NOT NULL,
+            description TEXT
+        );
+
+        INSERT INTO Todo (title, done, description) VALUES
+            ('non_unique', true, 'description_1'),
+            ('second_todo', false, 'description_2'),
+            ('third_todo', true, 'description_3'),
+            ('non_unique', false, 'description_4'),
+            ('fifth_todo', true, 'description_5'),
+            ('sixth_todo', false, 'description_6');
+    ",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+        let safe_op = FetchMany {
+            base: test_module::todo,
+            wheres: (),
+            links: (),
+            cursor_order_by: todo_members::title,
+            cursor_first_item: Some((4, String::from("non_unique"))),
+            limit: 2,
+        }
+        .safety_check()
+        .unwrap();
+
+        let output = Operation::<Sqlite>::exec_operation(safe_op, &mut conn).await;
+
+        pretty_assertions::assert_eq!(
+            output,
+            ManyOutput {
+                items: vec![
+                    LinkedOutput {
+                        id: 4,
+                        attributes: Todo {
+                            title: "non_unique".to_string(),
+                            done: false,
+                            description: Some("description_4".to_string()),
+                        },
+                        links: (),
+                    },
+                    LinkedOutput {
+                        id: 2,
+                        attributes: Todo {
+                            title: "second_todo".to_string(),
+                            done: false,
+                            description: Some("description_2".to_string()),
+                        },
+                        links: (),
+                    },
+                ],
+                next_item: Some((6, String::from("sixth_todo"))),
+            }
+        );
+    }
+}
+
+#[claw_ql_macros::skip]
+mod deprecate_vec_impls {
+
+    use super::LinkFetchMany;
+    use crate::collections::CollectionId;
+    use crate::from_row::FromRowData;
+    use crate::operations::OperationOutput;
+    use crate::operations::fetch_many::LinkFetchManyTakeId;
+    use crate::operations::fetch_many::functional_impls::select_items_supported_in_vec::VecCollection;
 
     mod select_items_supported_in_vec {
         use std::ops::Not;
@@ -439,217 +662,5 @@ mod functional_impls {
         {
             todo!()
         }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct ManyOutput<T, Next> {
-    pub items: Vec<T>,
-    pub next_item: Option<Next>,
-}
-
-impl<B, L, W, O, F> OperationOutput for FetchMany<B, L, W, O, (<B::Id as CollectionId>::IdData, F)>
-where
-    B: Collection,
-    L: LinkFetchMany,
-{
-    type Output = ManyOutput<
-        LinkedOutput<<B::Id as CollectionId>::IdData, B::Data, L::Output>,
-        (<B::Id as CollectionId>::IdData, F),
-    >;
-}
-
-impl<S, Base, Links, Wheres, OrderBy, First> Operation<S>
-    for FetchMany<Base, Links, Wheres, OrderBy, (<Base::Id as CollectionId>::IdData, First)>
-where
-    S: DatabaseExt,
-    S: ExecutorTrait,
-    Base: Send,
-    OrderBy: Send,
-    First: Send,
-    Wheres: Send,
-    Wheres: for<'q> ManyExpressions<'q, S>,
-    Links: Send + LinkFetchMany<Output: Send> + LinkFetchManyTakeId<Base::Id>,
-    Links::Wheres: for<'q> ManyExpressions<'q, S>,
-    Links::SelectItems: Send + Clone + StrAliased<StrAliased: for<'q> ManyExpressions<'q, S>>,
-    Links::SelectItems: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
-    Links::Join: for<'q> ManyExpressions<'q, S>,
-    Links::PostOperation: Operation<S>,
-    Base: Collection<Data: Send, Id: Send>,
-    Base: StrAliased<StrAliased: for<'q> ManyExpressions<'q, S>>,
-    Base: FromRowData<RData = Base::Data>,
-    Base: for<'r> FromRowAlias<'r, S::Row>,
-    Base::Id: FromRowData<RData = <Base::Id as CollectionId>::IdData>,
-    Base::Id: for<'r> FromRowAlias<'r, S::Row>,
-    Base::Id: CollectionId<IdData: Send + for<'q> Encode<'q, S> + Type<S>>,
-    Base::Id: Scoped<Scoped: for<'q> Expression<'q, S>>,
-    Base::Id: StrAliased<StrAliased: for<'q> Expression<'q, S>>,
-    Links: LinkFetchMany<Output: Send>,
-    i64: for<'q> Encode<'q, S> + Type<S>,
-    OrderBy: OnInsert<InsertInput = First, InsertExpression: for<'q> PossibleExpression<'q, S>>,
-    OrderBy: for<'r> FromRowAlias<'r, S::Row, RData = First>,
-{
-    async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output {
-        // let db = S::singleton();
-        let id = self.base.id();
-        let link_items = self.links.non_aggregating_select_items();
-        let query_builder = StatementBuilder::<'_, S>::new(SelectStatement {
-            select_items: ManyFlat((
-                id.str_aliased("i"),
-                self.base.str_aliased("b"),
-                link_items.str_aliased("l"),
-            )),
-            from: self.base.table_name().to_string(),
-            joins: self.links.non_duplicating_join(),
-            group_by: (),
-            // order: self.cursor_order_by.clone(),
-            order: (),
-            wheres: ManyFlat((
-                self.wheres,
-                // self.cursor_first_item.map(|(id, first)| LargerThanOrEqual {
-                //     id: ManyFlat((self.cursor_order_by.clone(), self.base.id().scoped())),
-                //     values: ManyFlat((Bind(first), Bind(id))),
-                // }),
-                self.links.wheres(),
-            )),
-            limit: Bind(self.limit),
-        });
-
-        let (stmt, arg) = query_builder.unwrap();
-        println!("stmt: {}", stmt);
-        let mut s = S::fetch_all(
-            &mut *pool,
-            Executable {
-                string: &stmt,
-                arguments: arg,
-            },
-        )
-        .await
-        .unwrap();
-
-        let has_more = if s.len() == (self.limit + 1) as usize {
-            let last = s
-                .pop()
-                .expect("bug: len is usize + 1, should have last item to pop");
-            let next = self
-                .cursor_order_by
-                .pre_alias(pre_alias::new(&last, "b"))
-                .unwrap();
-            let id = id.pre_alias(pre_alias::new(&last, "i")).unwrap();
-            Some((id, next))
-        } else {
-            None::<(<Base::Id as CollectionId>::IdData, First)>
-        };
-
-        let mut link_post_select = vec![];
-
-        for each in s.iter() {
-            let to_be_pushed = link_items.pre_alias(pre_alias::new(&each, "l")).unwrap();
-            link_post_select.push(to_be_pushed);
-        }
-
-        let post_operation = self.links.post_select();
-
-        let mut pod = post_operation.exec_operation(pool).await;
-
-        let all = s
-            .into_iter()
-            .map(|e| {
-                let id = id.pre_alias(pre_alias::new(&e, "i")).unwrap();
-                let links = self.links.take(&id, &mut link_post_select, &mut pod);
-                return LinkedOutput {
-                    id,
-                    attributes: self.base.pre_alias(pre_alias::new(&e, "b")).unwrap(),
-                    links,
-                };
-            })
-            .collect::<Vec<_>>();
-
-        ManyOutput {
-            items: all,
-            next_item: has_more,
-        }
-    }
-}
-
-#[cfg(test)]
-#[claw_ql_macros::skip]
-mod test {
-    use sqlx::{Sqlite, query};
-
-    use crate::{
-        connect_in_memory::ConnectInMemory,
-        operations::{
-            LinkedOutput, Operation, SafeOperation,
-            fetch_many::{FetchMany, ManyOutput},
-        },
-        test_module::{self, Todo, todo_members},
-    };
-
-    #[tokio::test]
-    async fn main() {
-        let mut conn = Sqlite::connect_in_memory_2().await;
-
-        query(
-            "
-        CREATE TABLE Todo (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            done BOOLEAN NOT NULL,
-            description TEXT
-        );
-
-        INSERT INTO Todo (title, done, description) VALUES
-            ('non_unique', true, 'description_1'),
-            ('second_todo', false, 'description_2'),
-            ('third_todo', true, 'description_3'),
-            ('non_unique', false, 'description_4'),
-            ('fifth_todo', true, 'description_5'),
-            ('sixth_todo', false, 'description_6');
-    ",
-        )
-        .execute(&mut conn)
-        .await
-        .unwrap();
-
-        let safe_op = FetchMany {
-            base: test_module::todo,
-            wheres: (),
-            links: (),
-            cursor_order_by: todo_members::title,
-            cursor_first_item: Some((4, String::from("non_unique"))),
-            limit: 2,
-        }
-        .safety_check()
-        .unwrap();
-
-        let output = Operation::<Sqlite>::exec_operation(safe_op, &mut conn).await;
-
-        pretty_assertions::assert_eq!(
-            output,
-            ManyOutput {
-                items: vec![
-                    LinkedOutput {
-                        id: 4,
-                        attributes: Todo {
-                            title: "non_unique".to_string(),
-                            done: false,
-                            description: Some("description_4".to_string()),
-                        },
-                        links: (),
-                    },
-                    LinkedOutput {
-                        id: 2,
-                        attributes: Todo {
-                            title: "second_todo".to_string(),
-                            done: false,
-                            description: Some("description_2".to_string()),
-                        },
-                        links: (),
-                    },
-                ],
-                next_item: Some((6, String::from("sixth_todo"))),
-            }
-        );
     }
 }

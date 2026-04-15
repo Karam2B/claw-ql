@@ -1327,7 +1327,7 @@ pub mod fetch_many {
         }
 
         impl<S: Database> FromRowData for JsonLinkFetchManySelectItems<S> {
-            type RData = Box<dyn Any + Send>;
+            type RData = Option<Box<dyn Any + Send>>;
         }
 
         impl<'r, S: Database> FromRowAlias<'r, S::Row> for JsonLinkFetchManySelectItems<S> {
@@ -1335,7 +1335,7 @@ pub mod fetch_many {
                 &self,
                 row: &'r S::Row,
             ) -> Result<Self::RData, crate::from_row::FromRowError> {
-                self.dyn_from_row.no_alias_2(row)
+                self.dyn_from_row.no_alias_2(row).map(|e| Some(e))
             }
 
             fn pre_alias(
@@ -1345,7 +1345,7 @@ pub mod fetch_many {
             where
                 S::Row: sqlx::Row,
             {
-                self.dyn_from_row.pre_alias(row)
+                self.dyn_from_row.pre_alias(row).map(|e| Some(e))
             }
 
             fn post_alias(
@@ -1355,7 +1355,7 @@ pub mod fetch_many {
             where
                 S::Row: sqlx::Row,
             {
-                self.dyn_from_row.post_alias(row)
+                self.dyn_from_row.post_alias(row).map(|e| Some(e))
             }
 
             fn two_alias(
@@ -1365,7 +1365,7 @@ pub mod fetch_many {
             where
                 S::Row: sqlx::Row,
             {
-                self.dyn_from_row.two_alias(row)
+                self.dyn_from_row.two_alias(row).map(|e| Some(e))
             }
         }
 
@@ -1379,9 +1379,9 @@ pub mod fetch_many {
             fn take_2(
                 &self,
                 into: &i64,
-                select_items: &mut Vec<Box<dyn Any + Send>>,
+                select_items: &mut Option<Box<dyn Any + Send>>,
                 op: &mut Box<dyn Any + Send>,
-            ) -> serde_json::Value;
+            ) -> Option<serde_json::Value>;
         }
 
         impl<S, T> JsonLinkFetchMany<S> for T
@@ -1424,47 +1424,38 @@ pub mod fetch_many {
             fn take_2(
                 &self,
                 into: &i64,
-                select_items: &mut Vec<Box<dyn Any + Send>>,
+                select_items: &mut Option<Box<dyn Any + Send>>,
                 op: &mut Box<dyn Any + Send>,
-            ) -> serde_json::Value {
-                let mut og = vec![];
-                mem::swap(&mut og, select_items);
-                let mut og = og
-                    .into_iter()
-                    .filter(|e| {
-                        // let s = std::any::type_name::<<T::SelectItems as FromRowData>::RData>();
-                        // let id = e.type_id();
-                        // let id2 = std::any::TypeId::of::<<T::SelectItems as FromRowData>::RData>();
-                        // let ee: &Box<dyn Any + Send> = e;
-                        // let downcasted =
-                        //     ee.downcast_ref::<<T::SelectItems as FromRowData>::RData>();
-                        // panic!("i'm expecting: {id2:?}\n but I'm getting {downcasted:?}");
-                        return true;
-                    })
-                    .map(|e| {
-                        let id2 = std::any::TypeId::of::<<T::SelectItems as FromRowData>::RData>();
-                        let name2 = std::any::type_name::<<T::SelectItems as FromRowData>::RData>();
+            ) -> Option<serde_json::Value> {
+                todo!()
+                // // let mut og = vec![];
+                // // mem::swap(&mut og, select_items);
+                // // let mut og = og
+                // //     .into_iter()
+                // //     .map(|e| {
+                // // why double box?
+                // // when I figure that out I will remove this code
+                // if let Some(e) = select_items {
+                //     let e = if e.is::<Box<dyn Any + Send>>() {
+                //         *e.downcast::<Box<dyn Any + Send>>().unwrap()
+                //     } else {
+                //         println!("bug fixed, remove me");
+                //         e
+                //     };
+                // }
 
-                        let another_hint = e.type_id();
+                // let downcasted = e
+                //     .downcast::<<T::SelectItems as FromRowData>::RData>()
+                //     .unwrap();
+                // //     return *downcasted;
+                // // })
+                // // .collect::<Vec<_>>();
+                // let op = op
+                //     .downcast_mut::<<T::PostOperation as OperationOutput>::Output>()
+                //     .expect("claw_ql bug: inconsistant code");
+                // let s = LinkFetchManyTakeId::take(self, into, &mut downcasted, op, output);
 
-                        let s: Box<dyn Any + Send> = e;
-
-                        let downcasted = s.downcast_ref::<<T::SelectItems as FromRowData>::RData>();
-
-                        panic!("i'm expecting: {name2:?} {id2:?}\n but I'm getting {downcasted:?}\n{:?}\n {another_hint:?}",
-                    s.type_id()
-                    );
-
-                        *s.downcast::<<T::SelectItems as FromRowData>::RData>()
-                            .unwrap()
-                    })
-                    .collect::<Vec<_>>();
-                let op = op
-                    .downcast_mut::<<T::PostOperation as OperationOutput>::Output>()
-                    .expect("claw_ql bug: inconsistant code");
-                let s = LinkFetchManyTakeId::take(self, into, &mut og, op);
-
-                serde_json::to_value(s).expect("claw_ql bug: when serialize ever fail?")
+                // serde_json::to_value(s).expect("claw_ql bug: when serialize ever fail?")
             }
         }
 
@@ -1501,14 +1492,22 @@ pub mod fetch_many {
 
         impl<'a, S: DatabaseExt> LinkFetchManyTakeId<SingleIncremintalInt<String>>
             for Box<dyn JsonLinkFetchMany<S> + Send + 'a>
+        // where
+        //     Self::SelectItems: MembersInDynamicOperation<S>,
         {
             fn take(
                 &self,
                 into: &i64,
-                select_items: &mut Vec<<Self::SelectItems as FromRowData>::RData>,
+                item: &mut <Self::SelectItems as FromRowData>::RData,
                 post_operation: &mut <Self::PostOperation as OperationOutput>::Output,
-            ) -> Self::Output {
-                self.take_2(into, select_items, post_operation)
+                output: &mut Self::Output,
+            ) {
+                let _ = (into, item, post_operation, output);
+                todo!()
+                // let s = JsonLinkFetchMany::take_2(self, into, item, post_operation);
+                // if let Some(s) = s {
+                //     *output = s;
+                // }
             }
         }
     }

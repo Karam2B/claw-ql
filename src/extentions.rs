@@ -60,30 +60,29 @@ pub mod common_expressions {
         use core::fmt;
         use std::any::{Any, type_name_of_val};
 
-        use crate::{
-            debug_any::DebugAny,
-            from_row::{FromRowAlias, FromRowData, FromRowError, post_alias, pre_alias, two_alias},
+        use crate::from_row::{
+            FromRowAlias, FromRowData, FromRowError, post_alias, pre_alias, two_alias,
         };
 
         pub trait DynFromRow<R> {
             fn clone_as_box(&self) -> Box<dyn DynFromRow<R> + Send>;
-            fn no_alias_2<'r>(&self, row: &'r R) -> Result<Box<dyn DebugAny + Send>, FromRowError>;
+            fn no_alias_2<'r>(&self, row: &'r R) -> Result<Box<dyn Any + Send>, FromRowError>;
             fn pre_alias_2<'r>(
                 &self,
                 row: pre_alias<'r, R>,
-            ) -> Result<Box<dyn DebugAny + Send>, FromRowError>
+            ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row;
             fn post_alias_2<'r>(
                 &self,
                 row: post_alias<'r, R>,
-            ) -> Result<Box<dyn DebugAny + Send>, FromRowError>
+            ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row;
             fn two_alias_2<'r>(
                 &self,
                 row: two_alias<'r, R>,
-            ) -> Result<Box<dyn DebugAny + Send>, FromRowError>
+            ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row;
         }
@@ -98,13 +97,13 @@ pub mod common_expressions {
             fn clone_as_box(&self) -> Box<dyn DynFromRow<R> + Send> {
                 Box::new(self.clone())
             }
-            fn no_alias_2<'r>(&self, row: &'r R) -> Result<Box<dyn DebugAny + Send>, FromRowError> {
+            fn no_alias_2<'r>(&self, row: &'r R) -> Result<Box<dyn Any + Send>, FromRowError> {
                 Ok(Box::new(self.no_alias(row)?))
             }
             fn pre_alias_2<'r>(
                 &self,
                 row: pre_alias<'r, R>,
-            ) -> Result<Box<dyn DebugAny + Send>, FromRowError>
+            ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row,
             {
@@ -115,22 +114,19 @@ pub mod common_expressions {
                     "TypeId(0x63cc4f4b1487754c707f72f691c5c420)",
                     format!("{:?}", s.type_id())
                 );
+
                 println!(
-                    "I'm converting to: {:?} \n{:?}",
+                    "I'm this to Any\n type_id: {:?} \n type_name: {:?}",
                     s.type_id(),
                     type_name_of_val(&s)
                 );
-                // panic!("type_name 2: {:?}", s.type_id());
-                // // s: (i64, core::option::Option<(i64, serde_json::value::Value)>),
-                // //id: TypeId(0xd4f6076ad58e3b145244fc05b79e6f15),
-                // //id2: TypeId(0x63cc4f4b1487754c707f72f691c5c420)
 
                 Ok(Box::new(s))
             }
             fn post_alias_2<'r>(
                 &self,
                 row: post_alias<'r, R>,
-            ) -> Result<Box<dyn DebugAny + Send>, FromRowError>
+            ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row,
             {
@@ -139,7 +135,7 @@ pub mod common_expressions {
             fn two_alias_2<'r>(
                 &self,
                 row: two_alias<'r, R>,
-            ) -> Result<Box<dyn DebugAny + Send>, FromRowError>
+            ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row,
             {
@@ -148,7 +144,7 @@ pub mod common_expressions {
         }
 
         impl<'r, R> FromRowData for Box<dyn DynFromRow<R> + Send> {
-            type RData = Box<dyn DebugAny + Send>;
+            type RData = Box<dyn Any + Send>;
         }
 
         impl<'r, R> FromRowAlias<'r, R> for Box<dyn DynFromRow<R> + Send> {

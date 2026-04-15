@@ -421,8 +421,6 @@ mod impl_link_fetch_many {
         T: Collection<Id: SingleColumnId + Identifier> + TableNameExpression + Clone,
         F: Collection + TableNameExpression + Clone,
     {
-        type Output = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>;
-
         type SelectItems = OptionaToManyItems<F::Id, T::Id, T>;
 
         fn non_aggregating_select_items(&self) -> Self::SelectItems {
@@ -464,6 +462,8 @@ mod impl_link_fetch_many {
             Self::SelectItems: crate::from_row::FromRowData,
         {
         }
+
+        type Output = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>;
     }
 
     impl<Key, F, T> LinkFetchManyTakeId<F::Id> for OptionalToMany<Key, F, T>
@@ -482,26 +482,48 @@ mod impl_link_fetch_many {
         F: Collection,
         T: Collection,
         <F::Id as CollectionId>::IdData: ::core::fmt::Debug + Clone,
+        <T::Id as CollectionId>::IdData: Clone,
+        T::Data: Clone,
     {
-        fn take(
+        type ForEach = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>;
+        type IntoIter = Vec<Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>>;
+
+        fn for_each(
             &self,
             into: &<F::Id as CollectionId>::IdData,
-            res: &mut Vec<(
-                <F::Id as CollectionId>::IdData,
-                Option<(<T::Id as CollectionId>::IdData, T::Data)>,
-            )>,
+            item: &mut <Self::SelectItems as FromRowData>::RData,
             _: &mut <Self::PostOperation as OperationOutput>::Output,
-        ) -> Self::Output {
-            for (i, each) in res.iter_mut().enumerate() {
-                if each.0 == *into {
-                    let (_done_in_comparison, option) = res.remove(i);
-                    return option.map(|(to_id, to)| CollectionOutput {
-                        id: to_id,
-                        attributes: to,
-                    });
-                }
+        ) -> Self::ForEach
+        where
+            F::Id: CollectionId,
+            Self::SelectItems: FromRowData,
+            Self::PostOperation: OperationOutput,
+        {
+            if item.0 == *into {
+                item.1.clone().map(|e| CollectionOutput {
+                    id: e.0,
+                    attributes: e.1,
+                })
+            } else {
+                None
             }
-            None
+        }
+
+        fn take(
+            &self,
+            mut all: Self::IntoIter,
+            _: &<F::Id as CollectionId>::IdData,
+            _: &mut <Self::PostOperation as OperationOutput>::Output,
+        ) -> Self::Output
+        where
+            Self::SelectItems: FromRowData,
+            Self::PostOperation: OperationOutput,
+            F::Id: CollectionId,
+        {
+            if all.len() > 1 {
+                panic!("bug: optional to many should have at maximum one item");
+            }
+            all.pop().flatten()
         }
     }
 }
