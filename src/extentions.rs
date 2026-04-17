@@ -60,8 +60,12 @@ pub mod common_expressions {
         use core::fmt;
         use std::any::{Any, type_name_of_val};
 
-        use crate::from_row::{
-            FromRowAlias, FromRowData, FromRowError, post_alias, pre_alias, two_alias,
+        use sqlx::Database;
+
+        use crate::{
+            extentions::common_expressions::StrAliased,
+            from_row::{FromRowAlias, FromRowData, FromRowError, post_alias, pre_alias, two_alias},
+            query_builder::{ManyBoxedExpressions, ManyExpressions},
         };
 
         pub trait DynFromRow<R> {
@@ -85,15 +89,32 @@ pub mod common_expressions {
             ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row;
+            fn str_aliased_2(
+                &self,
+                alias: &'static str,
+            ) -> Box<dyn ManyBoxedExpressions<R::Database> + Send>
+            where
+                R: sqlx::Row;
         }
 
         impl<R, T> DynFromRow<R> for T
         where
+            R: sqlx::Row,
             T: Clone + Send + 'static,
             T: for<'r> FromRowAlias<'r, R>,
             T::RData: 'static + Send,
             T::RData: fmt::Debug,
+            T: StrAliased<StrAliased: Send + for<'q> ManyExpressions<'q, R::Database>>,
         {
+            fn str_aliased_2(
+                &self,
+                alias: &'static str,
+            ) -> Box<dyn ManyBoxedExpressions<<R>::Database> + Send>
+            where
+                R: sqlx::Row,
+            {
+                Box::new(self.str_aliased(alias))
+            }
             fn clone_as_box(&self) -> Box<dyn DynFromRow<R> + Send> {
                 Box::new(self.clone())
             }
@@ -180,67 +201,6 @@ pub mod common_expressions {
                 R: sqlx::Row,
             {
                 Ok(Box::new(self.two_alias_2(row)?))
-            }
-        }
-    }
-
-    pub mod find_place_for_this {
-        use sqlx::{ColumnIndex, Decode, Encode, Type};
-
-        use crate::{
-            collections::SingleIncremintalInt, database_extention::DatabaseExt,
-            json_client::dynamic_collection::DynamicCollection,
-        };
-
-        pub struct DynamicCol {
-            pub table: String,
-            pub col: String,
-        }
-
-        impl Clone for DynamicCol {
-            fn clone(&self) -> Self {
-                Self {
-                    table: self.table.clone(),
-                    col: self.col.clone(),
-                }
-            }
-        }
-
-        pub trait MembersInDynamicOperation<S> {
-            type RData;
-            fn from_this_to_that(val: serde_json::Map<String, serde_json::Value>) -> Self::RData {
-                let _ = val;
-                todo!()
-            }
-            fn into_dynamic_cols(&self) -> Vec<DynamicCol>;
-        }
-
-        impl<S, T> MembersInDynamicOperation<S> for SingleIncremintalInt<T>
-        where
-            i64: Type<S> + for<'q> Encode<'q, S> + for<'q> Decode<'q, S>,
-            for<'a> &'a str: ColumnIndex<S::Row>,
-            S: DatabaseExt,
-            T: AsRef<str>,
-        {
-            type RData = i64;
-            fn into_dynamic_cols(&self) -> Vec<DynamicCol> {
-                vec![DynamicCol {
-                    table: self.0.as_ref().to_string(),
-                    col: "id".to_string(),
-                }]
-            }
-        }
-
-        impl<S> MembersInDynamicOperation<S> for DynamicCollection<S> {
-            type RData = serde_json::Value;
-            fn into_dynamic_cols(&self) -> Vec<DynamicCol> {
-                self.fields
-                    .iter()
-                    .map(|e| DynamicCol {
-                        table: self.name.clone(),
-                        col: e.name.clone(),
-                    })
-                    .collect()
             }
         }
     }

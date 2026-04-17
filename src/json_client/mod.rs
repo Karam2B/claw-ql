@@ -1,3 +1,60 @@
+// pub mod find_place_for_this {
+//     use sqlx::{ColumnIndex, Decode, Encode, Type};
+
+//     use crate::{collections::SingleIncremintalInt, database_extention::DatabaseExt};
+
+//     pub struct DynamicCol {
+//         pub table: String,
+//         pub col: String,
+//     }
+
+//     impl Clone for DynamicCol {
+//         fn clone(&self) -> Self {
+//             Self {
+//                 table: self.table.clone(),
+//                 col: self.col.clone(),
+//             }
+//         }
+//     }
+
+//     pub trait MembersInDynamicOperation<S> {
+//         type RData;
+//         fn from_this_to_that(val: serde_json::Map<String, serde_json::Value>) -> Self::RData {
+//             let _ = val;
+//             todo!()
+//         }
+//         fn into_dynamic_cols(&self) -> Vec<DynamicCol>;
+//     }
+
+//     impl<S, T> MembersInDynamicOperation<S> for SingleIncremintalInt<T>
+//     where
+//         i64: Type<S> + for<'q> Encode<'q, S> + for<'q> Decode<'q, S>,
+//         for<'a> &'a str: ColumnIndex<S::Row>,
+//         S: DatabaseExt,
+//         T: AsRef<str>,
+//     {
+//         type RData = i64;
+//         fn into_dynamic_cols(&self) -> Vec<DynamicCol> {
+//             vec![DynamicCol {
+//                 table: self.0.as_ref().to_string(),
+//                 col: "id".to_string(),
+//             }]
+//         }
+//     }
+
+//     impl<S> MembersInDynamicOperation<S> for DynamicCollection<S> {
+//         type RData = serde_json::Value;
+//         fn into_dynamic_cols(&self) -> Vec<DynamicCol> {
+//             self.fields
+//                 .iter()
+//                 .map(|e| DynamicCol {
+//                     table: self.name.clone(),
+//                     col: e.name.clone(),
+//                 })
+//                 .collect()
+//         }
+//     }
+// }
 pub mod to_bind_trait {
     use crate::expressions::is_null::IsNull as IsNullTrait;
     use sqlx::Database;
@@ -1271,56 +1328,39 @@ pub mod fetch_many {
     pub mod json_link_fetch_many_extention {
 
         use core::fmt;
-        use std::{any::Any, mem};
+        use std::{any::Any, sync::Arc};
 
         use serde::Serialize;
         use sqlx::Database;
 
         use crate::{
-            collections::SingleIncremintalInt,
             database_extention::DatabaseExt,
-            debug_any::DebugAny,
-            expressions::single_col_expressions::AliasedCol,
-            extentions::common_expressions::{
-                StrAliased,
-                dyn_from_row::DynFromRow,
-                find_place_for_this::{DynamicCol, MembersInDynamicOperation},
-            },
-            from_row::{FromRowAlias, FromRowData},
+            extentions::common_expressions::{StrAliased, dyn_from_row::DynFromRow},
+            from_row::{FromRowAlias, FromRowData, FromRowError, pre_alias},
             operations::{
-                Operation, OperationOutput,
-                boxed_operation::BoxedOperation,
-                fetch_many::{LinkFetchMany, LinkFetchManyTakeId},
+                Operation, OperationOutput, boxed_operation::BoxedOperation,
+                fetch_many::LinkFetchMany,
             },
             query_builder::{
-                Expression, ManyBoxedExpressions, ManyExpressions, SanitizeMany,
-                functional_expr::BoxedExpression,
+                Expression, IsOpExpression, ManyBoxedExpressions, ManyExpressions,
+                StatementBuilder, functional_expr::BoxedExpression,
             },
         };
 
         pub struct JsonLinkFetchManySelectItems<S: Database> {
-            pub select_items: Vec<DynamicCol>,
             pub dyn_from_row: Box<dyn DynFromRow<S::Row> + Send>,
         }
 
         impl<S: Database> StrAliased for JsonLinkFetchManySelectItems<S> {
-            type StrAliased = Vec<AliasedCol<String, String, SanitizeMany<(&'static str, String)>>>;
+            type StrAliased = Box<dyn ManyBoxedExpressions<S> + Send>;
             fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
-                self.select_items
-                    .iter()
-                    .map(|e| AliasedCol {
-                        table: e.table.clone(),
-                        col: e.col.clone(),
-                        alias: SanitizeMany((alias, e.col.clone())),
-                    })
-                    .collect()
+                self.dyn_from_row.str_aliased_2(alias)
             }
         }
 
         impl<S: Database> Clone for JsonLinkFetchManySelectItems<S> {
             fn clone(&self) -> Self {
                 Self {
-                    select_items: self.select_items.clone(),
                     dyn_from_row: self.dyn_from_row.clone_as_box(),
                 }
             }
@@ -1370,102 +1410,116 @@ pub mod fetch_many {
         }
 
         pub trait JsonLinkFetchMany<S>: Send {
-            fn select_items(&self) -> JsonLinkFetchManySelectItems<S>
-            where
-                S: Database;
+            // fn select_items(&self) -> JsonLinkFetchManySelectItems<S>
+            // where
+            //     S: Database;
             fn join(&self) -> Box<dyn BoxedExpression<S> + Send>;
             fn wheres_expression(&self) -> Box<dyn ManyBoxedExpressions<S> + Send>;
-            fn box_post_select(&self) -> Box<dyn BoxedOperation<S>>;
-            fn take_2(
+
+            fn select_items(&self) -> Box<dyn Any + Send>;
+            fn select_items_expression(
                 &self,
-                into: &i64,
-                select_items: &mut Option<Box<dyn Any + Send>>,
-                op: &mut Box<dyn Any + Send>,
-            ) -> Option<serde_json::Value>;
+                alias: &'static str,
+                si: &Box<dyn Any + Send>,
+            ) -> Box<dyn ManyBoxedExpressions<S> + Send>;
+            fn select_items_pre_alias<'r>(
+                &self,
+                si: &Box<dyn Any + Send>,
+                row: pre_alias<'r, S::Row>,
+            ) -> Result<Box<dyn Any + Send>, FromRowError>
+            where
+                S: Database;
+
+            fn box_post_select(&self) -> Box<dyn BoxedOperation<S>> {
+                todo!()
+            }
+            fn for_each(&self, item: serde_json::Value) -> serde_json::Value {
+                todo!()
+            }
+            fn final_take(&self, item: serde_json::Value) -> serde_json::Value {
+                todo!()
+            }
+            fn post_select(&self, item: serde_json::Value) -> serde_json::Value {
+                todo!()
+            }
+            // fn clone_to_arc(self: Arc<Self>) -> Arc<dyn JsonLinkFetchMany<S> + Send + Sync>;
+        }
+
+        const _: () = {
+            fn trait_is_dyn_compatible<S>(_: Arc<dyn JsonLinkFetchMany<S> + Send + Sync>) {}
+        };
+
+        pub struct JsonLinkFetchContainer<'a, S, T> {
+            pub this: Arc<dyn JsonLinkFetchMany<S> + Send + Sync + 'a>,
+            pub other: T,
         }
 
         impl<S, T> JsonLinkFetchMany<S> for T
         where
             S: DatabaseExt,
-            T: Send,
-            T: LinkFetchManyTakeId<SingleIncremintalInt<String>>,
+            T: Send + Sync + 'static,
             T: LinkFetchMany,
             T::SelectItems: 'static,
             T::SelectItems: Clone,
-            T::SelectItems: MembersInDynamicOperation<S>,
             T::SelectItems:
                 Send + for<'r> FromRowAlias<'r, S::Row, RData: fmt::Debug + Send + 'static>,
+            T::SelectItems: StrAliased<StrAliased: Send + for<'q> ManyExpressions<'q, S>>,
             T::Join: 'static + Send + for<'q> Expression<'q, S>,
             T::Wheres: 'static + Send + for<'q> ManyExpressions<'q, S>,
             T::PostOperation: 'static + Send + Operation<S>,
             T::Output: Serialize,
         {
-            fn select_items(&self) -> JsonLinkFetchManySelectItems<S>
-            where
-                S: Database,
-            {
-                JsonLinkFetchManySelectItems {
-                    select_items: self.non_aggregating_select_items().into_dynamic_cols(),
-                    dyn_from_row: Box::new(self.non_aggregating_select_items()),
-                }
-            }
             fn join(&self) -> Box<dyn BoxedExpression<S> + Send> {
                 Box::new(self.non_duplicating_join())
             }
             fn wheres_expression(&self) -> Box<dyn ManyBoxedExpressions<S> + Send> {
                 Box::new(self.wheres())
             }
-            fn box_post_select(&self) -> Box<dyn BoxedOperation<S>> {
-                Box::new(self.post_select())
+            fn select_items(&self) -> Box<dyn Any + Send> {
+                Box::new(self.non_aggregating_select_items())
+            }
+            fn select_items_expression(
+                &self,
+                alias: &'static str,
+                si: &Box<dyn Any + Send>,
+            ) -> Box<dyn ManyBoxedExpressions<S> + Send> {
+                let downcasted: &T::SelectItems = si.downcast_ref::<&T::SelectItems>().unwrap();
+                let cloned = downcasted.clone();
+                Box::new(cloned.str_aliased(alias))
             }
 
-            #[allow(unused)]
-            #[allow(unreachable_code)]
-            fn take_2(
+            fn select_items_pre_alias<'r>(
                 &self,
-                into: &i64,
-                select_items: &mut Option<Box<dyn Any + Send>>,
-                op: &mut Box<dyn Any + Send>,
-            ) -> Option<serde_json::Value> {
-                todo!()
-                // // let mut og = vec![];
-                // // mem::swap(&mut og, select_items);
-                // // let mut og = og
-                // //     .into_iter()
-                // //     .map(|e| {
-                // // why double box?
-                // // when I figure that out I will remove this code
-                // if let Some(e) = select_items {
-                //     let e = if e.is::<Box<dyn Any + Send>>() {
-                //         *e.downcast::<Box<dyn Any + Send>>().unwrap()
-                //     } else {
-                //         println!("bug fixed, remove me");
-                //         e
-                //     };
-                // }
-
-                // let downcasted = e
-                //     .downcast::<<T::SelectItems as FromRowData>::RData>()
-                //     .unwrap();
-                // //     return *downcasted;
-                // // })
-                // // .collect::<Vec<_>>();
-                // let op = op
-                //     .downcast_mut::<<T::PostOperation as OperationOutput>::Output>()
-                //     .expect("claw_ql bug: inconsistant code");
-                // let s = LinkFetchManyTakeId::take(self, into, &mut downcasted, op, output);
-
-                // serde_json::to_value(s).expect("claw_ql bug: when serialize ever fail?")
+                si: &Box<dyn Any + Send>,
+                row: pre_alias<'r, <S>::Row>,
+            ) -> Result<Box<dyn Any + Send>, FromRowError>
+            where
+                S: Database,
+            {
+                let downcasted: &T::SelectItems = si.downcast_ref::<&T::SelectItems>().unwrap();
+                let rdata = downcasted.pre_alias(row)?;
+                Ok(Box::new(rdata))
             }
         }
 
-        impl<'a, S: Database> LinkFetchMany for Box<dyn JsonLinkFetchMany<S> + Send + 'a> {
+        impl<'a, S: Database> StrAliased for JsonLinkFetchContainer<'a, S, Box<dyn Any + Send>> {
+            type StrAliased = Box<dyn ManyBoxedExpressions<S> + Send>;
+
+            fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
+                self.this.select_items_expression(alias, &self.other)
+            }
+        }
+
+        impl<'a, S: Database> LinkFetchMany for Arc<dyn JsonLinkFetchMany<S> + Send + Sync + 'a> {
             type Output = serde_json::Value;
 
-            type SelectItems = JsonLinkFetchManySelectItems<S>;
+            type SelectItems = JsonLinkFetchContainer<'a, S, Box<dyn Any + Send>>;
 
             fn non_aggregating_select_items(&self) -> Self::SelectItems {
-                self.select_items()
+                JsonLinkFetchContainer {
+                    this: self.clone(),
+                    other: self.select_items(),
+                }
             }
 
             type Join = Box<dyn BoxedExpression<S> + Send>;
@@ -1488,26 +1542,31 @@ pub mod fetch_many {
             {
                 self.box_post_select()
             }
-        }
 
-        impl<'a, S: DatabaseExt> LinkFetchManyTakeId<SingleIncremintalInt<String>>
-            for Box<dyn JsonLinkFetchMany<S> + Send + 'a>
-        // where
-        //     Self::SelectItems: MembersInDynamicOperation<S>,
-        {
-            fn take(
+            type OperationInput = ();
+
+            type ForEach = ();
+
+            fn for_each(
                 &self,
-                into: &i64,
-                item: &mut <Self::SelectItems as FromRowData>::RData,
-                post_operation: &mut <Self::PostOperation as OperationOutput>::Output,
-                output: &mut Self::Output,
-            ) {
-                let _ = (into, item, post_operation, output);
+                item: <Self::SelectItems as FromRowData>::RData,
+                poi: &mut Self::OperationInput,
+            ) -> Self::ForEach
+            where
+                Self::SelectItems: FromRowData,
+            {
                 todo!()
-                // let s = JsonLinkFetchMany::take_2(self, into, item, post_operation);
-                // if let Some(s) = s {
-                //     *output = s;
-                // }
+            }
+
+            fn final_take(
+                &self,
+                item: Self::ForEach,
+                op: &mut <Self::PostOperation as OperationOutput>::Output,
+            ) -> Self::Output
+            where
+                Self::PostOperation: OperationOutput,
+            {
+                todo!()
             }
         }
     }

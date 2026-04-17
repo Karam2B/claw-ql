@@ -173,12 +173,9 @@ mod optional_to_many_items_names {
     use core::fmt;
 
     use crate::{
-        collections::{self, Collection, CollectionId},
+        collections::{Collection, CollectionId},
         database_extention::DatabaseExt,
-        extentions::common_expressions::{
-            StrAliased,
-            find_place_for_this::{DynamicCol, MembersInDynamicOperation},
-        },
+        extentions::common_expressions::StrAliased,
         from_row::{
             FromRowAlias, FromRowData, TryFromRowAlias, swich_to_base_id::pre_alias_to_base_id,
         },
@@ -195,52 +192,52 @@ mod optional_to_many_items_names {
         pub to_id: ToId,
         pub to_attributes: ToAttributes,
     }
-    impl<S, Fi, Ti, Ta> MembersInDynamicOperation<S> for OptionaToManyItems<Fi, Ti, Ta>
-    where
-        Fi: MembersInDynamicOperation<S>,
-        Ti: MembersInDynamicOperation<S>,
-        Ta: MembersInDynamicOperation<S>,
-        // for from_this_to_that
-        Ti: CollectionId + FromRowData,
-        Ta: Collection<Id = Ti> + FromRowData<RData = Ta::Data>,
-        Fi: CollectionId + FromRowData,
-    {
-        type RData = (
-            <Fi as CollectionId>::IdData,
-            Option<(<Ti as CollectionId>::IdData, Ta::Data)>,
-        );
+    // impl<S, Fi, Ti, Ta> MembersInDynamicOperation<S> for OptionaToManyItems<Fi, Ti, Ta>
+    // where
+    //     Fi: MembersInDynamicOperation<S>,
+    //     Ti: MembersInDynamicOperation<S>,
+    //     Ta: MembersInDynamicOperation<S>,
+    //     // for from_this_to_that
+    //     Ti: CollectionId + FromRowData,
+    //     Ta: Collection<Id = Ti> + FromRowData<RData = Ta::Data>,
+    //     Fi: CollectionId + FromRowData,
+    // {
+    //     type RData = (
+    //         <Fi as CollectionId>::IdData,
+    //         Option<(<Ti as CollectionId>::IdData, Ta::Data)>,
+    //     );
 
-        fn from_this_to_that(val: serde_json::Map<String, serde_json::Value>) -> Self::RData {
-            let _ = val;
-            std::todo!()
-        }
-        fn into_dynamic_cols(&self) -> Vec<DynamicCol> {
-            let mut all = vec![];
+    //     fn from_this_to_that(val: serde_json::Map<String, serde_json::Value>) -> Self::RData {
+    //         let _ = val;
+    //         std::todo!()
+    //     }
+    //     fn into_dynamic_cols(&self) -> Vec<DynamicCol> {
+    //         let mut all = vec![];
 
-            let table_name = Collection::table_name(&self.to_attributes).to_string();
+    //         let table_name = Collection::table_name(&self.to_attributes).to_string();
 
-            all.extend(
-                self.to_id
-                    .into_dynamic_cols()
-                    .into_iter()
-                    .map(|e| DynamicCol {
-                        table: table_name.clone(),
-                        col: e.col,
-                    }),
-            );
-            all.extend(
-                self.to_attributes
-                    .into_dynamic_cols()
-                    .into_iter()
-                    .map(|e| DynamicCol {
-                        table: table_name.clone(),
-                        col: e.col,
-                    }),
-            );
+    //         all.extend(
+    //             self.to_id
+    //                 .into_dynamic_cols()
+    //                 .into_iter()
+    //                 .map(|e| DynamicCol {
+    //                     table: table_name.clone(),
+    //                     col: e.col,
+    //                 }),
+    //         );
+    //         all.extend(
+    //             self.to_attributes
+    //                 .into_dynamic_cols()
+    //                 .into_iter()
+    //                 .map(|e| DynamicCol {
+    //                     table: table_name.clone(),
+    //                     col: e.col,
+    //                 }),
+    //         );
 
-            all
-        }
-    }
+    //         all
+    //     }
+    // }
 
     impl<F, Ti, Ta> StrAliased for OptionaToManyItems<F, Ti, Ta>
     where
@@ -409,10 +406,7 @@ mod impl_link_fetch_many {
             OptionalToMany, join_expression::JoinExpression,
             optional_to_many_items_names::OptionaToManyItems,
         },
-        operations::{
-            CollectionOutput, OperationOutput,
-            fetch_many::{LinkFetchMany, LinkFetchManyTakeId},
-        },
+        operations::{CollectionOutput, OperationOutput, fetch_many::LinkFetchMany},
     };
 
     impl<Key, F, T> LinkFetchMany for OptionalToMany<Key, F, T>
@@ -457,73 +451,96 @@ mod impl_link_fetch_many {
 
         type PostOperation = ();
 
-        fn post_select(&self) -> Self::PostOperation
-        where
-            Self::SelectItems: crate::from_row::FromRowData,
-        {
-        }
-
         type Output = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>;
-    }
 
-    impl<Key, F, T> LinkFetchManyTakeId<F::Id> for OptionalToMany<Key, F, T>
-    where
-        Self: LinkFetchMany<
-            Output = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>,
-        >,
-        Self::PostOperation: OperationOutput,
-        Self::SelectItems: FromRowData<
-            RData = (
-                <F::Id as CollectionId>::IdData,
-                Option<(<T::Id as CollectionId>::IdData, T::Data)>,
-            ),
-        >,
-        <F::Id as CollectionId>::IdData: PartialEq,
-        F: Collection,
-        T: Collection,
-        <F::Id as CollectionId>::IdData: ::core::fmt::Debug + Clone,
-        <T::Id as CollectionId>::IdData: Clone,
-        T::Data: Clone,
-    {
+        type OperationInput = ();
+
         type ForEach = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>;
-        type IntoIter = Vec<Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>>;
 
         fn for_each(
             &self,
-            into: &<F::Id as CollectionId>::IdData,
-            item: &mut <Self::SelectItems as FromRowData>::RData,
-            _: &mut <Self::PostOperation as OperationOutput>::Output,
+            item: <Self::SelectItems as FromRowData>::RData,
+            poi: &mut Self::OperationInput,
         ) -> Self::ForEach
         where
-            F::Id: CollectionId,
             Self::SelectItems: FromRowData,
-            Self::PostOperation: OperationOutput,
         {
-            if item.0 == *into {
-                item.1.clone().map(|e| CollectionOutput {
-                    id: e.0,
-                    attributes: e.1,
-                })
-            } else {
-                None
-            }
+            todo!()
         }
 
-        fn take(
+        fn final_take(
             &self,
-            mut all: Self::IntoIter,
-            _: &<F::Id as CollectionId>::IdData,
-            _: &mut <Self::PostOperation as OperationOutput>::Output,
-        ) -> Self::Output
+            item: Self::ForEach,
+            op: &mut <Self::PostOperation as OperationOutput>::Output,
+        ) -> Self::Output {
+            item
+        }
+
+        fn post_select(&self, _: Self::OperationInput) -> Self::PostOperation
         where
             Self::SelectItems: FromRowData,
-            Self::PostOperation: OperationOutput,
-            F::Id: CollectionId,
         {
-            if all.len() > 1 {
-                panic!("bug: optional to many should have at maximum one item");
-            }
-            all.pop().flatten()
         }
     }
+
+    // impl<Key, F, T> LinkFetchManyTakeId<F::Id> for OptionalToMany<Key, F, T>
+    // where
+    //     Self: LinkFetchMany<
+    //         Output = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>,
+    //     >,
+    //     Self::PostOperation: OperationOutput,
+    //     Self::SelectItems: FromRowData<
+    //         RData = (
+    //             <F::Id as CollectionId>::IdData,
+    //             Option<(<T::Id as CollectionId>::IdData, T::Data)>,
+    //         ),
+    //     >,
+    //     <F::Id as CollectionId>::IdData: PartialEq,
+    //     F: Collection,
+    //     T: Collection,
+    //     <F::Id as CollectionId>::IdData: ::core::fmt::Debug + Clone,
+    //     <T::Id as CollectionId>::IdData: Clone,
+    //     T::Data: Clone,
+    // {
+    //     type ForEach = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>;
+    //     type IntoIter = Vec<Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>>;
+
+    //     fn for_each(
+    //         &self,
+    //         into: &<F::Id as CollectionId>::IdData,
+    //         item: &mut <Self::SelectItems as FromRowData>::RData,
+    //         _: &mut <Self::PostOperation as OperationOutput>::Output,
+    //     ) -> Self::ForEach
+    //     where
+    //         F::Id: CollectionId,
+    //         Self::SelectItems: FromRowData,
+    //         Self::PostOperation: OperationOutput,
+    //     {
+    //         if item.0 == *into {
+    //             item.1.clone().map(|e| CollectionOutput {
+    //                 id: e.0,
+    //                 attributes: e.1,
+    //             })
+    //         } else {
+    //             None
+    //         }
+    //     }
+
+    //     fn take(
+    //         &self,
+    //         mut all: Self::IntoIter,
+    //         _: &<F::Id as CollectionId>::IdData,
+    //         _: &mut <Self::PostOperation as OperationOutput>::Output,
+    //     ) -> Self::Output
+    //     where
+    //         Self::SelectItems: FromRowData,
+    //         Self::PostOperation: OperationOutput,
+    //         F::Id: CollectionId,
+    //     {
+    //         if all.len() > 1 {
+    //             panic!("bug: optional to many should have at maximum one item");
+    //         }
+    //         all.pop().flatten()
+    //     }
+    // }
 }

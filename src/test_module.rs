@@ -376,29 +376,12 @@ mod impl_zero_or_more_expressions_for_todo_partial {
 #[allow(non_camel_case_types)]
 pub mod todo_members {
     use super::todo;
+    use crate::extentions::common_expressions::{OnInsert, OnUpdate};
     use crate::prelude::macro_derive_collection::*;
     use crate::query_builder::OpExpression;
 
     #[derive(Clone, Default)]
     pub struct title;
-
-    impl OpExpression for title {}
-    impl<'q, S> Expression<'q, S> for title {
-        fn expression(self, ctx: &mut StatementBuilder<'q, S>)
-        where
-            S: DatabaseExt,
-        {
-            ctx.sanitize(&"Todo");
-            ctx.syntax(&".");
-            ctx.sanitize(&"title");
-        }
-    }
-
-    impl title {
-        const fn is_unique(&self) -> bool {
-            false
-        }
-    }
 
     impl Member for title {
         fn name(&self) -> &str {
@@ -409,28 +392,12 @@ pub mod todo_members {
     }
 
     crate::member_impl_from_row_alias!(title);
-    crate::member_impl_from_row_alias!(done);
-    crate::member_impl_from_row_alias!(description);
-    crate::member_impl_from_row_alias!(id);
     crate::member_impl_debug!(title);
-    crate::member_impl_debug!(done);
-    crate::member_impl_debug!(description);
-    crate::member_impl_debug!(id);
+    crate::member_is_unique_filter!(title, false);
+    crate::member_impl_expression!(title);
 
     #[derive(Clone, Default)]
     pub struct done;
-
-    impl OpExpression for done {}
-    impl<'q, S> Expression<'q, S> for done {
-        fn expression(self, ctx: &mut StatementBuilder<'q, S>)
-        where
-            S: DatabaseExt,
-        {
-            ctx.sanitize(&"Todo");
-            ctx.syntax(&".");
-            ctx.sanitize(&"done");
-        }
-    }
 
     impl Member for done {
         fn name(&self) -> &str {
@@ -440,26 +407,13 @@ pub mod todo_members {
         type Data = bool;
     }
 
-    impl done {
-        const fn is_unique(&self) -> bool {
-            false
-        }
-    }
+    crate::member_impl_from_row_alias!(done);
+    crate::member_impl_debug!(done);
+    crate::member_is_unique_filter!(done, false);
+    crate::member_impl_expression!(done);
 
     #[derive(Clone, Default)]
     pub struct description;
-
-    impl OpExpression for description {}
-    impl<'q, S> Expression<'q, S> for description {
-        fn expression(self, ctx: &mut StatementBuilder<'q, S>)
-        where
-            S: DatabaseExt,
-        {
-            ctx.sanitize(&"Todo");
-            ctx.syntax(&".");
-            ctx.sanitize(&"description");
-        }
-    }
 
     impl Member for description {
         fn name(&self) -> &str {
@@ -469,32 +423,13 @@ pub mod todo_members {
         type Data = Option<String>;
     }
 
-    impl description {
-        const fn is_unique(&self) -> bool {
-            false
-        }
-    }
+    crate::member_impl_from_row_alias!(description);
+    crate::member_impl_debug!(description);
+    crate::member_is_unique_filter!(description, false);
+    crate::member_impl_expression!(description);
 
     #[derive(Clone, Default)]
     pub struct id;
-
-    impl OpExpression for id {}
-    impl<'q, S> Expression<'q, S> for id {
-        fn expression(self, ctx: &mut StatementBuilder<'q, S>)
-        where
-            S: DatabaseExt,
-        {
-            ctx.sanitize(&"Todo");
-            ctx.syntax(&".");
-            ctx.sanitize(&"id");
-        }
-    }
-
-    impl id {
-        const fn is_unique(&self) -> bool {
-            true
-        }
-    }
 
     impl Member for id {
         fn name(&self) -> &str {
@@ -503,6 +438,11 @@ pub mod todo_members {
         type CollectionHandler = todo;
         type Data = <SingleIncremintalInt<&'static str> as CollectionId>::IdData;
     }
+
+    crate::member_impl_from_row_alias!(id);
+    crate::member_impl_debug!(id);
+    crate::member_is_unique_filter!(id, true);
+    crate::member_impl_expression!(id);
 }
 
 const _: () = {
@@ -754,23 +694,6 @@ pub mod category_members {
     #[derive(Clone, Default)]
     pub struct title;
 
-    impl OpExpression for title {}
-    impl<'q, S> Expression<'q, S> for title {
-        fn expression(self, ctx: &mut StatementBuilder<'q, S>)
-        where
-            S: DatabaseExt,
-        {
-            ctx.sanitize(&"Category");
-            ctx.syntax(&".");
-            ctx.sanitize(&"title");
-        }
-    }
-    crate::member_impl_from_row_alias!(title);
-    impl title {
-        const fn is_unique(&self) -> bool {
-            false
-        }
-    }
     impl Member for title {
         fn name(&self) -> &str {
             "title"
@@ -779,11 +702,13 @@ pub mod category_members {
         type Data = String;
     }
 
+    crate::member_impl_from_row_alias!(title);
+    crate::member_impl_debug!(title);
+    crate::member_is_unique_filter!(title, false);
+    crate::member_impl_expression!(title);
+
     #[derive(Clone, Default)]
     pub struct id;
-
-    crate::member_impl_expression!(id);
-    crate::member_is_unique_filter!(id, true);
 
     impl Member for id {
         fn name(&self) -> &str {
@@ -792,6 +717,11 @@ pub mod category_members {
         type CollectionHandler = category;
         type Data = <SingleIncremintalInt<&'static str> as CollectionId>::IdData;
     }
+
+    crate::member_impl_from_row_alias!(id);
+    crate::member_impl_debug!(id);
+    crate::member_is_unique_filter!(id, true);
+    crate::member_impl_expression!(id);
 }
 
 // OnMigrate derive for category
@@ -840,22 +770,26 @@ mod impl_link {
 
 #[macro_export]
 macro_rules! member_impl_expression {
-        ($member:ident) => {
-            impl $crate::query_builder::OpExpression for $member {}
-            impl<'q, S> $crate::query_builder::Expression<'q, S> for $member {
-                fn expression(self, ctx: &mut $crate::query_builder::StatementBuilder<'q, S>)
-                where
-                    S: $crate::database_extention::DatabaseExt,
-                {
-                    let s = <<$member as $crate::collections::Member>::CollectionHandler as $crate::singleton::Singleton>::singleton();
-                    let name = $crate::collections::Collection::table_name(s);
-                    ctx.sanitize(&name);
-                    ctx.syntax(&".");
-                    ctx.sanitize(&stringify!($member));
-                }
+    ($member:ident) => {
+        impl $crate::extentions::common_expressions::OnInsert for $member {
+            type InsertInput = <Self as $crate::collections::Member>::Data;
+            type InsertExpression = <Self as $crate::collections::Member>::Data;
+
+            fn validate_on_insert(&self, input: Self::InsertInput) -> Self::InsertExpression {
+                input
             }
-        };
-    }
+        }
+
+        impl $crate::extentions::common_expressions::OnUpdate for $member {
+            type UpdateInput = <Self as $crate::collections::Member>::Data;
+            type UpdateExpression = <Self as $crate::collections::Member>::Data;
+
+            fn validate_on_update(&self, input: Self::UpdateInput) -> Self::UpdateExpression {
+                input
+            }
+        }
+    };
+}
 
 #[macro_export]
 macro_rules! member_is_unique_filter {

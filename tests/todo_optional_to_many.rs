@@ -11,7 +11,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{FromRow, Row, Sqlite, query};
 use std::marker::PhantomData;
 
-#[claw_ql_macros::skip]
+// #[claw_ql_macros::skip]
 mod test {
     use sqlx::{Sqlite, query};
 

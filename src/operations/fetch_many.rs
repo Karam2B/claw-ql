@@ -117,22 +117,29 @@ pub trait LinkFetchMany {
     type Wheres;
     fn wheres(&self) -> Self::Wheres;
 
-    type PostOperation;
     type OperationInput: Default;
     type ForEach;
 
-    fn take(
+    fn for_each(
         &self,
         item: <Self::SelectItems as FromRowData>::RData,
         poi: &mut Self::OperationInput,
     ) -> Self::ForEach
     where
         Self::SelectItems: FromRowData;
-    fn post_map(&self, item: Self::ForEach) -> Self::Output;
 
+    type PostOperation;
     fn post_select(&self, poi: Self::OperationInput) -> Self::PostOperation
     where
         Self::SelectItems: FromRowData;
+
+    fn final_take(
+        &self,
+        item: Self::ForEach,
+        op: &mut <Self::PostOperation as OperationOutput>::Output,
+    ) -> Self::Output
+    where
+        Self::PostOperation: OperationOutput;
 }
 
 mod functional_impls {
@@ -157,7 +164,7 @@ mod functional_impls {
 
         type ForEach = ();
 
-        fn take(
+        fn for_each(
             &self,
             _: <Self::SelectItems as FromRowData>::RData,
             _: &mut Self::OperationInput,
@@ -167,7 +174,13 @@ mod functional_impls {
         {
         }
 
-        fn post_map(&self, _: Self::ForEach) -> Self::Output {}
+        fn final_take(
+            &self,
+            item: Self::ForEach,
+            _: &mut <Self::PostOperation as crate::operations::OperationOutput>::Output,
+        ) -> Self::Output {
+            item
+        }
 
         fn post_select(&self, _: Self::OperationInput) -> Self::PostOperation
         where
@@ -204,7 +217,9 @@ where
     First: Send,
     Wheres: Send,
     Wheres: for<'q> ManyExpressions<'q, S>,
-    Links: Send + LinkFetchMany<Output: Send> + LinkFetchManyTakeId<Base::Id>,
+    Links: Send + LinkFetchMany<Output: Send>,
+    Links::OperationInput: Send,
+    Links::ForEach: Send,
     Links::Wheres: for<'q> ManyExpressions<'q, S>,
     Links::SelectItems: Send + Clone + StrAliased<StrAliased: for<'q> ManyExpressions<'q, S>>,
     Links::SelectItems: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
@@ -282,27 +297,28 @@ where
 
         let mut poi = Default::default();
 
-        let all = s.into_iter().map(|e| {
-            let id = id.pre_alias(pre_alias::new(&e, "i")).unwrap();
-            let link = link_items.pre_alias(pre_alias::new(&e, "l")).unwrap();
-            let link = self.links.take(link, &mut poi);
-            return LinkedOutput {
-                id,
-                attributes: self.base.pre_alias(pre_alias::new(&e, "b")).unwrap(),
-                links: link,
-            };
-        });
+        let all = s
+            .into_iter()
+            .map(|e| {
+                let id = id.pre_alias(pre_alias::new(&e, "i")).unwrap();
+                let link = link_items.pre_alias(pre_alias::new(&e, "l")).unwrap();
+                let link = self.links.for_each(link, &mut poi);
+                return LinkedOutput {
+                    id,
+                    attributes: self.base.pre_alias(pre_alias::new(&e, "b")).unwrap(),
+                    links: link,
+                };
+            })
+            .collect::<Vec<_>>();
 
-        // hmm, I suspected this line of code to fail, let me just panic
-        (|| panic!("sneaky panic"))();
-
-        let po = self.links.post_select(poi).exec_operation(&mut *pool).await;
+        let mut po = self.links.post_select(poi).exec_operation(&mut *pool).await;
 
         let all = all
+            .into_iter()
             .map(|e| LinkedOutput {
                 id: e.id,
                 attributes: e.attributes,
-                links: self.links.post_map(e.links),
+                links: self.links.final_take(e.links, &mut po),
             })
             .collect::<Vec<_>>();
 
