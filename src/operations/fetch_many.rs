@@ -117,28 +117,27 @@ pub trait LinkFetchMany {
     type Wheres;
     fn wheres(&self) -> Self::Wheres;
 
-    type OperationInput: Default;
-    type ForEach;
+    type PostOperationInput;
+    fn post_operation_input_init(&self) -> Self::PostOperationInput;
+    type PostOperation;
+    fn post_select(&self, input: Self::PostOperationInput) -> Self::PostOperation
+    where
+        Self::SelectItems: FromRowData;
 
-    fn for_each(
+    fn post_select_each(
+        &self,
+        item: &<Self::SelectItems as FromRowData>::RData,
+        poi: &mut Self::PostOperationInput,
+    ) where
+        Self::SelectItems: FromRowData;
+
+    fn take(
         &self,
         item: <Self::SelectItems as FromRowData>::RData,
-        poi: &mut Self::OperationInput,
-    ) -> Self::ForEach
-    where
-        Self::SelectItems: FromRowData;
-
-    type PostOperation;
-    fn post_select(&self, poi: Self::OperationInput) -> Self::PostOperation
-    where
-        Self::SelectItems: FromRowData;
-
-    fn final_take(
-        &self,
-        item: Self::ForEach,
         op: &mut <Self::PostOperation as OperationOutput>::Output,
     ) -> Self::Output
     where
+        Self::SelectItems: FromRowData,
         Self::PostOperation: OperationOutput;
 }
 
@@ -159,33 +158,29 @@ mod functional_impls {
         fn wheres(&self) -> Self::Wheres {}
 
         type PostOperation = ();
-
-        type OperationInput = ();
-
-        type ForEach = ();
-
-        fn for_each(
-            &self,
-            _: <Self::SelectItems as FromRowData>::RData,
-            _: &mut Self::OperationInput,
-        ) -> Self::ForEach
+        type PostOperationInput = ();
+        fn post_operation_input_init(&self) -> Self::PostOperationInput {}
+        fn post_select(&self, _: Self::PostOperationInput) -> Self::PostOperation
         where
             Self::SelectItems: FromRowData,
         {
         }
 
-        fn final_take(
+        fn post_select_each(
             &self,
-            item: Self::ForEach,
+            _: &<Self::SelectItems as FromRowData>::RData,
+            _: &mut Self::PostOperation,
+        ) where
+            Self::SelectItems: FromRowData,
+        {
+        }
+
+        fn take(
+            &self,
+            item: <Self::SelectItems as FromRowData>::RData,
             _: &mut <Self::PostOperation as crate::operations::OperationOutput>::Output,
         ) -> Self::Output {
             item
-        }
-
-        fn post_select(&self, _: Self::OperationInput) -> Self::PostOperation
-        where
-            Self::SelectItems: FromRowData,
-        {
         }
     }
 }
@@ -218,13 +213,12 @@ where
     Wheres: Send,
     Wheres: for<'q> ManyExpressions<'q, S>,
     Links: Send + LinkFetchMany<Output: Send>,
-    Links::OperationInput: Send,
-    Links::ForEach: Send,
     Links::Wheres: for<'q> ManyExpressions<'q, S>,
-    Links::SelectItems: Send + Clone + StrAliased<StrAliased: for<'q> ManyExpressions<'q, S>>,
+    Links::SelectItems: Send + StrAliased<StrAliased: for<'q> ManyExpressions<'q, S>>,
     Links::SelectItems: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
     Links::Join: for<'q> ManyExpressions<'q, S>,
     Links::PostOperation: Operation<S>,
+    Links::PostOperationInput: Send,
     Base: Collection<Data: Send, Id: Send>,
     Base: StrAliased<StrAliased: for<'q> ManyExpressions<'q, S>>,
     Base: FromRowData<RData = Base::Data>,
@@ -295,14 +289,14 @@ where
         let m: Option<()> = m.collect();
         let _ = m;
 
-        let mut poi = Default::default();
+        let mut input = self.links.post_operation_input_init();
 
         let all = s
             .into_iter()
             .map(|e| {
                 let id = id.pre_alias(pre_alias::new(&e, "i")).unwrap();
                 let link = link_items.pre_alias(pre_alias::new(&e, "l")).unwrap();
-                let link = self.links.for_each(link, &mut poi);
+                self.links.post_select_each(&link, &mut input);
                 return LinkedOutput {
                     id,
                     attributes: self.base.pre_alias(pre_alias::new(&e, "b")).unwrap(),
@@ -311,14 +305,18 @@ where
             })
             .collect::<Vec<_>>();
 
-        let mut po = self.links.post_select(poi).exec_operation(&mut *pool).await;
+        let mut po = self
+            .links
+            .post_select(input)
+            .exec_operation(&mut *pool)
+            .await;
 
         let all = all
             .into_iter()
             .map(|e| LinkedOutput {
                 id: e.id,
                 attributes: e.attributes,
-                links: self.links.final_take(e.links, &mut po),
+                links: self.links.take(e.links, &mut po),
             })
             .collect::<Vec<_>>();
 

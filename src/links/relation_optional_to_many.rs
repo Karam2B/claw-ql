@@ -192,52 +192,6 @@ mod optional_to_many_items_names {
         pub to_id: ToId,
         pub to_attributes: ToAttributes,
     }
-    // impl<S, Fi, Ti, Ta> MembersInDynamicOperation<S> for OptionaToManyItems<Fi, Ti, Ta>
-    // where
-    //     Fi: MembersInDynamicOperation<S>,
-    //     Ti: MembersInDynamicOperation<S>,
-    //     Ta: MembersInDynamicOperation<S>,
-    //     // for from_this_to_that
-    //     Ti: CollectionId + FromRowData,
-    //     Ta: Collection<Id = Ti> + FromRowData<RData = Ta::Data>,
-    //     Fi: CollectionId + FromRowData,
-    // {
-    //     type RData = (
-    //         <Fi as CollectionId>::IdData,
-    //         Option<(<Ti as CollectionId>::IdData, Ta::Data)>,
-    //     );
-
-    //     fn from_this_to_that(val: serde_json::Map<String, serde_json::Value>) -> Self::RData {
-    //         let _ = val;
-    //         std::todo!()
-    //     }
-    //     fn into_dynamic_cols(&self) -> Vec<DynamicCol> {
-    //         let mut all = vec![];
-
-    //         let table_name = Collection::table_name(&self.to_attributes).to_string();
-
-    //         all.extend(
-    //             self.to_id
-    //                 .into_dynamic_cols()
-    //                 .into_iter()
-    //                 .map(|e| DynamicCol {
-    //                     table: table_name.clone(),
-    //                     col: e.col,
-    //                 }),
-    //         );
-    //         all.extend(
-    //             self.to_attributes
-    //                 .into_dynamic_cols()
-    //                 .into_iter()
-    //                 .map(|e| DynamicCol {
-    //                     table: table_name.clone(),
-    //                     col: e.col,
-    //                 }),
-    //         );
-
-    //         all
-    //     }
-    // }
 
     impl<F, Ti, Ta> StrAliased for OptionaToManyItems<F, Ti, Ta>
     where
@@ -414,6 +368,17 @@ mod impl_link_fetch_many {
         Key: Clone + AsRef<str>,
         T: Collection<Id: SingleColumnId + Identifier> + TableNameExpression + Clone,
         F: Collection + TableNameExpression + Clone,
+        // maybe remove
+        F::Id: CollectionId,
+        T: FromRowData + Collection,
+        T::Id: FromRowData,
+        // or maybe this
+        OptionaToManyItems<F::Id, T::Id, T>: FromRowData<
+            RData = (
+                <F::Id as CollectionId>::IdData,
+                Option<(<T::Id as CollectionId>::IdData, T::Data)>,
+            ),
+        >,
     {
         type SelectItems = OptionaToManyItems<F::Id, T::Id, T>;
 
@@ -453,30 +418,30 @@ mod impl_link_fetch_many {
 
         type Output = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>;
 
-        type OperationInput = ();
-
-        type ForEach = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>;
-
-        fn for_each(
+        fn take(
             &self,
             item: <Self::SelectItems as FromRowData>::RData,
-            poi: &mut Self::OperationInput,
-        ) -> Self::ForEach
+            _: &mut <Self::PostOperation as OperationOutput>::Output,
+        ) -> Self::Output
         where
             Self::SelectItems: FromRowData,
         {
-            todo!()
+            item.1.map(|e| CollectionOutput {
+                id: e.0,
+                attributes: e.1,
+            })
         }
 
-        fn final_take(
+        fn post_select_each(
             &self,
-            item: Self::ForEach,
-            op: &mut <Self::PostOperation as OperationOutput>::Output,
-        ) -> Self::Output {
-            item
+            _: &<Self::SelectItems as FromRowData>::RData,
+            _: &mut Self::PostOperation,
+        ) where
+            Self::SelectItems: FromRowData,
+        {
         }
 
-        fn post_select(&self, _: Self::OperationInput) -> Self::PostOperation
+        fn post_select(&self) -> Self::PostOperation
         where
             Self::SelectItems: FromRowData,
         {

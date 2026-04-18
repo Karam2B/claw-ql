@@ -158,7 +158,7 @@ pub mod boxed_operation {
     use sqlx::Database;
     use std::{any::Any, pin::Pin};
 
-    pub trait BoxedOperation<S: Database>: Send {
+    pub trait BoxedOperation<S: Database>: Send + Any {
         fn exec_boxed<'c>(
             self: Box<Self>,
             pool: &'c mut S::Connection,
