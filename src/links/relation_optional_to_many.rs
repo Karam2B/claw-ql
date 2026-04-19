@@ -76,7 +76,7 @@ mod impl_fetch_one {
         collections::{Collection, SingleIncremintalInt},
         expressions::left_join,
         extentions::Members,
-        from_row::{FromRowAlias, two_alias},
+        from_row::{FromRowAlias, RowTwoAliased},
         links::relation_optional_to_many::OptionalToMany,
         operations::{CollectionOutput, Operation},
     };
@@ -268,7 +268,7 @@ mod optional_to_many_items_names {
 
         fn pre_alias(
             &self,
-            row: crate::from_row::pre_alias<'r, R>,
+            row: crate::from_row::RowPreAliased<'r, R>,
         ) -> Result<Self::RData, crate::from_row::FromRowError>
         where
             R: sqlx::Row,
@@ -287,7 +287,7 @@ mod optional_to_many_items_names {
 
         fn post_alias(
             &self,
-            row: crate::from_row::post_alias<'r, R>,
+            row: crate::from_row::RowPostAliased<'r, R>,
         ) -> Result<Self::RData, crate::from_row::FromRowError>
         where
             R: sqlx::Row,
@@ -297,7 +297,7 @@ mod optional_to_many_items_names {
 
         fn two_alias(
             &self,
-            row: crate::from_row::two_alias<'r, R>,
+            row: crate::from_row::RowTwoAliased<'r, R>,
         ) -> Result<Self::RData, crate::from_row::FromRowError>
         where
             R: sqlx::Row,
@@ -336,6 +336,7 @@ pub mod join_expression {
     {
         fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
             ctx.syntax(&self.join_type);
+            ctx.syntax(" ");
             self.foreign_table.clone().expression(ctx);
             ctx.syntax(" ON ");
             self.local_table.expression(ctx);
@@ -368,10 +369,6 @@ mod impl_link_fetch_many {
         Key: Clone + AsRef<str>,
         T: Collection<Id: SingleColumnId + Identifier> + TableNameExpression + Clone,
         F: Collection + TableNameExpression + Clone,
-        // maybe remove
-        F::Id: CollectionId,
-        T: FromRowData + Collection,
-        T::Id: FromRowData,
         // or maybe this
         OptionaToManyItems<F::Id, T::Id, T>: FromRowData<
             RData = (
@@ -383,11 +380,13 @@ mod impl_link_fetch_many {
         type SelectItems = OptionaToManyItems<F::Id, T::Id, T>;
 
         fn non_aggregating_select_items(&self) -> Self::SelectItems {
-            OptionaToManyItems {
+            let s = OptionaToManyItems {
                 from_id: self.from.id(),
                 to_id: self.to.id(),
                 to_attributes: self.to.clone(),
-            }
+            };
+
+            s
         }
 
         type Join = JoinExpression<
@@ -441,7 +440,11 @@ mod impl_link_fetch_many {
         {
         }
 
-        fn post_select(&self) -> Self::PostOperation
+        type PostOperationInput = ();
+
+        fn post_operation_input_init(&self) -> Self::PostOperationInput {}
+
+        fn post_select(&self, _: Self::PostOperationInput) -> Self::PostOperation
         where
             Self::SelectItems: FromRowData,
         {

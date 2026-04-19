@@ -548,7 +548,7 @@ const _: () = {
                 description: row.try_get("description")?,
             })
         }
-        fn pre_alias(&self, row: pre_alias<'r, R>) -> Result<Self::RData, FromRowError> {
+        fn pre_alias(&self, row: RowPreAliased<'r, R>) -> Result<Self::RData, FromRowError> {
             Ok(Todo {
                 title: row.try_get("title")?,
                 done: row.try_get("done")?,
@@ -557,7 +557,7 @@ const _: () = {
         }
         fn two_alias(
             &self,
-            row: crate::from_row::two_alias<'r, R>,
+            row: crate::from_row::RowTwoAliased<'r, R>,
         ) -> Result<Self::RData, crate::from_row::FromRowError>
         where
             R: sqlx::Row,
@@ -568,7 +568,7 @@ const _: () = {
                 description: row.try_get("description")?,
             })
         }
-        fn post_alias(&self, row: post_alias<'r, R>) -> Result<Self::RData, FromRowError> {
+        fn post_alias(&self, row: RowPostAliased<'r, R>) -> Result<Self::RData, FromRowError> {
             Ok(Todo {
                 title: row.try_get("title")?,
                 done: row.try_get("done")?,
@@ -599,7 +599,7 @@ const _: () = {
     {
         fn two_alias(
             &self,
-            row: crate::from_row::two_alias<'r, R>,
+            row: crate::from_row::RowTwoAliased<'r, R>,
         ) -> Result<Self::RData, crate::from_row::FromRowError>
         where
             R: sqlx::Row,
@@ -613,12 +613,12 @@ const _: () = {
                 title: row.try_get("title")?,
             })
         }
-        fn pre_alias(&self, row: pre_alias<'r, R>) -> Result<Self::RData, FromRowError> {
+        fn pre_alias(&self, row: RowPreAliased<'r, R>) -> Result<Self::RData, FromRowError> {
             Ok(Category {
                 title: row.try_get("title")?,
             })
         }
-        fn post_alias(&self, row: post_alias<'r, R>) -> Result<Self::RData, FromRowError> {
+        fn post_alias(&self, row: RowPostAliased<'r, R>) -> Result<Self::RData, FromRowError> {
             Ok(Category {
                 title: row.try_get("title")?,
             })
@@ -773,10 +773,11 @@ macro_rules! member_impl_expression {
     ($member:ident) => {
         impl $crate::extentions::common_expressions::OnInsert for $member {
             type InsertInput = <Self as $crate::collections::Member>::Data;
-            type InsertExpression = <Self as $crate::collections::Member>::Data;
+            type InsertExpression =
+                $crate::query_builder::Bind<<Self as $crate::collections::Member>::Data>;
 
             fn validate_on_insert(&self, input: Self::InsertInput) -> Self::InsertExpression {
-                input
+                $crate::query_builder::Bind(input)
             }
         }
 
@@ -816,25 +817,25 @@ macro_rules! member_impl_from_row_alias {
             for<'a> &'a str: ::sqlx::ColumnIndex<R>,
         {
             fn no_alias(&self, row: &'r R) -> Result<Self::RData, $crate::from_row::FromRowError> {
-                Ok(row.get(self.name()))
+                Ok(row.try_get(self.name())?)
             }
             fn pre_alias(
                 &self,
-                row: $crate::from_row::pre_alias<'r, R>,
+                row: $crate::from_row::RowPreAliased<'r, R>,
             ) -> Result<Self::RData, $crate::from_row::FromRowError> {
-                Ok(row.get(self.name()))
+                Ok(row.try_get(self.name())?)
             }
             fn post_alias(
                 &self,
-                row: $crate::from_row::post_alias<'r, R>,
+                row: $crate::from_row::RowPostAliased<'r, R>,
             ) -> Result<Self::RData, $crate::from_row::FromRowError> {
-                Ok(row.get(self.name()))
+                Ok(row.try_get(self.name())?)
             }
             fn two_alias(
                 &self,
-                row: $crate::from_row::two_alias<'r, R>,
+                row: $crate::from_row::RowTwoAliased<'r, R>,
             ) -> Result<Self::RData, $crate::from_row::FromRowError> {
-                Ok(row.get(self.name()))
+                Ok(row.try_get(self.name())?)
             }
         }
     };

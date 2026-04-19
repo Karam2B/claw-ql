@@ -163,8 +163,8 @@ pub(crate) mod impl_id {
 
         use super::SingleIncremintalInt;
         use crate::from_row::{
-            FromRowAlias, FromRowData, FromRowError, TryFromRowAlias, post_alias, pre_alias,
-            two_alias,
+            FromRowAlias, FromRowData, FromRowError, TryFromRowAlias, RowPostAliased, RowPreAliased,
+            RowTwoAliased,
         };
 
         impl<T> FromRowData for SingleIncremintalInt<T> {
@@ -180,13 +180,13 @@ pub(crate) mod impl_id {
             fn no_alias(&self, row: &'r R) -> Result<Self::RData, FromRowError> {
                 Ok(row.try_get("id")?)
             }
-            fn pre_alias(&self, row: pre_alias<'r, R>) -> Result<Self::RData, FromRowError> {
+            fn pre_alias(&self, row: RowPreAliased<'r, R>) -> Result<Self::RData, FromRowError> {
                 Ok(row.try_get("id")?)
             }
-            fn post_alias(&self, row: post_alias<'r, R>) -> Result<Self::RData, FromRowError> {
+            fn post_alias(&self, row: RowPostAliased<'r, R>) -> Result<Self::RData, FromRowError> {
                 Ok(row.try_get("id")?)
             }
-            fn two_alias(&self, row: two_alias<'r, R>) -> Result<Self::RData, FromRowError> {
+            fn two_alias(&self, row: RowTwoAliased<'r, R>) -> Result<Self::RData, FromRowError> {
                 Ok(row.try_get("id")?)
             }
         }
@@ -204,7 +204,7 @@ pub(crate) mod impl_id {
 
             fn try_pre_alias(
                 &self,
-                row: pre_alias<'r, R>,
+                row: RowPreAliased<'r, R>,
             ) -> Result<Option<Self::RData>, FromRowError>
             where
                 R: Row,
@@ -214,7 +214,7 @@ pub(crate) mod impl_id {
 
             fn try_two_alias(
                 &self,
-                row: two_alias<'r, R>,
+                row: RowTwoAliased<'r, R>,
             ) -> Result<Option<Self::RData>, FromRowError>
             where
                 R: Row,
@@ -224,7 +224,7 @@ pub(crate) mod impl_id {
 
             fn try_post_alias(
                 &self,
-                row: post_alias<'r, R>,
+                row: RowPostAliased<'r, R>,
             ) -> Result<Option<Self::RData>, FromRowError>
             where
                 R: Row,

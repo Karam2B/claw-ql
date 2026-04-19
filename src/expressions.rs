@@ -475,7 +475,7 @@ impl<'a, S> Expression<'a, S> for left_join {
 //     }
 // }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize))]
 pub struct col_eq<Col, Eq> {
     pub col: Col,

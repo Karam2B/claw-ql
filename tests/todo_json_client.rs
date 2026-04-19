@@ -3,7 +3,9 @@
 use claw_ql::connect_in_memory::ConnectInMemory;
 use claw_ql::database_extention::DatabaseExt;
 use claw_ql::debug_row::DebugRow;
+use claw_ql::execute::Executable;
 use claw_ql::expressions::col_eq;
+use claw_ql::fix_executor::ExecutorTrait;
 use claw_ql::from_row::FromRowAlias;
 use claw_ql::into_infer_from_phantom::IntoInferFromPhantom;
 use claw_ql::json_client::add_collection::{AddCollectionInput, TypeSpec};
@@ -29,8 +31,8 @@ use claw_ql::statements::select_statement::SelectStatement;
 use claw_ql::statements::update_statement::UpdateStatement;
 use claw_ql::update_mod::Update;
 use claw_ql_macros::simple_enum;
-use serde_json::Value as JsonValue;
 use serde_json::json;
+use serde_json::{Value as JsonValue, from_value};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{FromRow, Row, Sqlite, query};
 use std::collections::{HashMap, HashSet};
@@ -322,47 +324,58 @@ async fn concept_test_json_client_supported_links() {
 async fn test_json_client() {
     let mut jc = JsonClient::<Sqlite>::from(Sqlite::connect_in_memory().await);
 
-    jc.add_collection(AddCollectionInput {
-        name: "todo".to_string(),
-        fields: vec![
-            DynamicField {
-                name: "title".to_string(),
-                is_optional: false,
-                type_info: TypeSpec::String,
-            },
-            DynamicField {
-                name: "description".to_string(),
-                is_optional: true,
-                type_info: TypeSpec::String,
-            },
-            DynamicField {
-                name: "done".to_string(),
-                is_optional: false,
-                type_info: TypeSpec::Boolean,
-            },
-        ],
-    })
+    jc.add_collection(
+        from_value(json!({
+            "name": "todo",
+            "fields": [
+                {
+                    "name": "title",
+                    "type_info": "String",
+                    "is_optional": false,
+                },
+                {
+                    "name": "description",
+                    "type_info": "String",
+                    "is_optional": true,
+                },
+                {
+                    "name": "done",
+                    "type_info": "Boolean",
+                    "is_optional": false,
+                },
+            ],
+        }))
+        .unwrap(),
+    )
     .await
     .unwrap();
 
-    jc.add_collection(AddCollectionInput {
-        name: "category".to_string(),
-        fields: vec![DynamicField {
-            name: "title".to_string(),
-            is_optional: false,
-            type_info: TypeSpec::String,
-        }],
-    })
+    jc.add_collection(
+        from_value(json!({
+            "name": "category",
+            "fields": [
+                {
+                    "name": "title",
+                    "type_info": "String",
+                    "is_optional": false,
+                },
+            ],
+        }))
+        .unwrap(),
+    )
     .await
     .unwrap();
 
-    let s = jc
-        .add_link(AddLinkInput::OptionalToMany {
-            from: "todo".to_string(),
-            to: "category".to_string(),
-        })
-        .await
-        .unwrap();
+    jc.add_link(
+        from_value(json!({
+            "ty": "optional_to_many",
+            "from": "todo",
+            "to": "category",
+        }))
+        .unwrap(),
+    )
+    .await
+    .unwrap();
 
     sqlx::query(
         "INSERT INTO Category (title) VALUES 
@@ -374,28 +387,78 @@ async fn test_json_client() {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO Todo 
-        (title, done, description, fk_category_def) 
-    VALUES 
-        ('first_todo', true, 'description_1', 1),
-        ('second_todo', false, 'description_2', NULL),
-        ('third_todo', true, 'description_3', 1),
-        ('fourth_todo', false, 'description_4', NULL);
-",
+        "INSERT INTO Todo
+            (title, done, description, fk_category_def)
+        VALUES
+            ('first_todo', true, 'description_1', 1),
+            ('second_todo', false, 'description_2', NULL),
+            ('third_todo', true, 'description_3', 1),
+            ('fourth_todo', false, 'description_4', NULL);
+    ",
     )
     .execute(&jc.pool)
     .await
     .unwrap();
 
-    jc.fetch_many(FetchManyInput {
-        base: "todo".to_string(),
-        filters: vec![],
-        links: vec![SupportedLinkFetchMany::OptionalToMany(
-            "category".to_string(),
-        )],
-    })
+    let all =
+        sqlx::query("SELECT * FROM Todo LEFT JOIN Category ON Todo.fk_category_def = Category.id")
+            .fetch_all(&jc.pool)
+            .await
+            .unwrap();
+
+    let mut conn = jc.pool.begin().await.unwrap();
+    let all = Sqlite::fetch_all(
+        &mut conn,
+        Executable {
+            string: "SELECT * FROM Todo LEFT JOIN Category ON Todo.fk_category_def = Category.id",
+            arguments: Default::default(),
+        },
+    )
     .await
     .unwrap();
+
+    conn.commit().await.unwrap();
+
+    panic!("this is four: {:?}", all.len());
+
+    let s = jc
+        .fetch_many(
+            from_value(json!({
+                "base": "todo",
+                "filters": [],
+                "links": [
+                    { "ty": "optional_to_many", "to": "category", },
+                ],
+                "limit": 10,
+                "cursor_first_item": null,
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    pretty_assertions::assert_eq!(
+        to_value(s).unwrap(),
+        json!({
+            "items": [
+                {
+                    "id": 1,
+                    "attributes": {
+                        "title": "first_todo",
+                        "done": true,
+                        "description": "description_1",
+                    },
+                    "links": [{
+                        "id": 1,
+                        "attributes": {
+                            "title": "category_1",
+                        },
+                    }],
+                }
+            ],
+            "next_item": null,
+        })
+    );
 
     // jc.insert_one(InsertOneInput {
     //     base: "todo".to_string(),

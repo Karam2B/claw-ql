@@ -2,12 +2,13 @@ use crate::{
     collections::{Collection, CollectionId},
     database_extention::DatabaseExt,
     execute::Executable,
+    expressions::larger_than_or_equal::LargerThanOrEqual,
     extentions::common_expressions::{OnInsert, Scoped, StrAliased},
     fix_executor::ExecutorTrait,
-    from_row::{FromRowAlias, FromRowData, pre_alias},
+    from_row::{FromRowAlias, FromRowData, RowPreAliased},
     operations::{LinkedOutput, Operation, OperationOutput},
     query_builder::{
-        Bind, Expression, ManyExpressions, PossibleExpression, StatementBuilder,
+        Bind, Expression, ManyExpressions, PossibleExpression, PossibleImplMany, StatementBuilder,
         functional_expr::ManyFlat,
     },
     statements::select_statement::SelectStatement,
@@ -66,7 +67,7 @@ mod sort_only_by_id {
 
         fn pre_alias(
             &self,
-            _: crate::from_row::pre_alias<'r, R>,
+            _: crate::from_row::RowPreAliased<'r, R>,
         ) -> Result<Self::RData, crate::from_row::FromRowError>
         where
             R: sqlx::Row,
@@ -76,7 +77,7 @@ mod sort_only_by_id {
 
         fn post_alias(
             &self,
-            _: crate::from_row::post_alias<'r, R>,
+            _: crate::from_row::RowPostAliased<'r, R>,
         ) -> Result<Self::RData, crate::from_row::FromRowError>
         where
             R: sqlx::Row,
@@ -86,7 +87,7 @@ mod sort_only_by_id {
 
         fn two_alias(
             &self,
-            _: crate::from_row::two_alias<'r, R>,
+            _: crate::from_row::RowTwoAliased<'r, R>,
         ) -> Result<Self::RData, crate::from_row::FromRowError>
         where
             R: sqlx::Row,
@@ -106,7 +107,7 @@ pub struct FetchMany<From, Links, Wheres, Order, FirstItem> {
 }
 
 pub trait LinkFetchMany {
-    type Output: Default;
+    type Output;
 
     type SelectItems;
     fn non_aggregating_select_items(&self) -> Self::SelectItems;
@@ -186,6 +187,7 @@ mod functional_impls {
 }
 
 #[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ManyOutput<T, Next> {
     pub items: Vec<T>,
     pub next_item: Option<Next>,
@@ -230,6 +232,7 @@ where
     Base::Id: StrAliased<StrAliased: for<'q> Expression<'q, S>>,
     Links: LinkFetchMany<Output: Send>,
     i64: for<'q> Encode<'q, S> + Type<S>,
+    OrderBy: Clone + for<'q> PossibleExpression<'q, S>,
     OrderBy: OnInsert<InsertInput = First, InsertExpression: for<'q> PossibleExpression<'q, S>>,
     OrderBy: for<'r> FromRowAlias<'r, S::Row, RData = First>,
 {
@@ -246,21 +249,26 @@ where
             from: self.base.table_name().to_string(),
             joins: self.links.non_duplicating_join(),
             group_by: (),
-            // order: self.cursor_order_by.clone(),
-            order: (),
+            order: self.cursor_order_by.clone(),
             wheres: ManyFlat((
                 self.wheres,
-                // self.cursor_first_item.map(|(id, first)| LargerThanOrEqual {
-                //     id: ManyFlat((self.cursor_order_by.clone(), self.base.id().scoped())),
-                //     values: ManyFlat((Bind(first), Bind(id))),
-                // }),
+                self.cursor_first_item.map(|(id, first)| LargerThanOrEqual {
+                    id: ManyFlat((
+                        PossibleImplMany(self.cursor_order_by.clone()),
+                        self.base.id().scoped(),
+                    )),
+                    values: ManyFlat((
+                        PossibleImplMany(self.cursor_order_by.validate_on_insert(first)),
+                        Bind(id),
+                    )),
+                }),
                 self.links.wheres(),
             )),
             limit: Bind(self.limit),
         });
 
         let (stmt, arg) = query_builder.unwrap();
-        println!("stmt: {}", stmt);
+
         let mut s = S::fetch_all(
             &mut *pool,
             Executable {
@@ -277,29 +285,25 @@ where
                 .expect("bug: len is usize + 1, should have last item to pop");
             let next = self
                 .cursor_order_by
-                .pre_alias(pre_alias::new(&last, "b"))
+                .pre_alias(RowPreAliased::new(&last, "b"))
                 .unwrap();
-            let id = id.pre_alias(pre_alias::new(&last, "i")).unwrap();
+            let id = id.pre_alias(RowPreAliased::new(&last, "i")).unwrap();
             Some((id, next))
         } else {
             None::<(<Base::Id as CollectionId>::IdData, First)>
         };
-
-        let m = [2].into_iter().map(|_| None::<()>);
-        let m: Option<()> = m.collect();
-        let _ = m;
 
         let mut input = self.links.post_operation_input_init();
 
         let all = s
             .into_iter()
             .map(|e| {
-                let id = id.pre_alias(pre_alias::new(&e, "i")).unwrap();
-                let link = link_items.pre_alias(pre_alias::new(&e, "l")).unwrap();
+                let id = id.pre_alias(RowPreAliased::new(&e, "i")).unwrap();
+                let link = link_items.pre_alias(RowPreAliased::new(&e, "l")).unwrap();
                 self.links.post_select_each(&link, &mut input);
                 return LinkedOutput {
                     id,
-                    attributes: self.base.pre_alias(pre_alias::new(&e, "b")).unwrap(),
+                    attributes: self.base.pre_alias(RowPreAliased::new(&e, "b")).unwrap(),
                     links: link,
                 };
             })
@@ -426,7 +430,7 @@ mod deprecate_vec_impls {
 
         use crate::{
             expressions::multi_col_expressions_stack_heavy::AliasedCols,
-            from_row::{FromRowAlias, FromRowData, two_alias},
+            from_row::{FromRowAlias, FromRowData, RowTwoAliased},
             query_builder::{
                 IsOpExpression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat,
             },
@@ -581,7 +585,7 @@ mod deprecate_vec_impls {
 
             fn pre_alias(
                 &self,
-                row: crate::from_row::pre_alias<'r, R>,
+                row: crate::from_row::RowPreAliased<'r, R>,
             ) -> Result<Self::RData, crate::from_row::FromRowError>
             where
                 R: Row,
@@ -603,7 +607,7 @@ mod deprecate_vec_impls {
 
             fn post_alias(
                 &self,
-                _: crate::from_row::post_alias<'r, R>,
+                _: crate::from_row::RowPostAliased<'r, R>,
             ) -> Result<Self::RData, crate::from_row::FromRowError>
             where
                 R: Row,
@@ -613,7 +617,7 @@ mod deprecate_vec_impls {
 
             fn two_alias(
                 &self,
-                _: crate::from_row::two_alias<'r, R>,
+                _: crate::from_row::RowTwoAliased<'r, R>,
             ) -> Result<Self::RData, crate::from_row::FromRowError>
             where
                 R: Row,

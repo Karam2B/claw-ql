@@ -213,11 +213,10 @@ impl<T> Sender<T>
 
 I have no clue what the hell is this method, in multi-producer channels, senders are cheaply clonable, why you keep a reference to the sender inside SendFut? this was the method that created lifetime issues. 
 
-I don't think there is any performance benefit to use this method, and if there is, it would never justifies bad signature. 
+In fact, `flume::Sender` is an `Arc<..>`, so IT IS cloneable.
 
-1. senders in multi-producer channels are cheaply clonable. Don't hold any lifetime to them.
+The "SendFut" is a future because if the channel is bounded and full, the future will yield to the async runtime, but whatever the implementation of that future, it doesn't have to have a lifetime parameter.
 
-2. As far as I understand, if you want to create some asyncrnous functionality to channel, you use futures on the receiver end of the channel, senders can send items asynchronously without touching futures or using async/await, maybe you need to check if items have been recieved? but in sqlx codebase we are waiting on recieve.
-
+So one drawback of this change is that if the channel is full, this will be blocking, but no performance cost justifies bad signature, send_async has to clone the sender, and return `SendFut<'static, T>`. or something else that is static.
 
 

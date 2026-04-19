@@ -39,6 +39,7 @@ impl<'q, S: DatabaseExt> StatementBuilder<'q, S> {
 
         this
     }
+
     pub fn new_no_data<Expr>(expr: Expr) -> Option<String>
     where
         Expr: Expression<'q, S>,
@@ -308,7 +309,34 @@ where
         S: DatabaseExt,
     {
         ctx.syntax(start);
+
         Expression::expression(self, ctx);
+    }
+}
+
+pub struct PossibleImplMany<T>(pub T);
+
+impl<T> IsOpExpression for PossibleImplMany<T>
+where
+    T: IsOpExpression,
+{
+    fn is_op(&self) -> bool {
+        self.0.is_op()
+    }
+}
+
+impl<'q, S, T> ManyExpressions<'q, S> for PossibleImplMany<T>
+where
+    T: PossibleExpression<'q, S> + 'q,
+{
+    fn expression(self, start: &'static str, _: &'static str, ctx: &mut StatementBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+        if self.0.is_op() {
+            ctx.syntax(start);
+            self.0.expression(ctx);
+        }
     }
 }
 

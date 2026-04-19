@@ -64,7 +64,10 @@ pub mod common_expressions {
 
         use crate::{
             extentions::common_expressions::StrAliased,
-            from_row::{FromRowAlias, FromRowData, FromRowError, post_alias, pre_alias, two_alias},
+            from_row::{
+                FromRowAlias, FromRowData, FromRowError, RowPostAliased, RowPreAliased,
+                RowTwoAliased,
+            },
             query_builder::{ManyBoxedExpressions, ManyExpressions},
         };
 
@@ -73,19 +76,19 @@ pub mod common_expressions {
             fn no_alias_2<'r>(&self, row: &'r R) -> Result<Box<dyn Any + Send>, FromRowError>;
             fn pre_alias_2<'r>(
                 &self,
-                row: pre_alias<'r, R>,
+                row: RowPreAliased<'r, R>,
             ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row;
             fn post_alias_2<'r>(
                 &self,
-                row: post_alias<'r, R>,
+                row: RowPostAliased<'r, R>,
             ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row;
             fn two_alias_2<'r>(
                 &self,
-                row: two_alias<'r, R>,
+                row: RowTwoAliased<'r, R>,
             ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row;
@@ -123,7 +126,7 @@ pub mod common_expressions {
             }
             fn pre_alias_2<'r>(
                 &self,
-                row: pre_alias<'r, R>,
+                row: RowPreAliased<'r, R>,
             ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row,
@@ -146,7 +149,7 @@ pub mod common_expressions {
             }
             fn post_alias_2<'r>(
                 &self,
-                row: post_alias<'r, R>,
+                row: RowPostAliased<'r, R>,
             ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row,
@@ -155,7 +158,7 @@ pub mod common_expressions {
             }
             fn two_alias_2<'r>(
                 &self,
-                row: two_alias<'r, R>,
+                row: RowTwoAliased<'r, R>,
             ) -> Result<Box<dyn Any + Send>, FromRowError>
             where
                 R: sqlx::Row,
@@ -175,7 +178,7 @@ pub mod common_expressions {
 
             fn pre_alias(
                 &self,
-                row: crate::from_row::pre_alias<'r, R>,
+                row: crate::from_row::RowPreAliased<'r, R>,
             ) -> Result<Self::RData, FromRowError>
             where
                 R: sqlx::Row,
@@ -185,7 +188,7 @@ pub mod common_expressions {
 
             fn post_alias(
                 &self,
-                row: crate::from_row::post_alias<'r, R>,
+                row: crate::from_row::RowPostAliased<'r, R>,
             ) -> Result<Self::RData, FromRowError>
             where
                 R: sqlx::Row,
@@ -195,7 +198,7 @@ pub mod common_expressions {
 
             fn two_alias(
                 &self,
-                row: crate::from_row::two_alias<'r, R>,
+                row: crate::from_row::RowTwoAliased<'r, R>,
             ) -> Result<Self::RData, FromRowError>
             where
                 R: sqlx::Row,
@@ -272,7 +275,7 @@ pub mod as_member_helper {
 
         fn pre_alias(
             &self,
-            row: crate::from_row::pre_alias<'r, R>,
+            row: crate::from_row::RowPreAliased<'r, R>,
         ) -> Result<Self::RData, crate::from_row::FromRowError>
         where
             R: sqlx::Row,
@@ -282,7 +285,7 @@ pub mod as_member_helper {
 
         fn post_alias(
             &self,
-            row: crate::from_row::post_alias<'r, R>,
+            row: crate::from_row::RowPostAliased<'r, R>,
         ) -> Result<Self::RData, crate::from_row::FromRowError>
         where
             R: sqlx::Row,
@@ -292,7 +295,7 @@ pub mod as_member_helper {
 
         fn two_alias(
             &self,
-            row: crate::from_row::two_alias<'r, R>,
+            row: crate::from_row::RowTwoAliased<'r, R>,
         ) -> Result<Self::RData, crate::from_row::FromRowError>
         where
             R: sqlx::Row,

@@ -95,10 +95,10 @@ pub mod debug_row {
     use core::fmt;
     use sqlx::{Column, Row};
 
-    use crate::from_row::{post_alias, pre_alias, two_alias};
+    use crate::from_row::{RowPostAliased, RowPreAliased, RowTwoAliased};
 
     pub struct DebugRow<T>(pub T);
-    impl<'r, R> fmt::Debug for DebugRow<two_alias<'r, R>>
+    impl<'r, R> fmt::Debug for DebugRow<RowTwoAliased<'r, R>>
     where
         R: Row,
     {
@@ -116,7 +116,7 @@ pub mod debug_row {
         }
     }
 
-    impl<'r, R> fmt::Debug for DebugRow<pre_alias<'r, R>>
+    impl<'r, R> fmt::Debug for DebugRow<RowPreAliased<'r, R>>
     where
         R: Row,
     {
@@ -132,7 +132,7 @@ pub mod debug_row {
             Ok(())
         }
     }
-    impl<'r, R> fmt::Debug for DebugRow<post_alias<'r, R>>
+    impl<'r, R> fmt::Debug for DebugRow<RowPostAliased<'r, R>>
     where
         R: Row,
     {
