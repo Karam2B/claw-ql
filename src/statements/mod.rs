@@ -21,7 +21,9 @@ pub struct DropColumn<Table, Name> {
     pub col_name: Name,
 }
 
-impl<Table, Name, R0, R1> Inverse for AddColumn<Table, super::expressions::col_def<Name, R0, R1>> {
+impl<Table, Name, R0, R1> Inverse
+    for AddColumn<Table, super::expressions::ColumnDefinition<Name, R0, R1>>
+{
     type InverseStatement = DropColumn<Table, Name>;
     fn inverse(&self) -> Self::InverseStatement {
         todo!()
@@ -60,7 +62,7 @@ mod impl_for_sqlx_fo {
         {
             ctx.syntax("ALTER TABLE ");
             self.table.expression(ctx);
-            ctx.syntax("ADD COLUMN ");
+            ctx.syntax(" ADD COLUMN ");
             self.col_def.expression(ctx);
             ctx.syntax(";");
         }

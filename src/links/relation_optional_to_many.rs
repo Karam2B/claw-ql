@@ -21,7 +21,8 @@ mod impl_on_migrate {
     use crate::{
         collections::{Collection, SingleColumnId},
         expressions::{
-            col_def, foriegn_key, on_delete_set_null, standard_naming_conventions::ForeignKeyName,
+            ColumnDefinition, foriegn_key, on_delete_set_null,
+            standard_naming_conventions::ForeignKeyName,
         },
         extentions::common_expressions::TableNameExpression,
         links::relation_optional_to_many::OptionalToMany,
@@ -41,7 +42,7 @@ mod impl_on_migrate {
     {
         type Statements = AddColumn<
             F::TableNameExpression,
-            col_def<
+            ColumnDefinition<
                 ForeignKeyName<Key, T::TableNameExpression>,
                 Option<i64>,
                 foriegn_key<ManyPossible<(on_delete_set_null,)>>,
@@ -50,7 +51,7 @@ mod impl_on_migrate {
         fn statments(&self) -> Self::Statements {
             AddColumn {
                 table: self.from.table_name_expression(),
-                col_def: col_def {
+                col_def: ColumnDefinition {
                     name: ForeignKeyName {
                         key: self.foriegn_key.clone(),
                         to: self.to.table_name_expression(),

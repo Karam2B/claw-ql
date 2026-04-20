@@ -186,7 +186,7 @@ mod functional_impls {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ManyOutput<T, Next> {
     pub items: Vec<T>,

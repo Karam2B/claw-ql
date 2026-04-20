@@ -340,6 +340,41 @@ pub mod debug_any {
     }
 }
 
+pub mod clear_double_space {
+
+    pub struct ClearDoubleSpace<Iterator> {
+        iterator: Iterator,
+        returning: String,
+        space: bool,
+    }
+
+    impl<I: Iterator<Item = char>> ClearDoubleSpace<I> {
+        pub fn new(iterator: I) -> Self {
+            Self {
+                iterator,
+                returning: String::new(),
+                space: false,
+            }
+        }
+        pub fn consume(mut self) -> String {
+            for each in self.iterator {
+                if each == ' ' {
+                    if self.space {
+                        continue;
+                    } else {
+                        self.returning.push(each);
+                    }
+                    self.space = true;
+                } else {
+                    self.space = false;
+                    self.returning.push(each);
+                }
+            }
+            self.returning
+        }
+    }
+}
+
 // usefull old utils, they all in utils
 // folder, I don't want to delete
 // because I might come back for them!

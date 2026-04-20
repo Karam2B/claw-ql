@@ -374,10 +374,21 @@ where
 }
 
 pub struct ManyImplExpression<T> {
-    pub item: T,
-    pub start: &'static str,
-    pub join: &'static str,
+    item: T,
+    start: &'static str,
+    join: &'static str,
 }
+
+impl<T: IsOpExpression> ManyImplExpression<T> {
+    pub fn new(item: T, start: &'static str, join: &'static str) -> Result<Self, ()> {
+        if item.is_op() {
+            Ok(Self { item, start, join })
+        } else {
+            Err(())
+        }
+    }
+}
+
 impl<T> OpExpression for ManyImplExpression<T> {}
 
 impl<'q, S, T> Expression<'q, S> for ManyImplExpression<T>
@@ -389,8 +400,10 @@ where
     where
         S: DatabaseExt,
     {
-        if self.item.is_op() {
-            panic!("ManyImplExpression: item is not operational");
+        if self.item.is_op().not() {
+            panic!(
+                "bug: ManyImplExpression is not operational, ManyImplExpression should not be constructed"
+            );
         }
         self.item.expression(&self.start, &self.join, ctx);
     }

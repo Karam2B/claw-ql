@@ -269,6 +269,7 @@ pub mod multi_col_expressions_stack_heavy {
                 return;
             }
             ctx.syntax(start);
+            // panic!("problem, stmt {:?}", self.cols);
             for (i, item) in self.cols.into_iter().enumerate() {
                 ctx.sanitize(self.table);
                 ctx.syntax(&".");
@@ -279,6 +280,7 @@ pub mod multi_col_expressions_stack_heavy {
                     ctx.syntax(join);
                 }
             }
+            println!("problem, stmt {:?}", ctx.stmt());
         }
     }
 }
@@ -335,19 +337,19 @@ pub mod is_null {
     }
 }
 
-pub struct col_def<Name, Type, Constraints> {
+pub struct ColumnDefinition<Name, Type, Constraints> {
     pub name: Name,
     pub ty: PhantomData<Type>,
     pub constraints: Constraints,
 }
 
-impl<Name, Type, Constraints> OpExpression for col_def<Name, Type, Constraints> {}
+impl<Name, Type, Constraints> OpExpression for ColumnDefinition<Name, Type, Constraints> {}
 
-impl<'q, S, Name, Type, Constraints> Expression<'q, S> for col_def<Name, Type, Constraints>
+impl<'q, S, Name, Type, Constraints> Expression<'q, S> for ColumnDefinition<Name, Type, Constraints>
 where
     S: Database,
     Name: Expression<'q, S>,
-    Type: sqlx::Type<S> + 'q,
+    Type: is_null::IsNull + sqlx::Type<S> + 'q,
     Constraints: ManyExpressions<'q, S> + 'q,
 {
     fn expression(self, ctx: &mut StatementBuilder<'q, S>)
@@ -356,8 +358,12 @@ where
     {
         self.name.expression(ctx);
         ctx.syntax(" ");
+
         ctx.type_as_syntax::<Type>();
-        self.constraints.expression("", ", ", ctx);
+        if <Type as is_null::IsNull>::is_null().not() {
+            ctx.syntax(" NOT NULL");
+        }
+        self.constraints.expression(" ", ", ", ctx);
     }
 }
 

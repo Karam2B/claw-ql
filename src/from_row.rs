@@ -163,83 +163,118 @@ impl From<sqlx::Error> for FromRowError {
     }
 }
 
-pub mod row_ext {
+pub mod from_row_v2 {
+    use core::fmt;
+
     use crate::from_row::{
         FromRowData, FromRowError, RowPostAliased, RowPreAliased, RowTwoAliased,
     };
-    use sqlx::{ColumnIndex, Database, Decode, Row, Type};
+    use sqlx::{ColumnIndex, Database, Decode, Row, Sqlite, Type, sqlite::SqliteRow};
+    use std::any::Any;
 
-    pub trait RowExt: Clone + Sized {
-        type OgRow: Row;
+    pub trait RowAliased: Clone + Sized {
+        type SqlxRow: Row;
         type Database: Database;
 
-        fn get_og_row(&self) -> &Self::OgRow;
+        fn get_sqlx_row(&self) -> &Self::SqlxRow;
 
         #[inline]
         #[track_caller]
-        fn get<T>(self, index: &str) -> T
+        fn get<I, T>(self, index: I) -> T
         where
+            I: ColumnIndex<Self::SqlxRow> + fmt::Display,
             T: Type<Self::Database> + for<'r> Decode<'r, Self::Database>,
         {
-            self.try_get::<T>(index).unwrap()
+            self.try_get::<I, T>(index).unwrap()
         }
 
-        fn try_get<T>(self, index: &str) -> Result<T, sqlx::Error>
+        fn try_get_optional<I, T>(self, index: I) -> Result<Option<T>, sqlx::Error>
         where
+            I: ColumnIndex<Self::SqlxRow> + fmt::Display,
+            Option<T>: Type<Self::Database> + for<'r> Decode<'r, Self::Database>;
+
+        fn try_get<I, T>(self, index: I) -> Result<T, sqlx::Error>
+        where
+            I: ColumnIndex<Self::SqlxRow> + fmt::Display,
             T: Type<Self::Database> + for<'r> Decode<'r, Self::Database>;
     }
 
-    impl<'r, R: Row> RowExt for &'r R
+    impl<'r, R: Row> RowAliased for &'r R
     where
         for<'q> &'q str: ColumnIndex<R>,
     {
-        type OgRow = R;
+        type SqlxRow = R;
         type Database = R::Database;
 
-        fn get_og_row(&self) -> &Self::OgRow {
+        fn get_sqlx_row(&self) -> &Self::SqlxRow {
             *self
         }
 
-        fn try_get<T>(self, index: &str) -> Result<T, sqlx::Error>
+        fn try_get<I, T>(self, index: I) -> Result<T, sqlx::Error>
         where
+            I: ColumnIndex<Self::SqlxRow> + fmt::Display,
             T: Type<Self::Database> + for<'s> Decode<'s, Self::Database>,
         {
-            sqlx::Row::try_get(self.get_og_row(), index)
+            sqlx::Row::try_get(self.get_sqlx_row(), index)
+        }
+
+        fn try_get_optional<I, T>(self, index: I) -> Result<Option<T>, sqlx::Error>
+        where
+            I: ColumnIndex<Self::SqlxRow> + fmt::Display,
+            Option<T>: Type<Self::Database> + for<'s> Decode<'s, Self::Database>,
+        {
+            sqlx::Row::try_get(self.get_sqlx_row(), index)
         }
     }
-    impl<'r, R: Row> RowExt for RowPreAliased<'r, R>
+    impl<'r, R: Row> RowAliased for RowPreAliased<'r, R>
     where
         for<'q> &'q str: ColumnIndex<R>,
     {
-        type OgRow = R;
+        type SqlxRow = R;
 
         type Database = R::Database;
 
-        fn get_og_row(&self) -> &Self::OgRow {
+        fn get_sqlx_row(&self) -> &Self::SqlxRow {
             self.row
         }
 
-        fn try_get<T>(self, index: &str) -> Result<T, sqlx::Error>
+        fn try_get<I, T>(self, index: I) -> Result<T, sqlx::Error>
         where
+            I: ColumnIndex<Self::SqlxRow> + fmt::Display,
             T: Type<Self::Database> + for<'r2> Decode<'r2, Self::Database>,
         {
-            sqlx::Row::try_get(self.row, format!("{}{}", self.alias, index).as_str())
+            sqlx::Row::try_get(
+                self.row,
+                format!("{}{}", self.alias, index.to_string()).as_str(),
+            )
+        }
+        fn try_get_optional<I, T>(self, index: I) -> Result<Option<T>, sqlx::Error>
+        where
+            I: ColumnIndex<Self::SqlxRow> + fmt::Display,
+            Option<T>: Type<Self::Database> + for<'r2> Decode<'r2, Self::Database>,
+        {
+            sqlx::Row::try_get(
+                self.row,
+                format!("{}{}", self.alias, index.to_string()).as_str(),
+            )
         }
     }
-    impl<'r, R: Row> RowExt for RowTwoAliased<'r, R>
+
+    impl<'r, R: Row> RowAliased for RowTwoAliased<'r, R>
     where
         for<'q> &'q str: ColumnIndex<R>,
     {
-        type OgRow = R;
+        type SqlxRow = R;
 
         type Database = R::Database;
 
-        fn get_og_row(&self) -> &Self::OgRow {
+        fn get_sqlx_row(&self) -> &Self::SqlxRow {
             self.row
         }
 
-        fn try_get<T>(self, index: &str) -> Result<T, sqlx::Error>
+        fn try_get<I, T>(self, index: I) -> Result<T, sqlx::Error>
         where
+            I: ColumnIndex<Self::SqlxRow> + fmt::Display,
             T: Type<Self::Database> + for<'r2> Decode<'r2, Self::Database>,
         {
             sqlx::Row::try_get(
@@ -248,34 +283,65 @@ pub mod row_ext {
                     "{}{}{}",
                     self.str_alias,
                     self.num_alias.unwrap_or_default(),
-                    index
+                    index.to_string()
+                )
+                .as_str(),
+            )
+        }
+        fn try_get_optional<I, T>(self, index: I) -> Result<Option<T>, sqlx::Error>
+        where
+            I: ColumnIndex<Self::SqlxRow> + fmt::Display,
+            Option<T>: Type<Self::Database> + for<'r2> Decode<'r2, Self::Database>,
+        {
+            sqlx::Row::try_get(
+                self.row,
+                format!(
+                    "{}{}{}",
+                    self.str_alias,
+                    self.num_alias.unwrap_or_default(),
+                    index.to_string()
                 )
                 .as_str(),
             )
         }
     }
-    impl<'r, R: Row> RowExt for RowPostAliased<'r, R>
+
+    impl<'r, R: Row> RowAliased for RowPostAliased<'r, R>
     where
         for<'q> &'q str: ColumnIndex<R>,
     {
-        type OgRow = R;
+        type SqlxRow = R;
 
         type Database = R::Database;
 
-        fn get_og_row(&self) -> &Self::OgRow {
+        fn get_sqlx_row(&self) -> &Self::SqlxRow {
             self.row
         }
 
-        fn try_get<T>(self, index: &str) -> Result<T, sqlx::Error>
+        fn try_get<I, T>(self, index: I) -> Result<T, sqlx::Error>
         where
+            I: ColumnIndex<Self::SqlxRow> + fmt::Display,
             T: Type<Self::Database> + for<'r2> Decode<'r2, Self::Database>,
         {
-            sqlx::Row::try_get(self.row, format!("{}{}", index, self.alias).as_str())
+            sqlx::Row::try_get(
+                self.row,
+                format!("{}{}", index.to_string(), self.alias).as_str(),
+            )
+        }
+        fn try_get_optional<I, T>(self, index: I) -> Result<Option<T>, sqlx::Error>
+        where
+            I: ColumnIndex<Self::SqlxRow> + fmt::Display,
+            Option<T>: Type<Self::Database> + for<'r2> Decode<'r2, Self::Database>,
+        {
+            sqlx::Row::try_get(
+                self.row,
+                format!("{}{}", index.to_string(), self.alias).as_str(),
+            )
         }
     }
 
-    pub trait FromRowAlias2<'r, Re>: FromRowData {
-        fn from_row_alias(&self, row_ext: Re) -> Result<Self::RData, FromRowError>;
+    pub trait FromRowAlias2<'r, RAlias>: FromRowData {
+        fn from_row_alias(&self, row_aliased: RAlias) -> Result<Self::RData, FromRowError>;
     }
 }
 

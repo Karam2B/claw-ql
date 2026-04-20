@@ -479,8 +479,8 @@ mod sanitize_and_build_3 {
             S: DatabaseExt,
         {
             fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
-                let local = String::from("sdf");
-                ctx.sanitize_strings((self.0, "world", local.as_str()));
+                let local = String::from(" local");
+                ctx.sanitize_strings((self.0, " world", local.as_str()));
             }
         }
 
@@ -491,7 +491,7 @@ mod sanitize_and_build_3 {
                 .unwrap()
                 .0;
 
-            assert_eq!(str, "\"helloworld\"");
+            assert_eq!(str, "\"hello world local\"");
         }
     }
 }

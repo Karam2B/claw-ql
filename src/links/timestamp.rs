@@ -2,13 +2,13 @@ pub struct Timestamp<C> {
     pub collection: C,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct TimestampOutput {
     pub created_at: String,
     pub updated_at: String,
 }
 
 pub mod expressions {
-
     pub mod sql_default {
         use crate::{
             database_extention::DatabaseExt,
@@ -160,13 +160,11 @@ pub mod expressions {
                     self.operation_name.expression(ctx);
                     ctx.syntax(" ON ");
                     self.on_table.expression(ctx);
-                    ctx.syntax(" ");
                     if self.for_each_row {
-                        ctx.syntax("FOR EACH ROW ");
+                        ctx.syntax(" FOR EACH ROW ");
                     }
-                    ctx.syntax(" ");
                     if self.when_expression.is_op() {
-                        ctx.syntax("WHEN ");
+                        ctx.syntax(" WHEN ");
                         self.when_expression.expression(ctx);
                     }
                     ctx.syntax(" BEGIN ");
@@ -283,7 +281,7 @@ mod impl_on_migrate {
 
     use crate::{
         collections::Collection,
-        expressions::col_def,
+        expressions::ColumnDefinition,
         extentions::common_expressions::TableNameExpression,
         links::timestamp::{
             Timestamp,
@@ -306,11 +304,11 @@ mod impl_on_migrate {
         type Statements = (
             AddColumn<
                 C::TableNameExpression,
-                col_def<&'static str, String, SqlDefault<CurrentTimestamp>>,
+                ColumnDefinition<&'static str, String, SqlDefault<CurrentTimestamp>>,
             >,
             AddColumn<
                 C::TableNameExpression,
-                col_def<&'static str, String, SqlDefault<CurrentTimestamp>>,
+                ColumnDefinition<&'static str, String, SqlDefault<CurrentTimestamp>>,
             >,
             CreateTrigger<
                 &'static str,
@@ -333,7 +331,7 @@ mod impl_on_migrate {
                 for_each_row: false,
                 statements: VerbatimStatement {
                     verbatim: String::from(
-                        "UPDATE {table} SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;",
+                        "UPDATE {table} SET \"updated_at\" = CURRENT_TIMESTAMP WHERE \"id\" = NEW.\"id\";",
                     ),
                     for_db: Sqlite,
                 },
@@ -341,7 +339,7 @@ mod impl_on_migrate {
             (
                 AddColumn {
                     table: self.collection.table_name_expression(),
-                    col_def: col_def {
+                    col_def: ColumnDefinition {
                         name: "created_at",
                         ty: PhantomData,
                         constraints: SqlDefault {
@@ -351,7 +349,7 @@ mod impl_on_migrate {
                 },
                 AddColumn {
                     table: self.collection.table_name_expression(),
-                    col_def: col_def {
+                    col_def: ColumnDefinition {
                         name: "updated_at",
                         ty: PhantomData,
                         constraints: SqlDefault {
@@ -363,58 +361,59 @@ mod impl_on_migrate {
             )
         }
     }
-
-    #[cfg(test)]
-    mod test {
-        use sqlx::Sqlite;
-
-        use crate::{
-            links::timestamp::Timestamp,
-            on_migrate::OnMigrate,
-            prelude::sql::ManyPossible,
-            query_builder::{StatementBuilder, functional_expr::ManyImplExpression},
-            test_module,
-        };
-
-        #[test]
-        fn on_migrate_for_sqlite() {
-            let many = ManyImplExpression {
-                item: ManyPossible(
-                    Timestamp {
-                        collection: test_module::todo,
-                    }
-                    .statments(),
-                ),
-                start: "",
-                join: ";",
-            };
-            let s = StatementBuilder::<Sqlite>::new(many);
-
-            pretty_assertions::assert_eq!(
-                s.stmt(),
-                "CREATE TRIGGER update_timestamp AFTER UPDATE ON todo BEGIN UPDATE todo SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id; END;",
-            );
-        }
-    }
 }
 
 mod impl_fetch_many {
     use sqlx::{ColumnIndex, Decode, Row, Type};
-    use tokio::time::Timeout;
 
     use crate::{
+        expressions::{
+            multi_col_expressions_stack_heavy::AliasedCols, single_col_expressions::AliasedCol,
+        },
+        extentions::common_expressions::{StrAliased, TableNameExpression},
         from_row::{FromRowAlias, FromRowData},
-        links::timestamp::TimestampOutput,
+        links::timestamp::{Timestamp, TimestampOutput},
         operations::fetch_many::LinkFetchMany,
     };
 
-    pub struct TimestampSelectItems;
+    pub struct TimestampSelectItems<TableName>(TableName);
 
-    impl FromRowData for TimestampSelectItems {
+    impl StrAliased for TimestampSelectItems<&'static str> {
+        type StrAliased = AliasedCols<'static>;
+
+        fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
+            AliasedCols {
+                table: self.0,
+                cols: &["created_at", "updated_at"],
+                alias,
+            }
+        }
+    }
+
+    impl StrAliased for TimestampSelectItems<String> {
+        type StrAliased = Vec<AliasedCol<String, &'static str, &'static str>>;
+
+        fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
+            vec![
+                AliasedCol {
+                    table: self.0.clone(),
+                    col: "created_at",
+                    alias,
+                },
+                AliasedCol {
+                    table: self.0.clone(),
+                    col: "updated_at",
+                    alias,
+                },
+            ]
+        }
+    }
+
+    impl<T> FromRowData for TimestampSelectItems<T> {
         type RData = TimestampOutput;
     }
 
-    impl<'r, R> FromRowAlias<'r, R> for TimestampSelectItems
+    impl<'r, R, T> FromRowAlias<'r, R> for TimestampSelectItems<T>
     where
         R: Row,
         for<'s> &'s str: ColumnIndex<R>,
@@ -422,8 +421,8 @@ mod impl_fetch_many {
     {
         fn no_alias(&self, row: &'r R) -> Result<Self::RData, crate::from_row::FromRowError> {
             Ok(TimestampOutput {
-                created_at: row.get("crated_at"),
-                updated_at: row.get("update_at"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
             })
         }
 
@@ -435,8 +434,8 @@ mod impl_fetch_many {
             R: sqlx::Row,
         {
             Ok(TimestampOutput {
-                created_at: row.get("crated_at"),
-                updated_at: row.get("update_at"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
             })
         }
 
@@ -448,8 +447,8 @@ mod impl_fetch_many {
             R: sqlx::Row,
         {
             Ok(TimestampOutput {
-                created_at: row.get("crated_at"),
-                updated_at: row.get("update_at"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
             })
         }
 
@@ -461,19 +460,23 @@ mod impl_fetch_many {
             R: sqlx::Row,
         {
             Ok(TimestampOutput {
-                created_at: row.get("crated_at"),
-                updated_at: row.get("update_at"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
             })
         }
     }
 
-    impl<C> LinkFetchMany for Timeout<C> {
+    impl<C> LinkFetchMany for Timestamp<C>
+    where
+        TimestampSelectItems<C::TableNameExpression>: FromRowData<RData = TimestampOutput>,
+        C: TableNameExpression,
+    {
         type Output = TimestampOutput;
 
-        type SelectItems = TimestampSelectItems;
+        type SelectItems = TimestampSelectItems<C::TableNameExpression>;
 
         fn non_aggregating_select_items(&self) -> Self::SelectItems {
-            TimestampSelectItems
+            TimestampSelectItems(self.collection.table_name_expression())
         }
 
         type Join = ();

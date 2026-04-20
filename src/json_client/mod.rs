@@ -1546,6 +1546,7 @@ pub mod fetch_many {
             type SelectItems = Vec<JsonLinkSelectItems<'a, S>>;
 
             fn non_aggregating_select_items(&self) -> Self::SelectItems {
+                todo!("how to ensure using TwoAlias");
                 self.iter()
                     .map(|each| each.non_aggregating_select_items())
                     .collect()
