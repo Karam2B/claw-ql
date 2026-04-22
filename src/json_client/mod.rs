@@ -384,7 +384,8 @@ pub mod json_client {
 
     #[derive(Default, Debug)]
     pub struct LinkInformations {
-        pub optional_to_many: HashSet<(String, String)>,
+        pub optional_to_many: HashMap<(String, String), bool>,
+        pub timestamped: HashSet<String>,
     }
 
     impl<S: Database> From<Pool<S>> for JsonClient<S> {
@@ -405,7 +406,7 @@ pub mod supported_filter {
     use crate::expressions::col_eq;
     use crate::json_client::dynamic_collection::DynamicCollection;
     use crate::query_builder::functional_expr::BoxedExpression;
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
     use serde_json::Value as JsonValue;
 
     #[derive(Deserialize, Clone, Debug)]
@@ -414,7 +415,7 @@ pub mod supported_filter {
         ColEq(col_eq<String, JsonValue>),
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Serialize)]
     pub enum InvalidFilter {
         FieldNotFound(String),
         TypeMismatch(String),
@@ -467,7 +468,7 @@ pub mod links_utils {
         if jc
             .links
             .optional_to_many
-            .contains(&(base.name_lower_case.clone(), to.to_string()))
+            .contains_key(&(base.name_lower_case.clone(), to.to_string()))
             .not()
         {
             panic!()
@@ -990,14 +991,6 @@ pub mod add_collection {
         pub fields: Vec<DynamicField<TypeSpec>>,
     }
 
-    #[derive(Debug, Serialize)]
-    pub enum AddCollectionError {
-        CollectionAlreadyExists,
-        InvalidName,
-        NameViolateId,
-        NameViolateLinks,
-    }
-
     pub type AddCollectionOutput = ();
 
     impl<S> JsonClient<S>
@@ -1009,7 +1002,7 @@ pub mod add_collection {
         pub fn add_collection(
             &mut self,
             input: AddCollectionInput,
-        ) -> impl Future<Output = Result<AddCollectionOutput, AddCollectionError>> + Send {
+        ) -> impl Future<Output = Result<AddCollectionOutput, String>> + Send {
             async move {
                 let name = input.name.clone();
 
@@ -1018,14 +1011,19 @@ pub mod add_collection {
                     || input.name.starts_with("ct_")
                     || input.name.starts_with("meta_")
                 {
-                    return Err(AddCollectionError::InvalidName);
+                    Err(format!(
+                        "{} should not start with either ct_ or meta_",
+                        input.name
+                    ))?;
                 }
 
                 if input.fields.iter().any(|e| e.name.starts_with("id")) {
-                    return Err(AddCollectionError::NameViolateId);
+                    todo!()
+                    // return Err(AddCollectionError::NameViolateId);
                 }
                 if input.fields.iter().any(|e| e.name.starts_with("fk_")) {
-                    return Err(AddCollectionError::NameViolateLinks);
+                    todo!()
+                    // return Err(AddCollectionError::NameViolateLinks);
                 }
                 let dc = DynamicCollection {
                     name: input.name.to_case(Case::Pascal),
@@ -1056,7 +1054,8 @@ pub mod add_collection {
                 self.migrations.push(mig);
 
                 if self.collections.get(&name).is_some() {
-                    return Err(AddCollectionError::CollectionAlreadyExists);
+                    todo!()
+                    // return Err(AddCollectionError::CollectionAlreadyExists);
                 }
 
                 match self
@@ -1077,7 +1076,9 @@ pub mod add_link {
 
     use crate::{
         json_client::{database_for_json_client::DatabaseForJsonClient, json_client::JsonClient},
-        links::{DefaultRelationKey, relation_optional_to_many::OptionalToMany},
+        links::{
+            DefaultRelationKey, relation_optional_to_many::OptionalToMany, timestamp::Timestamp,
+        },
         on_migrate::OnMigrate,
         query_builder::StatementBuilder,
     };
@@ -1087,6 +1088,8 @@ pub mod add_link {
     pub enum AddLinkInput {
         #[serde(rename = "optional_to_many")]
         OptionalToMany { from: String, to: String },
+        #[serde(rename = "timestamp")]
+        Timestamp { collection: String },
     }
     pub type AddLinkOutput = ();
 
@@ -1107,22 +1110,33 @@ pub mod add_link {
             input: AddLinkInput,
         ) -> impl Future<Output = Result<AddLinkOutput, AddLinkError>> + Send {
             async move {
-                match &input {
-                    AddLinkInput::OptionalToMany { from, to } => {
-                        self.links
-                            .optional_to_many
-                            .insert((from.clone(), to.clone()));
-
-                        let from = self
+                match input {
+                    AddLinkInput::Timestamp { collection } => {
+                        let collection_lock = self
                             .collections
-                            .get(from)
+                            .get(collection.as_str())
+                            .ok_or(AddLinkError::CollectionDoesntExist(collection.clone()))?
+                            .read()
+                            .await;
+
+                        let collection_obj = collection_lock.clone();
+
+                        todo!("perform migration");
+
+                        self.links.timestamped.insert(collection.clone());
+                        todo!()
+                    }
+                    AddLinkInput::OptionalToMany { from, to } => {
+                        let from_collection = self
+                            .collections
+                            .get(from.as_str())
                             .ok_or(AddLinkError::CollectionDoesntExist(from.clone()))?
                             .read()
                             .await
                             .clone();
-                        let to = self
+                        let to_collection = self
                             .collections
-                            .get(to)
+                            .get(to.as_str())
                             .ok_or(AddLinkError::CollectionDoesntExist(to.clone()))?
                             .read()
                             .await
@@ -1131,14 +1145,22 @@ pub mod add_link {
                         let s =
                             StatementBuilder::new_no_data(OnMigrate::statments(&OptionalToMany {
                                 foriegn_key: DefaultRelationKey,
-                                from,
-                                to,
+                                from: from_collection,
+                                to: to_collection,
                             }))
                             .expect("bug: migrations should not have any aditional data");
 
+                        sqlx::query(s.as_str()).execute(&self.pool).await.unwrap();
+
+                        // what if server crash here, this is not atomic op
+
                         self.migrations.push(s.to_string());
 
-                        sqlx::query(s.as_str()).execute(&self.pool).await.unwrap();
+                        self.links
+                            .optional_to_many
+                            .insert((from.clone(), to.clone()), false);
+
+                        self.links.optional_to_many.insert((to, from), true);
 
                         Ok(())
                     }
@@ -1148,6 +1170,7 @@ pub mod add_link {
     }
 }
 
+#[claw_ql_macros::skip]
 pub mod fetch_many {
     use std::{ops::Not, sync::Arc};
 
@@ -1174,6 +1197,8 @@ pub mod fetch_many {
     pub enum SupportedLinkFetchMany {
         #[serde(rename = "optional_to_many")]
         OptionalToMany { to: String },
+        #[serde(rename = "timestamp")]
+        Timestamp,
     }
 
     #[derive(Debug, Deserialize)]
@@ -1182,6 +1207,14 @@ pub mod fetch_many {
         pub base: String,
         pub filters: Vec<SupportedFilter>,
         pub links: Vec<SupportedLinkFetchMany>,
+        pub pagination: Pagination,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct Pagination {
+        pub limit: i64,
+        pub first_item: Option<(i64, serde_json::Value)>,
+        pub order_by: Option<String>,
     }
 
     pub type FetchManyOutput =
@@ -1223,6 +1256,9 @@ pub mod fetch_many {
                             SupportedLinkFetchMany::OptionalToMany { to } => links.push(Arc::new(
                                 get_optional_to_many(&base, to, self).await.unwrap(),
                             )),
+                            SupportedLinkFetchMany::Timestamp => {
+                                todo!()
+                            }
                         }
                     }
                     links
@@ -1271,7 +1307,7 @@ pub mod fetch_many {
         };
 
         pub trait JsonLinkFetchMany<S>: Send {
-            fn join(&self) -> Box<dyn BoxedExpression<S> + Send>;
+            fn join(&self) -> Box<dyn ManyBoxedExpressions<S> + Send>;
             fn wheres_expression(&self) -> Box<dyn ManyBoxedExpressions<S> + Send>;
 
             fn select_items(&self) -> Box<dyn Any + Send>;
@@ -1325,8 +1361,8 @@ pub mod fetch_many {
             T::SelectItems:
                 Send + for<'r> FromRowAlias<'r, S::Row, RData: fmt::Debug + Send + 'static>,
             T::SelectItems: StrAliased<StrAliased: Send + for<'q> ManyExpressions<'q, S>>,
-            T::Join: 'static + Send + for<'q> Expression<'q, S>,
-            T::Wheres: 'static + Send + for<'q> ManyExpressions<'q, S>,
+            T::Join: 'static + Send + ManyBoxedExpressions<S>,
+            T::Wheres: 'static + Send + ManyBoxedExpressions<S>,
             T::PostOperation: 'static + Send + Operation<S>,
             T::Output: Serialize,
             T::PostOperationInput: Send + 'static,
@@ -1353,7 +1389,7 @@ pub mod fetch_many {
                 let s = self.post_select(s);
                 Box::new(s)
             }
-            fn join(&self) -> Box<dyn BoxedExpression<S> + Send> {
+            fn join(&self) -> Box<dyn ManyBoxedExpressions<S> + Send> {
                 Box::new(self.non_duplicating_join())
             }
             fn wheres_expression(&self) -> Box<dyn ManyBoxedExpressions<S> + Send> {

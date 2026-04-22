@@ -6,6 +6,7 @@ use sqlx::{Row, Sqlite};
 
 #[tokio::test]
 async fn main() {
+    let pool = Sqlite::connect_in_memory();
     let mut conn = Sqlite::connect_in_memory_2().await;
 
     sqlx::query(

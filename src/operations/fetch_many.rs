@@ -269,6 +269,8 @@ where
 
         let (stmt, arg) = query_builder.unwrap();
 
+        println!("stmt: {}", stmt);
+
         let mut s = S::fetch_all(
             &mut *pool,
             Executable {

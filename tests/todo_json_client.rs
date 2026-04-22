@@ -40,286 +40,6 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 
-#[claw_ql_macros::skip]
-async fn concept_check_unique_filter() {
-    let mut conn = Sqlite::connect_in_memory_2().await;
-
-    let todo = DynamicCollection {
-        name: "Todo".to_string(),
-        name_lower_case: "todo".to_string(),
-        fields: vec![
-            DynamicField {
-                name: "title".to_string(),
-                is_optional: false,
-                type_info: Box::new(PhantomData::<String>) as Box<dyn SqlxTypeIdent<Sqlite>>,
-            },
-            DynamicField {
-                name: "done".to_string(),
-                is_optional: false,
-                type_info: Box::new(PhantomData::<bool>) as Box<dyn SqlxTypeIdent<Sqlite>>,
-            },
-            DynamicField {
-                name: "description".to_string(),
-                is_optional: true,
-                type_info: Box::new(PhantomData::<String>) as Box<dyn SqlxTypeIdent<Sqlite>>,
-            },
-        ],
-    };
-
-    ExpressionAsOperation::exec_operation(todo.statments(), &mut conn).await;
-
-    sqlx::query(
-        "
-        INSERT INTO Todo (title, done, description) VALUES 
-            ('first_todo', true, 'description_1'), 
-            ('second_todo', false, 'description_2'), 
-            ('third_todo', true, 'description_3');
-        ",
-    )
-    .execute(&mut conn)
-    .await
-    .unwrap();
-
-    // pub enum SupportedWhere {
-    //     ColEq(String, JsonValue),
-    // }
-
-    // impl SupportedFilter {
-    //     pub fn safety_check(&self, base: &DynamicCollection<Sqlite>) -> Result<(), String> {
-    //         match self {
-    //             SupportedFilter::ColEq(col, _) => {
-    //                 if col == "id" || base.fields.iter().any(|f| f.name == *col) {
-    //                     Ok(())
-    //                 } else {
-    //                     Err(format!("{} does not exist in the collection", col))
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
-    // impl IsUniqueFilter<DynamicCollection<Sqlite>> for SupportedFilter {
-    //     fn is_unique(&self, base: &DynamicCollection<Sqlite>) -> bool {
-    //         match self {
-    //             SupportedFilter::ColEq(col, _) => col == "id",
-    //             _ => false,
-    //         }
-    //     }
-    // }
-
-    // impl OpExpression for SupportedFilter {}
-    // impl Expression<'static, Sqlite> for SupportedFilter {
-    //     fn expression(self, ctx: &mut QueryBuilder<'static, Sqlite>) {
-    //         match self {
-    //             SupportedFilter::ColEq(col, value) => {
-    //                 ctx.sanitize(&col);
-    //                 ctx.syntax(&" = ");
-    //                 ctx.bind(value);
-    //             }
-    //         }
-    //     }
-    // }
-
-    let s = Operation::<Sqlite>::exec_operation(
-        UpdateOne {
-            partial: json!({
-                "title": ["set", "new_title"],
-                "done": ["keep"],
-                "description": ["keep"],
-            }),
-            wheres: vec![{
-                let s = SupportedWhere::ColEq("id".to_string(), 1.into());
-                s.safety_check(&cl).unwrap();
-                s
-            }],
-            handler: cl,
-            links: (),
-        }
-        .safety_check()
-        .unwrap(),
-        &mut conn,
-    )
-    .await;
-
-    pretty_assertions::assert_eq!(
-        to_value(s).unwrap(),
-        json!({
-            "id": 1,
-            "attributes": {
-                "title": "new_title",
-                "done": true,
-                "description": "description_1",
-            },
-            "links": null,
-        })
-    );
-}
-
-#[claw_ql_macros::skip]
-async fn concept_test_json_client_supported_links() {
-    use tokio::sync::RwLock as TrwLock;
-
-    let mut conn = Sqlite::connect_in_memory_2().await;
-
-    let todo_cl = DynamicCollection {
-        name: "Todo".to_string(),
-        name_lower_case: "todo".to_string(),
-        fields: vec![
-            DynamicField {
-                name: "title".to_string(),
-                is_optional: false,
-                type_info: Box::new(PhantomData::<String>) as Box<dyn SqlxTypeHandler<Sqlite>>,
-            },
-            DynamicField {
-                name: "done".to_string(),
-                is_optional: false,
-                type_info: Box::new(PhantomData::<bool>) as Box<dyn SqlxTypeHandler<Sqlite>>,
-            },
-            DynamicField {
-                name: "description".to_string(),
-                is_optional: true,
-                type_info: Box::new(PhantomData::<String>) as Box<dyn SqlxTypeHandler<Sqlite>>,
-            },
-        ],
-    };
-
-    let category_cl = DynamicCollection {
-        name: "Category".to_string(),
-        name_lower_case: "category".to_string(),
-        fields: vec![DynamicField {
-            name: "title".to_string(),
-            is_optional: false,
-            type_info: Box::new(PhantomData::<String>) as Box<dyn SqlxTypeHandler<Sqlite>>,
-        }],
-    };
-
-    let sudo_jc = JsonClient {
-        collections: HashMap::from([
-            ("todo".to_string(), Arc::new(TrwLock::new(todo_cl.clone()))),
-            (
-                "category".to_string(),
-                Arc::new(TrwLock::new(category_cl.clone())),
-            ),
-        ]),
-        migrations: vec![],
-        options: JsonClientOption::default_setting(),
-        pool: Sqlite::connect_in_memory().await,
-        links: LinkInformations {
-            optional_to_many: HashSet::from([("todo".to_string(), "category".to_string())]),
-        },
-    };
-
-    ExpressionAsOperation(todo_cl.statments())
-        .exec_operation(&mut conn)
-        .await;
-    ExpressionAsOperation(category_cl.statments())
-        .exec_operation(&mut conn)
-        .await;
-    ExpressionAsOperation(
-        OptionalToMany {
-            from: todo_cl.clone(),
-            to: category_cl.clone(),
-            foriegn_key: "default".to_string(),
-        }
-        .statments(),
-    )
-    .exec_operation(&mut conn)
-    .await;
-
-    sqlx::query(
-        "
-        INSERT INTO Category (title) VALUES ('category_1'), ('category_2'), ('category_3');
-        INSERT INTO Todo (title, done, description, fk_todo_category_default) VALUES 
-            ('first_todo', true, 'description_1', 1), 
-            ('second_todo', false, 'description_2', NULL), 
-            ('third_todo', true, 'description_3', NULL),
-            ('fourth_todo', false, 'description_4', 3),
-            ('fifth_todo', true, 'description_5', 1);
-        ",
-    )
-    .execute(&mut conn)
-    .await
-    .unwrap();
-
-    let s = Operation::<Sqlite>::exec_operation(
-        FetchOne {
-            base: todo_cl.clone(),
-            wheres: (),
-            links: OptionalToMany {
-                foriegn_key: "default".to_string(),
-                from: todo_cl.clone(),
-                to: category_cl.clone(),
-            },
-        },
-        &mut conn,
-    )
-    .await
-    .unwrap();
-
-    pretty_assertions::assert_eq!(
-        to_value(s).unwrap(),
-        json!({
-            "id": 1,
-            "attributes": {
-                "title": "first_todo",
-                "done": true,
-                "description": "description_1",
-            },
-            "links": {
-                "id": 1,
-                "attributes": {
-                    "title": "category_1",
-                },
-            },
-        })
-    );
-
-    // let jc = JsonClient::from(conn);
-
-    let first = match_and_cast_to_fetch(
-        claw_ql::json_client::supported_links_on_fetch_one::on_request(
-            json!({
-                "ty": "optional_to_many",
-                "to": "category",
-            }),
-            "todo".to_string(),
-            &sudo_jc,
-        )
-        .unwrap(),
-        &sudo_jc,
-    )
-    .await;
-
-    let s = Operation::<Sqlite>::exec_operation(
-        FetchOne {
-            base: todo_cl.clone(),
-            wheres: (),
-            links: vec![first],
-        },
-        &mut conn,
-    )
-    .await
-    .unwrap();
-
-    pretty_assertions::assert_eq!(
-        to_value(s).unwrap(),
-        json!({
-            "id": 1,
-            "attributes": {
-                "title": "first_todo",
-                "done": true,
-                "description": "description_1",
-            },
-            "links": [{
-                "id": 1,
-                "attributes": {
-                    "title": "category_1",
-                },
-            }],
-        })
-    );
-}
-
 #[tokio::test]
 async fn test_json_client() {
     let mut jc = JsonClient::<Sqlite>::from(Sqlite::connect_in_memory().await);
@@ -377,6 +97,16 @@ async fn test_json_client() {
     .await
     .unwrap();
 
+    jc.add_link(
+        from_value(json!({
+            "ty": "timestamp",
+            "collection": "todo",
+        }))
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
     sqlx::query(
         "INSERT INTO Category (title) VALUES 
         ('category_1'), ('category_2'), ('category_3');
@@ -407,6 +137,7 @@ async fn test_json_client() {
             .unwrap();
 
     let mut conn = jc.pool.begin().await.unwrap();
+
     let all = Sqlite::fetch_all(
         &mut conn,
         Executable {
@@ -419,8 +150,6 @@ async fn test_json_client() {
 
     conn.commit().await.unwrap();
 
-    panic!("this is four: {:?}", all.len());
-
     let s = jc
         .fetch_many(
             from_value(json!({
@@ -428,9 +157,13 @@ async fn test_json_client() {
                 "filters": [],
                 "links": [
                     { "ty": "optional_to_many", "to": "category", },
+                    { "ty": "timestamp" },
                 ],
-                "limit": 10,
-                "cursor_first_item": null,
+                "pagination": {
+                    "limit": 10,
+                    "first_item": null,
+                    "order_by": null,
+                },
             }))
             .unwrap(),
         )

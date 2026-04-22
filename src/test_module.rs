@@ -789,6 +789,16 @@ macro_rules! member_impl_expression {
                 input
             }
         }
+
+        impl $crate::query_builder::OpExpression for $member {}
+        impl<'q, S> $crate::query_builder::Expression<'q, S> for $member
+        where
+            S: $crate::database_extention::DatabaseExt,
+        {
+            fn expression(self, ctx: &mut $crate::query_builder::StatementBuilder<'q, S>) {
+                ctx.sanitize(self.name());
+            }
+        }
     };
 }
 

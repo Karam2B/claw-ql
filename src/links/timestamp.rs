@@ -1,8 +1,10 @@
+#[derive(Debug, Clone)]
 pub struct Timestamp<C> {
     pub collection: C,
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TimestampOutput {
     pub created_at: String,
     pub updated_at: String,
@@ -376,6 +378,7 @@ mod impl_fetch_many {
         operations::fetch_many::LinkFetchMany,
     };
 
+    #[derive(Debug, Clone)]
     pub struct TimestampSelectItems<TableName>(TableName);
 
     impl StrAliased for TimestampSelectItems<&'static str> {

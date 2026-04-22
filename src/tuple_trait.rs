@@ -209,6 +209,41 @@ implt!(0 1 2 3 4 5 6 7 8 9 10 11 12 13 last 14);
 implt!(0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 last 15);
 
 #[cfg(test)]
+mod calling_fn_test {
+    use std::marker::PhantomData;
+
+    use crate::tuple_trait::{Info, Tuple, TupleSpec};
+
+    fn example(_: i32, _: bool) -> String {
+        "hello world".to_string()
+    }
+
+    pub struct DefaultFromPhantom;
+
+    impl<T: Default> TupleSpec<PhantomData<T>> for DefaultFromPhantom {
+        type Output = T;
+        fn on_each<const LEN: usize, const INDEX: usize>(
+            &mut self,
+            member: PhantomData<T>,
+        ) -> Self::Output {
+            T::default()
+        }
+    }
+
+    #[test]
+    fn example_test() {
+        let Info {
+            input_info,
+            output_info,
+        } = super::FnInfo::info(example);
+        let populated = input_info.on_all_only_mut(DefaultFromPhantom);
+        // need to wait for feature="fn_traits" to calle the next line
+        // FnOnce::call_once(example, populated)
+        example(populated.0, populated.1);
+    }
+}
+
+#[cfg(test)]
 mod basic_example {
     #![allow(unused)]
     #![deny(unused_must_use)]
