@@ -214,8 +214,8 @@ mod calling_fn_test {
 
     use crate::tuple_trait::{Info, Tuple, TupleSpec};
 
-    fn example(_: i32, _: bool) -> String {
-        "hello world".to_string()
+    fn example(f0: i32, f1: bool) -> String {
+        format!("{} {}", f0, f1)
     }
 
     pub struct DefaultFromPhantom;
@@ -224,9 +224,23 @@ mod calling_fn_test {
         type Output = T;
         fn on_each<const LEN: usize, const INDEX: usize>(
             &mut self,
-            member: PhantomData<T>,
+            _: PhantomData<T>,
         ) -> Self::Output {
             T::default()
+        }
+    }
+
+    trait FnOnceStable<Args> {
+        type Output;
+        fn call_once(self, args: Args) -> Self::Output;
+    }
+    impl<F, T0, T1, O> FnOnceStable<(T0, T1)> for F
+    where
+        F: FnOnce(T0, T1) -> O,
+    {
+        type Output = F::Output;
+        fn call_once(self, args: (T0, T1)) -> Self::Output {
+            self(args.0, args.1)
         }
     }
 
@@ -234,12 +248,11 @@ mod calling_fn_test {
     fn example_test() {
         let Info {
             input_info,
-            output_info,
+            output_info: _,
         } = super::FnInfo::info(example);
         let populated = input_info.on_all_only_mut(DefaultFromPhantom);
-        // need to wait for feature="fn_traits" to calle the next line
-        // FnOnce::call_once(example, populated)
-        example(populated.0, populated.1);
+        let output = FnOnceStable::call_once(example, populated);
+        assert_eq!(output, "0 false");
     }
 }
 

@@ -176,9 +176,10 @@ mod optional_to_many_items_names {
     use crate::{
         collections::{Collection, CollectionId},
         database_extention::DatabaseExt,
-        extentions::common_expressions::StrAliased,
+        extentions::common_expressions::Aliased,
         from_row::{
-            FromRowAlias, FromRowData, TryFromRowAlias, swich_to_base_id::pre_alias_to_base_id,
+            FromRowAlias, FromRowData, TryFromRowAlias,
+            swich_to_base_id::{pre_alias_to_base_id, two_alias_to_base_id},
         },
         query_builder::{
             IsOpExpression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat,
@@ -194,18 +195,26 @@ mod optional_to_many_items_names {
         pub to_attributes: ToAttributes,
     }
 
-    impl<F, Ti, Ta> StrAliased for OptionaToManyItems<F, Ti, Ta>
+    impl<F, Ti, Ta> Aliased for OptionaToManyItems<F, Ti, Ta>
     where
-        F: StrAliased,
-        Ti: StrAliased,
-        Ta: StrAliased,
+        F: Aliased,
+        Ti: Aliased,
+        Ta: Aliased,
     {
-        type StrAliased = OptionaToManyItems<F::StrAliased, Ti::StrAliased, Ta::StrAliased>;
-        fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
+        type Aliased = OptionaToManyItems<F::Aliased, Ti::Aliased, Ta::Aliased>;
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
             OptionaToManyItems {
-                from_id: self.from_id.str_aliased(alias),
-                to_id: self.to_id.str_aliased(alias),
-                to_attributes: self.to_attributes.str_aliased(alias),
+                from_id: self.from_id.aliased(alias),
+                to_id: self.to_id.aliased(alias),
+                to_attributes: self.to_attributes.aliased(alias),
+            }
+        }
+        type NumAliased = OptionaToManyItems<F::NumAliased, Ti::NumAliased, Ta::NumAliased>;
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+            OptionaToManyItems {
+                from_id: self.from_id.num_aliased(num, alias),
+                to_id: self.to_id.num_aliased(num, alias),
+                to_attributes: self.to_attributes.num_aliased(num, alias),
             }
         }
     }
@@ -274,14 +283,12 @@ mod optional_to_many_items_names {
         where
             R: sqlx::Row,
         {
-            let found = self.to_id.try_pre_alias(row.clone())?;
-            let found = if let Some(found) = found {
+            let try_to_find_id = self.to_id.try_pre_alias(row.clone())?;
+            let found = if let Some(found) = try_to_find_id {
                 Some((found, self.to_attributes.pre_alias(row.clone())?))
             } else {
                 None
             };
-
-            // panic!("debug: {:?}", self.from);
 
             Ok((self.from_id.pre_alias(pre_alias_to_base_id(row))?, found))
         }
@@ -293,7 +300,8 @@ mod optional_to_many_items_names {
         where
             R: sqlx::Row,
         {
-            todo!()
+            let _ = row;
+            panic!("debug in the process of deprecating this method");
         }
 
         fn two_alias(
@@ -303,7 +311,14 @@ mod optional_to_many_items_names {
         where
             R: sqlx::Row,
         {
-            todo!()
+            let try_to_find_id = self.to_id.try_two_alias(row.clone())?;
+            let found = if let Some(found) = try_to_find_id {
+                Some((found, self.to_attributes.two_alias(row.clone())?))
+            } else {
+                None
+            };
+
+            Ok((self.from_id.two_alias(two_alias_to_base_id(row))?, found))
         }
     }
 }

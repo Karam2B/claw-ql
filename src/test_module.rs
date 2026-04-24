@@ -10,7 +10,7 @@ use sqlx::{Database, Encode, prelude::Type};
 use crate::{
     database_extention::DatabaseExt,
     expressions::{
-        multi_col_expressions_stack_heavy::{AliasedCols, ScopedCols},
+        multi_col_expressions_stack_heavy::{AliasedCols, NumAliasedCols, ScopedCols},
         single_col_expressions::{MigratingCol, UpdatingCol},
     },
     extentions::common_expressions::{
@@ -67,9 +67,7 @@ impl Singleton for todo {
 
 // impl common expressions for category
 const _: () = {
-    use crate::extentions::common_expressions::{
-        Identifier, MigrateExpression, Scoped, StrAliased,
-    };
+    use crate::extentions::common_expressions::{Aliased, Identifier, MigrateExpression, Scoped};
 
     impl TableNameExpression for category {
         type TableNameExpression = &'static str;
@@ -88,12 +86,21 @@ const _: () = {
         }
     }
 
-    impl StrAliased for category {
-        type StrAliased = AliasedCols<'static>;
-        fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
+    impl Aliased for category {
+        type Aliased = AliasedCols<'static>;
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
             AliasedCols {
                 table: "Category",
                 cols: <Category as AsTuple>::NAMES,
+                alias,
+            }
+        }
+        type NumAliased = NumAliasedCols<'static>;
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+            NumAliasedCols {
+                table: "Category",
+                cols: <Category as AsTuple>::NAMES,
+                num,
                 alias,
             }
         }
@@ -198,9 +205,7 @@ const _: () = {
 
 // impl common expressions for todo
 const _: () = {
-    use crate::extentions::common_expressions::{
-        Identifier, MigrateExpression, Scoped, StrAliased,
-    };
+    use crate::extentions::common_expressions::{Aliased, Identifier, MigrateExpression, Scoped};
 
     impl TableNameExpression for todo {
         type TableNameExpression = &'static str;
@@ -220,13 +225,22 @@ const _: () = {
         }
     }
 
-    impl StrAliased for todo {
-        type StrAliased = AliasedCols<'static>;
+    impl Aliased for todo {
+        type Aliased = AliasedCols<'static>;
 
-        fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
             AliasedCols {
                 table: "Todo",
                 cols: <Todo as AsTuple>::NAMES,
+                alias,
+            }
+        }
+        type NumAliased = NumAliasedCols<'static>;
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+            NumAliasedCols {
+                table: "Todo",
+                cols: <Todo as AsTuple>::NAMES,
+                num,
                 alias,
             }
         }

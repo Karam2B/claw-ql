@@ -51,7 +51,7 @@ pub(crate) mod impl_id {
         collections::{CollectionId, SingleColumnId, SingleIncremintalInt},
         expressions::single_col_expressions::{AliasedCol, ScopedCol, UpdatingCol},
         extentions::common_expressions::{
-            Identifier, MigrateExpression, OnUpdate, Scoped, StrAliased,
+            Aliased, Identifier, MigrateExpression, OnUpdate, Scoped,
         },
         query_builder::{Expression, OpExpression, SanitizeMany, StatementBuilder},
         update_mod::Update,
@@ -69,26 +69,46 @@ pub(crate) mod impl_id {
 
     impl<T> SingleColumnId for SingleIncremintalInt<T> {}
 
-    impl StrAliased for SingleIncremintalInt<&'static str> {
-        type StrAliased =
+    impl Aliased for SingleIncremintalInt<&'static str> {
+        type Aliased =
             AliasedCol<&'static str, &'static str, SanitizeMany<(&'static str, &'static str)>>;
-        fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
             AliasedCol {
                 table: self.0,
                 col: "id",
                 alias: SanitizeMany((alias, "id")),
             }
         }
+        type NumAliased = AliasedCol<
+            &'static str,
+            &'static str,
+            SanitizeMany<(&'static str, usize, &'static str)>,
+        >;
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+            AliasedCol {
+                table: self.0,
+                col: "id",
+                alias: SanitizeMany((alias, num, "id")),
+            }
+        }
     }
 
-    impl StrAliased for SingleIncremintalInt<String> {
-        type StrAliased =
-            AliasedCol<String, &'static str, SanitizeMany<(&'static str, &'static str)>>;
-        fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
+    impl Aliased for SingleIncremintalInt<String> {
+        type Aliased = AliasedCol<String, &'static str, SanitizeMany<(&'static str, &'static str)>>;
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
             AliasedCol {
                 table: self.0.clone(),
                 col: "id",
                 alias: SanitizeMany((alias, "id")),
+            }
+        }
+        type NumAliased =
+            AliasedCol<String, &'static str, SanitizeMany<(&'static str, usize, &'static str)>>;
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+            AliasedCol {
+                table: self.0.clone(),
+                col: "id",
+                alias: SanitizeMany((alias, num, "id")),
             }
         }
     }
@@ -163,8 +183,8 @@ pub(crate) mod impl_id {
 
         use super::SingleIncremintalInt;
         use crate::from_row::{
-            FromRowAlias, FromRowData, FromRowError, TryFromRowAlias, RowPostAliased, RowPreAliased,
-            RowTwoAliased,
+            FromRowAlias, FromRowData, FromRowError, RowPostAliased, RowPreAliased, RowTwoAliased,
+            TryFromRowAlias,
         };
 
         impl<T> FromRowData for SingleIncremintalInt<T> {

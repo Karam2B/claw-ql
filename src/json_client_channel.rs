@@ -56,11 +56,14 @@ pub mod sqlx_executor {
     use crate::fix_executor::ExecutorTrait;
     use crate::json_client::dynamic_collection::DynamicCollection;
 
+    use crate::json_client::fetch_many::extending_link_trait::JsonLinkFetchMany;
     use crate::json_client_channel::add_collection::add_collection;
     use crate::json_client_channel::add_link::add_link;
     use crate::json_client_channel::fetch_many::fetch_many;
     use crate::json_client_channel::http_client_error::HttpClientError;
     use crate::json_client_channel::json_client::JsonClient;
+    use crate::links::DefaultRelationKey;
+    use crate::links::relation_optional_to_many::OptionalToMany;
     use crate::on_migrate::OnMigrate;
     use crate::query_builder::Expression;
     use futures::future::Future;
@@ -124,64 +127,6 @@ pub mod sqlx_executor {
         async move { Ok("test success") }
     }
 
-    // impl SqlxExecutor<Sqlite> {
-    //     pub fn run_sqlite(mut self) -> impl Future<Output = Infallible> {
-    //         async move {
-    //             loop {
-    //                 let operation = self.reciever.recv().await.unwrap();
-
-    //                 macro_rules! macr {
-    //                     ($([$operation:ident, $fn:ident]),*) => {
-    //                         match operation.0 {
-    //                             $(
-    //                                 Operation::$operation(input) => {
-    //                                     let s = $fn(self.data.clone(), input);
-    //                                     tokio::spawn(async move {
-    //                                         let s = tokio::spawn(s).await;
-    //                                         match s {
-    //                                             Ok(output) => operation
-    //                                                 .1
-    //                                                 .send(output.map(|e| OperationOutput::$operation(e)))
-    //                                                 .unwrap(),
-    //                                             Err(e) => match e.try_into_panic() {
-    //                                                 Ok(s) => {
-    //                                                     let _msg = match s
-    //                                                         .downcast::<String>()
-    //                                                         .map_err(|e| e.downcast::<&str>())
-    //                                                     {
-    //                                                         Ok(s) => *s,
-    //                                                         Err(Ok(s)) => s.to_string(),
-    //                                                         _ => String::from("unknown panic"),
-    //                                                     };
-    //                                                     operation
-    //                                                         .1
-    //                                                         .send(Err(HttpClientError {
-    //                                                             status:
-    //                                                                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-    //                                                             payload: serde_json::Value::Null,
-    //                                                         }))
-    //                                                         .unwrap();
-    //                                                 },
-    //                                                 Err(_) => {panic!("uncoverd task join error case")},
-    //                                             }
-    //                                         };
-    //                                     });
-    //                                 }
-    //                             )*
-    //                         }
-    //                     };
-    //                 }
-
-    //                 macr!(
-    //                     [AddCollection, add_collection],
-    //                     [AddLink, add_link],
-    //                     [DropCollection, drop_collection]
-    //                 );
-    //             }
-    //         }
-    //     }
-    // }
-
     impl<S> SqlxExecutor<S>
     where
         S: DatabaseExt,
@@ -192,6 +137,8 @@ pub mod sqlx_executor {
         DynamicCollection<S>: OnMigrate<Statements: Expression<'static, S>>,
         for<'a> S::Arguments<'a>: IntoArguments<'a, S>,
         S: ExecutorTrait,
+        OptionalToMany<DefaultRelationKey, DynamicCollection<S>, DynamicCollection<S>>:
+            JsonLinkFetchMany<S>,
     {
         pub fn run(mut self) -> impl Future<Output = Infallible> {
             async move {
@@ -663,9 +610,7 @@ pub mod fetch_many {
         fix_executor::ExecutorTrait,
         json_client::{
             dynamic_collection::DynamicCollection,
-            fetch_many::{
-                SupportedLinkFetchMany, json_link_fetch_many_extention::JsonLinkFetchMany,
-            },
+            fetch_many::{SupportedLinkFetchMany, extending_link_trait::JsonLinkFetchMany},
             supported_filter::parse_supported_filter,
         },
         json_client_channel::{
@@ -703,7 +648,7 @@ pub mod fetch_many {
             let wheres = parse_supported_filter(input.filters, &base)?;
 
             let links = {
-                let mut links = Vec::<Arc<dyn JsonLinkFetchMany<S> + Send + Sync>>::new();
+                let mut links = Vec::<Box<dyn JsonLinkFetchMany<S> + Send>>::new();
                 for each in input.links {
                     match each {
                         SupportedLinkFetchMany::OptionalToMany { to } => {
@@ -720,7 +665,7 @@ pub mod fetch_many {
                                 base.name_lower_case.clone(),
                                 to.name_lower_case.clone(),
                             )) {
-                                links.push(Arc::new(OptionalToMany {
+                                links.push(Box::new(OptionalToMany {
                                     foriegn_key: DefaultRelationKey,
                                     from: base.clone(),
                                     to,
@@ -745,15 +690,16 @@ pub mod fetch_many {
     }
 }
 
+#[claw_ql_macros::skip]
 pub mod links_utils {
     use std::{ops::Not, sync::Arc};
-
-    use sqlx::Database;
 
     use crate::{
         json_client::{dynamic_collection::DynamicCollection, json_client::JsonClient},
         links::{DefaultRelationKey, relation_optional_to_many::OptionalToMany},
     };
+    use sqlx::Database;
+    use tokio::sync::RwLockReadGuard as TrwLockReadGuard;
 
     pub async fn get_optional_to_many<S: Database>(
         base: &DynamicCollection<S>,

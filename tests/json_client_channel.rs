@@ -148,4 +148,8 @@ async fn test_json_client() {
         )
         .await
         .unwrap();
+
+    pretty_assertions::assert_eq!(serde_json::to_value(s).unwrap(), json!({}));
+
+    panic!("continue here")
 }

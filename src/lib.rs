@@ -33,7 +33,7 @@ pub mod extend_sqlite;
 pub mod extentions;
 pub mod from_row;
 pub mod json_client;
-// pub mod json_client_channel;
+pub mod json_client_channel;
 pub mod json_value_cmp;
 #[cfg(test)]
 pub mod lifetime_guide;
@@ -56,17 +56,22 @@ pub mod macros {
 
 pub mod select_items_trait_object {
     use crate::{
-        extentions::common_expressions::StrAliased,
+        extentions::common_expressions::Aliased,
         from_row::{
             FromRowAlias, FromRowData, FromRowError, RowPostAliased, RowPreAliased, RowTwoAliased,
         },
-        query_builder::ManyBoxedExpressions,
+        query_builder::{ManyBoxedExpressions, functional_expr::ManyFlat},
     };
     use sqlx::Database;
     use std::any::Any;
 
     pub trait SelectItemsTraitObject<S, CastFromRowResult>: Send {
         fn str_alias_erase(&self, alias: &'static str) -> Box<dyn ManyBoxedExpressions<S> + Send>;
+        fn num_alias_erase(
+            &self,
+            num: usize,
+            alias: &'static str,
+        ) -> Box<dyn ManyBoxedExpressions<S> + Send>;
         fn no_alias_2<'r>(&self, row: &'r S::Row) -> Result<Box<dyn Any + Send>, FromRowError>
         where
             S: Database;
@@ -98,43 +103,24 @@ pub mod select_items_trait_object {
         pub cast_from_row_result: CastFromRowResult,
     }
 
-    pub struct ToImplSelectItemsNum<Se, CastFromRowResult> {
-        pub num: usize,
-        pub select_items: Se,
-        pub cast_from_row_result: CastFromRowResult,
-    }
-
-    // impl<Se, C> StrAliased for ToImplSelectItems<Se, C>
-    // where
-    //     Se: Send + StrAliased,
-    // {
-    //     type StrAliased = Se::StrAliased;
-    //     fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
-    //         self.select_items.str_aliased(alias)
-    //     }
-    // }
-
-    // impl<Se, C> StrAliased for ToImplSelectItemsNum<Se, C>
-    // where
-    //     Se: Send + StrAliased,
-    // {
-    //     type StrAliased = Se::StrAliased;
-    //     fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
-    //         let _ = alias;
-
-    //         todo!("str_aliased for ToImplSelectItemsNum");
-    //     }
-    // }
-
     impl<Se, S> SelectItemsTraitObject<S, ()> for ToImplSelectItems<Se, ()>
     where
-        Se: Send + StrAliased<StrAliased: 'static + Send + ManyBoxedExpressions<S>>,
+        Se: Send,
+        Se: Aliased<Aliased: 'static + Send + ManyBoxedExpressions<S>>,
+        Se: Aliased<NumAliased: 'static + Send + ManyBoxedExpressions<S>>,
         Se: for<'r> FromRowAlias<'r, S::Row>,
         Se: FromRowData<RData: Send + 'static>,
         S: Database,
     {
         fn str_alias_erase(&self, alias: &'static str) -> Box<dyn ManyBoxedExpressions<S> + Send> {
-            Box::new(self.select_items.str_aliased(alias))
+            Box::new(self.select_items.aliased(alias))
+        }
+        fn num_alias_erase(
+            &self,
+            num: usize,
+            alias: &'static str,
+        ) -> Box<dyn ManyBoxedExpressions<S> + Send> {
+            Box::new(self.select_items.num_aliased(num, alias))
         }
         fn no_alias_2<'r>(&self, row: &'r S::Row) -> Result<Box<dyn Any + Send>, FromRowError> {
             Ok(Box::new(self.select_items.no_alias(row)?))
@@ -144,10 +130,6 @@ pub mod select_items_trait_object {
             row: RowPreAliased<'r, S::Row>,
         ) -> Result<Box<dyn Any + Send>, FromRowError> {
             let ret = self.select_items.pre_alias(row)?;
-            println!(
-                "EraseSelectItems::<NoErase>::pre_alias: \n{:?}",
-                ret.type_id()
-            );
             Ok(Box::new(ret))
         }
         fn post_alias_2<'r>(
@@ -164,75 +146,34 @@ pub mod select_items_trait_object {
         }
     }
 
-    impl<S, Se> SelectItemsTraitObject<S, ()> for ToImplSelectItemsNum<Se, ()>
-    where
-        S: Database,
-        Se: Send,
-        Se: FromRowData<RData: 'static + Send>,
-        Se: for<'r> FromRowAlias<'r, S::Row>,
-    {
-        fn str_alias_erase(&self, alias: &'static str) -> Box<dyn ManyBoxedExpressions<S> + Send> {
-            todo!("ret alaias")
+    impl<'r, S, C> Aliased for Box<dyn SelectItemsTraitObject<S, C> + 'r> {
+        type Aliased = Box<dyn ManyBoxedExpressions<S> + Send>;
+
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
+            self.str_alias_erase(alias)
         }
 
-        fn no_alias_2<'r>(&self, row: &'r <S>::Row) -> Result<Box<dyn Any + Send>, FromRowError>
-        where
-            S: Database,
-        {
-            let row = RowTwoAliased {
-                row,
-                str_alias: "",
-                num_alias: Some(self.num),
-            };
-
-            Ok(Box::new(self.select_items.two_alias(row)?))
-        }
-
-        fn pre_alias_2<'r>(
-            &self,
-            row: RowPreAliased<'r, <S>::Row>,
-        ) -> Result<Box<dyn Any + Send>, FromRowError>
-        where
-            S: Database,
-            <S>::Row: sqlx::Row,
-        {
-            let row = RowTwoAliased {
-                row: row.row,
-                str_alias: row.alias,
-                num_alias: Some(self.num),
-            };
-
-            Ok(Box::new(self.select_items.two_alias(row)?))
-        }
-
-        fn post_alias_2<'r>(
-            &self,
-            _: RowPostAliased<'r, <S>::Row>,
-        ) -> Result<Box<dyn Any + Send>, FromRowError>
-        where
-            S: Database,
-            <S>::Row: sqlx::Row,
-        {
-            panic!("bug: in the process of deprecating this method")
-        }
-
-        fn two_alias_2<'r>(
-            &self,
-            _: RowTwoAliased<'r, <S>::Row>,
-        ) -> Result<Box<dyn Any + Send>, FromRowError>
-        where
-            S: Database,
-            <S>::Row: sqlx::Row,
-        {
-            panic!("bug: there is some illegal nesting")
+        type NumAliased = Box<dyn ManyBoxedExpressions<S> + Send>;
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+            self.num_alias_erase(num, alias)
         }
     }
 
-    impl<'r, S, C> StrAliased for Box<dyn SelectItemsTraitObject<S, C> + 'r> {
-        type StrAliased = Box<dyn ManyBoxedExpressions<S> + Send>;
+    impl<'r, S, C> Aliased for Vec<Box<dyn SelectItemsTraitObject<S, C> + 'r>> {
+        type Aliased = ManyFlat<Vec<Box<dyn ManyBoxedExpressions<S> + Send>>>;
 
-        fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
-            self.str_alias_erase(alias)
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
+            ManyFlat(
+                self.iter()
+                    .enumerate()
+                    .map(|(i, each)| each.num_alias_erase(i, alias))
+                    .collect::<Vec<_>>(),
+            )
+        }
+
+        type NumAliased = ManyFlat<Box<dyn ManyBoxedExpressions<S> + Send>>;
+        fn num_aliased(&self, _: usize, _: &'static str) -> Self::NumAliased {
+            panic!("bug: nesting where it was not expected");
         }
     }
 
@@ -258,263 +199,293 @@ pub mod select_items_trait_object {
             Ok(self.two_alias_2(row)?)
         }
     }
-}
-
-pub mod temp_fetch_many_for_vec {
-    use serde::Serialize;
-    use sqlx::Database;
-
-    use crate::from_row::{FromRowAlias, FromRowData};
-    use crate::operations::OperationOutput;
-    use crate::operations::boxed_operation::BoxedOperation;
-    use crate::query_builder::ManyBoxedExpressions;
-    use crate::select_items_trait_object::{ToImplSelectItems, ToImplSelectItemsNum};
-    use crate::{database_extention::DatabaseExt, extentions::common_expressions::StrAliased};
-    use crate::{
-        operations::fetch_many::LinkFetchMany, select_items_trait_object::SelectItemsTraitObject,
-    };
-    use std::any::Any;
-    use std::ops::{Deref, DerefMut};
-
-    pub trait JsonLinkFetchMany<S> {
-        fn select_items_expr(&self) -> Box<dyn SelectItemsTraitObject<S, ()>>;
-        fn post_select_each_2(&self, item: &Box<dyn Any + Send>, poi: &mut Box<dyn Any + Send>);
-        fn post_operation_input_init_2(&self) -> Box<dyn Any + Send>;
-        fn post_select_2(&self, input: Box<dyn Any + Send>) -> Box<dyn BoxedOperation<S> + Send>;
-        fn take_2(
-            &self,
-            item: Box<dyn Any + Send>,
-            op: &mut Box<dyn Any + Send>,
-        ) -> serde_json::Value;
-        fn join_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send>;
-        fn wheres_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send>;
+    impl<'r, S> FromRowData for Vec<Box<dyn SelectItemsTraitObject<S, ()> + 'r>> {
+        type RData = Vec<Box<dyn Any + Send>>;
     }
 
-    impl<S, T> JsonLinkFetchMany<S> for T
-    where
-        T: Clone + Send + 'static,
-        T::SelectItems: Send,
-        T::SelectItems: FromRowData,
-        S: DatabaseExt,
-        T: LinkFetchMany,
-        T::SelectItems: Send + StrAliased<StrAliased: 'static + Send + ManyBoxedExpressions<S>>,
-        T::PostOperationInput: 'static + Send,
-        T::PostOperation: Send + 'static + BoxedOperation<S>,
-        T::PostOperation: OperationOutput,
-        T::Output: Serialize,
-        T::SelectItems: FromRowData<RData: Send + 'static>,
-        T::SelectItems: for<'r> FromRowAlias<'r, S::Row>,
-        T::Join: Send + 'static + ManyBoxedExpressions<S>,
-        T::Wheres: Send + 'static + ManyBoxedExpressions<S>,
+    impl<'r, 'b, S: Database> FromRowAlias<'r, S::Row>
+        for Vec<Box<dyn SelectItemsTraitObject<S, ()> + 'b>>
     {
-        fn join_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send> {
-            Box::new(self.non_duplicating_join())
+        fn no_alias(&self, row: &'r S::Row) -> Result<Self::RData, FromRowError> {
+            let mut v = vec![];
+            for (i, each) in self.iter().enumerate() {
+                v.push(each.two_alias(RowTwoAliased {
+                    row: row,
+                    str_alias: "",
+                    num_alias: Some(i),
+                })?);
+            }
+            Ok(v)
         }
-        fn wheres_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send> {
-            Box::new(self.wheres())
+        fn pre_alias(&self, row: RowPreAliased<'r, S::Row>) -> Result<Self::RData, FromRowError> {
+            let mut v = vec![];
+            for (i, each) in self.iter().enumerate() {
+                v.push(each.two_alias(RowTwoAliased {
+                    row: row.row,
+                    str_alias: row.alias,
+                    num_alias: Some(i),
+                })?);
+            }
+            Ok(v)
         }
-        fn take_2(
-            &self,
-            item: Box<dyn Any + Send>,
-            op: &mut Box<dyn Any + Send>,
-        ) -> serde_json::Value {
-            let s = self.take(
-                *item
-                    .downcast::<<T::SelectItems as FromRowData>::RData>()
-                    .unwrap(),
-                op.downcast_mut::<<T::PostOperation as OperationOutput>::Output>()
-                    .unwrap(),
-            );
-
-            serde_json::to_value(s).expect("bug: serializing should not fail")
-        }
-        fn select_items_expr(&self) -> Box<dyn SelectItemsTraitObject<S, ()>> {
-            Box::new(ToImplSelectItems {
-                select_items: self.non_aggregating_select_items(),
-                cast_from_row_result: (),
-            })
-        }
-        fn post_select_each_2(
-            &self,
-            item: &Box<dyn Any + Send>,
-            mut poi: &mut Box<dyn Any + Send>,
-        ) {
-            let ite_down = item
-                .deref()
-                .downcast_ref::<<T::SelectItems as FromRowData>::RData>();
-
-            let poi_down = poi.deref_mut().downcast_mut::<T::PostOperationInput>();
-
-            self.post_select_each(ite_down.unwrap(), poi_down.unwrap())
+        fn post_alias(&self, _: RowPostAliased<'r, S::Row>) -> Result<Self::RData, FromRowError> {
+            panic!("in the process of deprecating this method");
         }
 
-        fn post_operation_input_init_2(&self) -> Box<dyn Any + Send> {
-            let ret = self.post_operation_input_init();
-
-            println!(
-                "JsonLinkFetchMany::post_operation_input_init_2: \n{:?}",
-                ret.type_id(),
-            );
-
-            println!(
-                "same as (): {:?}",
-                std::any::TypeId::of::<()>() == ret.type_id()
-            );
-
-            Box::new(ret)
-        }
-        fn post_select_2(&self, input: Box<dyn Any + Send>) -> Box<dyn BoxedOperation<S> + Send> {
-            Box::new(self.post_select(*input.downcast::<T::PostOperationInput>().unwrap()))
+        fn two_alias(&self, _: RowTwoAliased<'r, S::Row>) -> Result<Self::RData, FromRowError>
+        where
+            S::Row: sqlx::Row,
+        {
+            panic!("nesting where it was not expected");
         }
     }
 
-    impl<'r, S> LinkFetchMany for Box<dyn JsonLinkFetchMany<S> + Send + 'r>
-    where
-        Box<dyn SelectItemsTraitObject<S, ()>>: FromRowData<RData = Box<dyn Any + Send>>,
-        Box<dyn BoxedOperation<S> + Send>: OperationOutput<Output = Box<dyn Any + Send>>,
-    {
-        type SelectItems = Box<dyn SelectItemsTraitObject<S, ()>>;
+    #[cfg(test)]
+    mod test {
+        use std::marker::PhantomData;
 
-        fn non_aggregating_select_items(&self) -> Self::SelectItems {
-            self.select_items_expr()
-        }
+        use crate::{
+            connect_in_memory::ConnectInMemory,
+            json_client::{
+                dynamic_collection::{DynamicCollection, DynamicField},
+                fetch_many::extending_link_trait::JsonLinkFetchMany,
+            },
+            links::{
+                DefaultRelationKey, relation_optional_to_many::OptionalToMany, timestamp::Timestamp,
+            },
+            operations::{
+                Operation,
+                fetch_many::{FetchMany, SortOnlyById},
+            },
+        };
+        use serde_json::json;
+        use sqlx::Sqlite;
 
-        fn post_select_each(&self, item: &Box<dyn Any + Send>, poi: &mut Self::PostOperationInput)
-        where
-            Self::SelectItems: FromRowData,
-        {
-            self.post_select_each_2(item, poi)
-        }
+        #[tokio::test]
+        async fn test_ref_link() {
+            let mut db = Sqlite::connect_in_memory_2().await;
 
-        fn take(
-            &self,
-            item: <Self::SelectItems as FromRowData>::RData,
-            op: &mut <Self::PostOperation as OperationOutput>::Output,
-        ) -> Self::Output
-        where
-            Self::SelectItems: FromRowData,
-            Self::PostOperation: OperationOutput,
-        {
-            self.take_2(item, op)
-        }
+            sqlx::query(
+                "
+        CREATE TABLE Category ( 
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT
+        );
+        CREATE TABLE Todo ( 
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT, 
+            done BOOLEAN, 
+            description TEXT, 
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            fk_category_def INTEGER, FOREIGN KEY (fk_category_def) REFERENCES Category(id)
+        );
 
-        type Join = Box<dyn ManyBoxedExpressions<S> + Send>;
+        
 
-        fn non_duplicating_join(&self) -> Self::Join {
-            self.join_expr()
-        }
+        INSERT INTO Category (title) VALUES 
+        ('category_1'), ('category_2'), ('category_3');
 
-        type Wheres = Box<dyn ManyBoxedExpressions<S> + Send>;
+        INSERT INTO Todo
+            (title, done, description, fk_category_def, created_at, updated_at)
+        VALUES
+            ('first_todo', true, 'description_1', 1, 'test_0', 'test_1'),
+            ('second_todo', false, 'description_2', NULL, 'test_2', 'test_3'),
+            ('third_todo', true, 'description_3', 2, 'test_4', 'test_5'),
+            ('fourth_todo', false, 'description_4', 2, 'test_6', 'test_7');
+    
+    ",
+            )
+            .execute(&mut db)
+            .await
+            .unwrap();
 
-        fn wheres(&self) -> Self::Wheres {
-            self.wheres_expr()
-        }
+            let todo_collection = DynamicCollection::<Sqlite> {
+                name: "Todo".to_string(),
+                name_lower_case: "todo".to_string(),
+                fields: vec![
+                    DynamicField {
+                        name: "title".to_string(),
+                        is_optional: false,
+                        type_info: Box::new(PhantomData::<String>),
+                    },
+                    DynamicField {
+                        name: "done".to_string(),
+                        is_optional: false,
+                        type_info: Box::new(PhantomData::<bool>),
+                    },
+                    DynamicField {
+                        name: "description".to_string(),
+                        is_optional: true,
+                        type_info: Box::new(PhantomData::<String>),
+                    },
+                ],
+            };
 
-        type Output = serde_json::Value;
+            let category_collection = DynamicCollection::<Sqlite> {
+                name: "Category".to_string(),
+                name_lower_case: "category".to_string(),
+                fields: vec![DynamicField {
+                    name: "title".to_string(),
+                    is_optional: false,
+                    type_info: Box::new(PhantomData::<String>),
+                }],
+            };
 
-        type PostOperationInput = Box<dyn Any + Send>;
+            let optional_to_many = || {
+                Box::new(OptionalToMany {
+                    from: todo_collection.clone(),
+                    to: category_collection.clone(),
+                    foriegn_key: DefaultRelationKey,
+                }) as Box<dyn JsonLinkFetchMany<Sqlite> + Send>
+            };
 
-        fn post_operation_input_init(&self) -> Self::PostOperationInput {
-            let ret = self.post_operation_input_init_2();
+            let timestamp = || {
+                Box::new(Timestamp {
+                    collection: todo_collection.clone(),
+                }) as Box<dyn JsonLinkFetchMany<Sqlite> + Send>
+            };
 
-            println!(
-                "LinkFetchMany::<JsonLinkFetchMany>::post_operation_input_init: \n{:?}",
-                ret.type_id()
+            let result = FetchMany {
+                base: todo_collection.clone(),
+                wheres: (),
+                links: optional_to_many(),
+                cursor_order_by: SortOnlyById,
+                cursor_first_item: None::<(i64, ())>,
+                limit: 10,
+            };
+
+            let output = Operation::<Sqlite>::exec_operation(result, &mut db).await;
+
+            pretty_assertions::assert_eq!(
+                serde_json::to_value(output).unwrap(),
+                json!({
+                    "items": [
+                        {
+                            "id": 1,
+                            "attributes": {
+                                "title": "first_todo",
+                                "done": true,
+                                "description": "description_1",
+
+                            },
+                            "links": {
+                                "id": 1,
+                                "attributes": {
+                                    "title": "category_1",
+                                }
+                            }
+                        },
+                        {
+                            "id": 2,
+                            "attributes": {
+                                "title": "second_todo",
+                                "done": false,
+                                "description": "description_2",
+                            },
+                            "links": null
+                        },
+                        {
+                            "id": 3,
+                            "attributes": {
+                                "title": "third_todo",
+                                "done": true,
+                                "description": "description_3",
+                            },
+                            "links": {
+                                "id": 2,
+                                "attributes": {
+                                    "title": "category_2",
+                                }
+                            }
+                        },
+                        {
+                            "id": 4,
+                            "attributes": {
+                                "title": "fourth_todo",
+                                "done": false,
+                                "description": "description_4",
+                            },
+                            "links": {
+                                "id": 2,
+                                "attributes": {
+                                    "title": "category_2",
+                                }
+                            }
+                        }
+                    ],
+                    "next_item": null,
+                })
             );
 
-            println!(
-                "same as (): {:?}",
-                ret.type_id() == std::any::TypeId::of::<()>()
+            let result = FetchMany {
+                base: todo_collection.clone(),
+                wheres: (),
+                links: vec![optional_to_many(), timestamp()],
+                cursor_order_by: SortOnlyById,
+                cursor_first_item: None::<(i64, ())>,
+                limit: 10,
+            };
+
+            let output = Operation::<Sqlite>::exec_operation(result, &mut db).await;
+
+            pretty_assertions::assert_eq!(
+                serde_json::to_value(output).unwrap(),
+                json!({
+                    "items": [
+                        {
+                            "id": 1,
+                            "attributes": {
+                                "title": "first_todo",
+                                "done": true,
+                                "description": "description_1",
+
+                            },
+                            "links": [
+                                { "id": 1, "attributes": { "title": "category_1", } },
+                                { "created_at": "test_0", "updated_at": "test_1", }
+                            ]
+                        },
+                        {
+                            "id": 2,
+                            "attributes": {
+                                "title": "second_todo",
+                                "done": false,
+                                "description": "description_2",
+                            },
+                            "links": [
+                                null,
+                                { "created_at": "test_2", "updated_at": "test_3", }
+                            ]
+                        },
+                        {
+                            "id": 3,
+                            "attributes": {
+                                "title": "third_todo",
+                                "done": true,
+                                "description": "description_3",
+                            },
+                            "links": [
+                                { "id": 2, "attributes": { "title": "category_2", } },
+                                { "created_at": "test_4", "updated_at": "test_5", }
+                            ]
+                        },
+                        {
+                            "id": 4,
+                            "attributes": {
+                                "title": "fourth_todo",
+                                "done": false,
+                                "description": "description_4",
+                            },
+                            "links": [
+                                { "id": 2, "attributes": { "title": "category_2", } },
+                                { "created_at": "test_6", "updated_at": "test_7", }
+                            ]
+                        }
+                    ],
+                    "next_item": null,
+                })
             );
-
-            println!("downref to (): {:?}", ret.downcast_ref::<()>());
-
-            ret
-        }
-
-        type PostOperation = Box<dyn BoxedOperation<S> + Send>;
-
-        fn post_select(&self, input: Self::PostOperationInput) -> Self::PostOperation
-        where
-            Self::SelectItems: FromRowData,
-        {
-            self.post_select_2(input)
-        }
-    }
-
-    impl<'r, S> LinkFetchMany for Vec<Box<dyn JsonLinkFetchMany<S> + Send + 'r>>
-    where
-        S: Database,
-        Vec<Box<dyn SelectItemsTraitObject<S, ()>>>: FromRowData<RData = Vec<Box<dyn Any + Send>>>,
-        Box<dyn BoxedOperation<S> + Send>: OperationOutput<Output = Box<dyn Any + Send>>,
-    {
-        type SelectItems = Vec<Box<dyn SelectItemsTraitObject<S, ()>>>;
-
-        fn non_aggregating_select_items(&self) -> Self::SelectItems {
-            let s = self
-                .iter()
-                .map(|each| each.select_items_expr())
-                .collect::<Vec<_>>();
-
-            s
-        }
-
-        fn post_select_each(
-            &self,
-            item: &Vec<Box<dyn Any + Send>>,
-            poi: &mut Self::PostOperationInput,
-        ) where
-            Self::SelectItems: FromRowData,
-        {
-            // self.post_select_each_2(item, poi)
-            todo!()
-        }
-
-        fn take(
-            &self,
-            item: <Self::SelectItems as FromRowData>::RData,
-            op: &mut <Self::PostOperation as OperationOutput>::Output,
-        ) -> Self::Output
-        where
-            Self::SelectItems: FromRowData,
-            Self::PostOperation: OperationOutput,
-        {
-            // self.take_2(item, op)
-            todo!()
-        }
-
-        type Join = Box<dyn ManyBoxedExpressions<S> + Send>;
-
-        fn non_duplicating_join(&self) -> Self::Join {
-            // self.join_expr()
-            todo!()
-        }
-
-        type Wheres = Box<dyn ManyBoxedExpressions<S> + Send>;
-
-        fn wheres(&self) -> Self::Wheres {
-            // self.wheres_expr()
-            todo!()
-        }
-
-        type Output = serde_json::Value;
-
-        type PostOperationInput = Box<dyn Any + Send>;
-
-        fn post_operation_input_init(&self) -> Self::PostOperationInput {
-            // let ret = self.post_operation_input_init_2();
-            // ret
-            todo!()
-        }
-
-        type PostOperation = Box<dyn BoxedOperation<S> + Send>;
-
-        fn post_select(&self, input: Self::PostOperationInput) -> Self::PostOperation
-        where
-            Self::SelectItems: FromRowData,
-        {
-            // self.post_select_2(input)
-            todo!()
         }
     }
 }

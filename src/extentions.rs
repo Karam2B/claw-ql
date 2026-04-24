@@ -51,19 +51,19 @@ pub mod common_expressions {
     }
 
     /// list identifier aliased, ex: 'Todo.title AS btitle'
-    pub trait StrAliased {
-        type StrAliased;
-        fn str_aliased(&self, alias: &'static str) -> Self::StrAliased;
+    pub trait Aliased {
+        type Aliased;
+        fn aliased(&self, alias: &'static str) -> Self::Aliased;
+        type NumAliased;
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased;
     }
 
     pub mod dyn_from_row {
         use core::fmt;
         use std::any::{Any, type_name_of_val};
 
-        use sqlx::Database;
-
         use crate::{
-            extentions::common_expressions::StrAliased,
+            extentions::common_expressions::Aliased,
             from_row::{
                 FromRowAlias, FromRowData, FromRowError, RowPostAliased, RowPreAliased,
                 RowTwoAliased,
@@ -107,7 +107,7 @@ pub mod common_expressions {
             T: for<'r> FromRowAlias<'r, R>,
             T::RData: 'static + Send,
             T::RData: fmt::Debug,
-            T: StrAliased<StrAliased: Send + for<'q> ManyExpressions<'q, R::Database>>,
+            T: Aliased<Aliased: Send + for<'q> ManyExpressions<'q, R::Database>>,
         {
             fn str_aliased_2(
                 &self,
@@ -116,7 +116,7 @@ pub mod common_expressions {
             where
                 R: sqlx::Row,
             {
-                Box::new(self.str_aliased(alias))
+                Box::new(self.aliased(alias))
             }
             fn clone_as_box(&self) -> Box<dyn DynFromRow<R> + Send> {
                 Box::new(self.clone())
@@ -208,9 +208,11 @@ pub mod common_expressions {
         }
     }
 
-    impl StrAliased for () {
-        type StrAliased = ();
-        fn str_aliased(&self, _: &'static str) -> Self::StrAliased {}
+    impl Aliased for () {
+        type Aliased = ();
+        fn aliased(&self, _: &'static str) -> Self::Aliased {}
+        type NumAliased = ();
+        fn num_aliased(&self, _: usize, _: &'static str) -> Self::NumAliased {}
     }
 
     #[derive(Clone, Debug, Default)]

@@ -283,6 +283,46 @@ pub mod multi_col_expressions_stack_heavy {
             println!("problem, stmt {:?}", ctx.stmt());
         }
     }
+
+    pub struct NumAliasedCols<'q> {
+        pub table: &'q str,
+        pub cols: &'q [&'q str],
+        pub num: usize,
+        pub alias: &'q str,
+    }
+
+    impl IsOpExpression for NumAliasedCols<'_> {
+        fn is_op(&self) -> bool {
+            self.cols.len() != 0
+        }
+    }
+    impl<'q, S> ManyExpressions<'q, S> for NumAliasedCols<'static>
+    where
+        S: DatabaseExt,
+    {
+        fn expression(
+            self,
+            start: &'static str,
+            join: &'static str,
+            ctx: &mut StatementBuilder<'q, S>,
+        ) {
+            let len = self.cols.len();
+            if len == 0 {
+                return;
+            }
+            ctx.syntax(start);
+            for (i, item) in self.cols.into_iter().enumerate() {
+                ctx.sanitize(self.table);
+                ctx.syntax(&".");
+                ctx.sanitize(item);
+                ctx.syntax(&" AS ");
+                ctx.sanitize_strings((self.alias, self.num, *item));
+                if i < len - 1 {
+                    ctx.syntax(join);
+                }
+            }
+        }
+    }
 }
 
 pub mod is_null {

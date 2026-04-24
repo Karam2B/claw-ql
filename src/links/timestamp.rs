@@ -370,43 +370,73 @@ mod impl_fetch_many {
 
     use crate::{
         expressions::{
-            multi_col_expressions_stack_heavy::AliasedCols, single_col_expressions::AliasedCol,
+            multi_col_expressions_stack_heavy::{AliasedCols, NumAliasedCols},
+            single_col_expressions::AliasedCol,
         },
-        extentions::common_expressions::{StrAliased, TableNameExpression},
+        extentions::common_expressions::{Aliased, TableNameExpression},
         from_row::{FromRowAlias, FromRowData},
         links::timestamp::{Timestamp, TimestampOutput},
         operations::fetch_many::LinkFetchMany,
+        query_builder::SanitizeMany,
     };
 
     #[derive(Debug, Clone)]
     pub struct TimestampSelectItems<TableName>(TableName);
 
-    impl StrAliased for TimestampSelectItems<&'static str> {
-        type StrAliased = AliasedCols<'static>;
+    impl Aliased for TimestampSelectItems<&'static str> {
+        type Aliased = AliasedCols<'static>;
 
-        fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
             AliasedCols {
                 table: self.0,
                 cols: &["created_at", "updated_at"],
                 alias,
             }
         }
+
+        type NumAliased = NumAliasedCols<'static>;
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+            NumAliasedCols {
+                table: self.0,
+                cols: &["created_at", "updated_at"],
+                num,
+                alias,
+            }
+        }
     }
 
-    impl StrAliased for TimestampSelectItems<String> {
-        type StrAliased = Vec<AliasedCol<String, &'static str, &'static str>>;
+    impl Aliased for TimestampSelectItems<String> {
+        type Aliased =
+            Vec<AliasedCol<String, &'static str, SanitizeMany<(&'static str, &'static str)>>>;
 
-        fn str_aliased(&self, alias: &'static str) -> Self::StrAliased {
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
             vec![
                 AliasedCol {
                     table: self.0.clone(),
                     col: "created_at",
-                    alias,
+                    alias: SanitizeMany((alias, "created_at")),
                 },
                 AliasedCol {
                     table: self.0.clone(),
                     col: "updated_at",
-                    alias,
+                    alias: SanitizeMany((alias, "updated_at")),
+                },
+            ]
+        }
+        type NumAliased = Vec<
+            AliasedCol<String, &'static str, SanitizeMany<(&'static str, usize, &'static str)>>,
+        >;
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+            vec![
+                AliasedCol {
+                    table: self.0.clone(),
+                    col: "created_at",
+                    alias: SanitizeMany((alias, num, "created_at")),
+                },
+                AliasedCol {
+                    table: self.0.clone(),
+                    col: "updated_at",
+                    alias: SanitizeMany((alias, num, "updated_at")),
                 },
             ]
         }

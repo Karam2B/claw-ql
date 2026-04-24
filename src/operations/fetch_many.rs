@@ -3,7 +3,7 @@ use crate::{
     database_extention::DatabaseExt,
     execute::Executable,
     expressions::larger_than_or_equal::LargerThanOrEqual,
-    extentions::common_expressions::{OnInsert, Scoped, StrAliased},
+    extentions::common_expressions::{Aliased, OnInsert, Scoped},
     fix_executor::ExecutorTrait,
     from_row::{FromRowAlias, FromRowData, RowPreAliased},
     operations::{LinkedOutput, Operation, OperationOutput},
@@ -216,20 +216,20 @@ where
     Wheres: for<'q> ManyExpressions<'q, S>,
     Links: Send + LinkFetchMany<Output: Send>,
     Links::Wheres: for<'q> ManyExpressions<'q, S>,
-    Links::SelectItems: Send + StrAliased<StrAliased: for<'q> ManyExpressions<'q, S>>,
+    Links::SelectItems: Send + Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
     Links::SelectItems: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
     Links::Join: for<'q> ManyExpressions<'q, S>,
     Links::PostOperation: Operation<S>,
     Links::PostOperationInput: Send,
     Base: Collection<Data: Send, Id: Send>,
-    Base: StrAliased<StrAliased: for<'q> ManyExpressions<'q, S>>,
+    Base: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
     Base: FromRowData<RData = Base::Data>,
     Base: for<'r> FromRowAlias<'r, S::Row>,
     Base::Id: FromRowData<RData = <Base::Id as CollectionId>::IdData>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row>,
     Base::Id: CollectionId<IdData: Send + for<'q> Encode<'q, S> + Type<S>>,
     Base::Id: Scoped<Scoped: for<'q> Expression<'q, S>>,
-    Base::Id: StrAliased<StrAliased: for<'q> Expression<'q, S>>,
+    Base::Id: Aliased<Aliased: for<'q> Expression<'q, S>>,
     Links: LinkFetchMany<Output: Send>,
     i64: for<'q> Encode<'q, S> + Type<S>,
     OrderBy: Clone + for<'q> PossibleExpression<'q, S>,
@@ -242,9 +242,9 @@ where
         let link_items = self.links.non_aggregating_select_items();
         let query_builder = StatementBuilder::<'_, S>::new(SelectStatement {
             select_items: ManyFlat((
-                id.str_aliased("i"),
-                self.base.str_aliased("b"),
-                link_items.str_aliased("l"),
+                id.aliased("i"),
+                self.base.aliased("b"),
+                link_items.aliased("l"),
             )),
             from: self.base.table_name().to_string(),
             joins: self.links.non_duplicating_join(),
@@ -268,8 +268,6 @@ where
         });
 
         let (stmt, arg) = query_builder.unwrap();
-
-        println!("stmt: {}", stmt);
 
         let mut s = S::fetch_all(
             &mut *pool,
