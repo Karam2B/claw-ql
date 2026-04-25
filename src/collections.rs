@@ -143,7 +143,7 @@ pub(crate) mod impl_id {
     impl OnUpdate for SingleIncremintalInt<&'static str> {
         type UpdateInput = Update<i64>;
         type UpdateExpression = UpdatingCol<&'static str, i64>;
-        fn validate_on_update(&self, input: Self::UpdateInput) -> Self::UpdateExpression {
+        fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression {
             UpdatingCol {
                 col: self.identifier(),
                 set: input,
@@ -154,9 +154,9 @@ pub(crate) mod impl_id {
     impl OnUpdate for SingleIncremintalInt<String> {
         type UpdateInput = Update<i64>;
         type UpdateExpression = UpdatingCol<String, i64>;
-        fn validate_on_update(&self, input: Self::UpdateInput) -> Self::UpdateExpression {
+        fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression {
             UpdatingCol {
-                col: self.0.clone(),
+                col: self.0,
                 set: input,
             }
         }

@@ -18,6 +18,7 @@ mod test {
     use claw_ql::{
         collections::Member,
         connect_in_memory::ConnectInMemory,
+        extentions::common_expressions::OnInsert,
         links::Link,
         operations::{
             CollectionOutput, LinkedOutput, Operation, SafeOperation,
@@ -67,8 +68,7 @@ mod test {
             links: { <category as Link<test_module::todo>>::spec(category) },
             cursor_order_by: todo_members::title,
             cursor_first_item: Some((4, {
-                let s: <todo_members::title as Member>::Data = String::from("non_unique");
-                s
+                todo_members::title.on_insert(String::from("non_unique"))
             })),
             limit: 2,
         };

@@ -30,6 +30,11 @@ pub mod common_expressions {
         fn scoped(&self) -> Self::Scoped;
     }
 
+    impl Scoped for () {
+        type Scoped = ();
+        fn scoped(&self) -> Self::Scoped {}
+    }
+
     pub trait MembersAndIdAliased {
         type MembersAndIdAliased;
         fn members_and_id_aliased(&self, alias: &'static str) -> Self::MembersAndIdAliased;
@@ -215,21 +220,39 @@ pub mod common_expressions {
         fn num_aliased(&self, _: usize, _: &'static str) -> Self::NumAliased {}
     }
 
-    #[derive(Clone, Debug, Default)]
-    pub struct Numbered {
-        pub(crate) num: Option<usize>,
-    }
-
-    impl ToString for Numbered {
-        fn to_string(&self) -> String {
-            self.num.map(|e| e.to_string()).unwrap_or_default()
-        }
-    }
-
     /// list identifier, ex 'title'
     pub trait Identifier {
         type Identifier;
         fn identifier(&self) -> Self::Identifier;
+    }
+
+    impl Identifier for () {
+        type Identifier = ();
+        fn identifier(&self) -> Self::Identifier {}
+    }
+
+    impl<T> Identifier for Vec<T>
+    where
+        T: Identifier,
+    {
+        type Identifier = Vec<<T as Identifier>::Identifier>;
+        fn identifier(&self) -> Self::Identifier {
+            self.iter().map(|e| e.identifier()).collect()
+        }
+    }
+
+    impl Identifier for String {
+        type Identifier = String;
+        fn identifier(&self) -> Self::Identifier {
+            self.clone()
+        }
+    }
+
+    impl<'q> Identifier for &'q str {
+        type Identifier = &'q str;
+        fn identifier(&self) -> Self::Identifier {
+            self
+        }
     }
 
     pub trait MigrateExpression {
@@ -239,16 +262,80 @@ pub mod common_expressions {
 
     /// important for operations that require runtime checks
     /// to be valid.
-    pub trait OnInsert {
+    pub trait OnInsert: Sized {
         type InsertInput;
         type InsertExpression;
-        fn validate_on_insert(&self, input: Self::InsertInput) -> Self::InsertExpression;
+        fn on_insert(self, input: Self::InsertInput) -> Self::InsertExpression;
     }
 
-    pub trait OnUpdate {
+    impl OnInsert for () {
+        type InsertInput = ();
+        type InsertExpression = ();
+        fn on_insert(self, _: Self::InsertInput) -> Self::InsertExpression {}
+    }
+
+    pub trait OnUpdate: Sized {
         type UpdateInput;
         type UpdateExpression;
-        fn validate_on_update(&self, input: Self::UpdateInput) -> Self::UpdateExpression;
+        fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression;
+    }
+}
+
+pub mod named_bind {
+    use crate::{
+        expressions::single_col_expressions::ScopedCol,
+        extentions::common_expressions::{Identifier, OnInsert, Scoped},
+    };
+
+    pub struct NamedBind<Table, Name, Value> {
+        pub table: Table,
+        pub name: Name,
+        pub value: Value,
+    }
+
+    impl<T, Name, V> Identifier for NamedBind<T, Name, V>
+    where
+        Name: Identifier,
+    {
+        type Identifier = <Name as Identifier>::Identifier;
+        fn identifier(&self) -> Self::Identifier {
+            self.name.identifier()
+        }
+    }
+
+    impl<T: Clone, Name: Clone, V> Scoped for NamedBind<T, Name, V> {
+        type Scoped = ScopedCol<T, Name>;
+        fn scoped(&self) -> ScopedCol<T, Name> {
+            ScopedCol {
+                table: self.table.clone(),
+                col: self.name.clone(),
+            }
+        }
+    }
+
+    impl<T: Clone, Name: Clone, V> Scoped for Vec<NamedBind<T, Name, V>> {
+        type Scoped = Vec<ScopedCol<T, Name>>;
+        fn scoped(&self) -> Self::Scoped {
+            self.iter().map(|e| e.scoped()).collect()
+        }
+    }
+
+    impl<T, N, V> OnInsert for NamedBind<T, N, V> {
+        type InsertInput = ();
+
+        type InsertExpression = V;
+
+        fn on_insert(self, _: Self::InsertInput) -> Self::InsertExpression {
+            self.value
+        }
+    }
+
+    impl<T, N, V> OnInsert for Vec<NamedBind<T, N, V>> {
+        type InsertInput = ();
+        type InsertExpression = Vec<V>;
+        fn on_insert(self, input: Self::InsertInput) -> Self::InsertExpression {
+            self.into_iter().map(|e| e.on_insert(input)).collect()
+        }
     }
 }
 

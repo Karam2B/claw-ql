@@ -253,10 +253,7 @@ pub mod select_items_trait_object {
             links::{
                 DefaultRelationKey, relation_optional_to_many::OptionalToMany, timestamp::Timestamp,
             },
-            operations::{
-                Operation,
-                fetch_many::{FetchMany, SortOnlyById},
-            },
+            operations::{Operation, fetch_many::FetchMany},
         };
         use serde_json::json;
         use sqlx::Sqlite;
@@ -350,7 +347,7 @@ pub mod select_items_trait_object {
                 base: todo_collection.clone(),
                 wheres: (),
                 links: optional_to_many(),
-                cursor_order_by: SortOnlyById,
+                cursor_order_by: (),
                 cursor_first_item: None::<(i64, ())>,
                 limit: 10,
             };
@@ -422,7 +419,7 @@ pub mod select_items_trait_object {
                 base: todo_collection.clone(),
                 wheres: (),
                 links: vec![optional_to_many(), timestamp()],
-                cursor_order_by: SortOnlyById,
+                cursor_order_by: (),
                 cursor_first_item: None::<(i64, ())>,
                 limit: 10,
             };
@@ -808,6 +805,30 @@ pub mod clear_double_space {
                 }
             }
             self.returning
+        }
+    }
+}
+
+pub mod utils_some_is_err {
+    pub fn some_is_err<E>(optional: Option<E>) -> Result<(), E> {
+        match optional {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    pub trait SomeIsErr {
+        type Error;
+        fn some_is_err(self) -> Result<(), Self::Error>;
+    }
+
+    impl<E> SomeIsErr for Option<E> {
+        type Error = E;
+        fn some_is_err(self) -> Result<(), Self::Error> {
+            match self {
+                Some(e) => Err(e),
+                None => Ok(()),
+            }
         }
     }
 }

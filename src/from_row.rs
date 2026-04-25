@@ -365,6 +365,69 @@ pub trait FromRowAlias<'r, R>: FromRowData {
         R: Row;
 }
 
+#[claw_ql_macros::skip]
+mod functional_impls {
+    use crate::from_row::FromRowAlias;
+    use crate::from_row::FromRowData;
+    use crate::from_row::FromRowError;
+    use crate::from_row::RowPostAliased;
+    use crate::from_row::RowPreAliased;
+    use crate::from_row::RowTwoAliased;
+    use sqlx::Row;
+
+    impl<T> FromRowData for Vec<T>
+    where
+        T: FromRowData,
+    {
+        type RData = Vec<T::RData>;
+    }
+    impl<'r, T, R> FromRowAlias<'r, R> for Vec<T>
+    where
+        T: FromRowAlias<'r, R>,
+    {
+        fn no_alias(&self, row: &'r R) -> Result<Self::RData, FromRowError> {
+            let mut r = vec![];
+            for each in self {
+                r.push(each.no_alias(row)?);
+            }
+            Ok(r)
+        }
+
+        fn pre_alias(&self, row: RowPreAliased<'r, R>) -> Result<Self::RData, FromRowError>
+        where
+            R: Row,
+        {
+            let mut r = vec![];
+            for each in self {
+                r.push(each.pre_alias(row)?);
+            }
+            Ok(r)
+        }
+
+        fn post_alias(&self, row: RowPostAliased<'r, R>) -> Result<Self::RData, FromRowError>
+        where
+            R: Row,
+        {
+            let mut r = vec![];
+            for each in self {
+                r.push(each.post_alias(row)?);
+            }
+            Ok(r)
+        }
+
+        fn two_alias(&self, row: RowTwoAliased<'r, R>) -> Result<Self::RData, FromRowError>
+        where
+            R: Row,
+        {
+            let mut r = vec![];
+            for each in self {
+                r.push(each.two_alias(row)?);
+            }
+            Ok(r)
+        }
+    }
+}
+
 pub trait TryFromRowAlias<'r, R>: FromRowData {
     fn try_no_alias(&self, row: &'r R) -> Result<Option<Self::RData>, FromRowError>;
     fn try_pre_alias(&self, row: RowPreAliased<'r, R>) -> Result<Option<Self::RData>, FromRowError>

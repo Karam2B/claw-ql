@@ -377,10 +377,10 @@ mod impl_link_fetch_many {
             OptionalToMany, join_expression::JoinExpression,
             optional_to_many_items_names::OptionaToManyItems,
         },
-        operations::{CollectionOutput, OperationOutput, fetch_many::LinkFetchMany},
+        operations::{CollectionOutput, OperationOutput, fetch_many::LinkFetch},
     };
 
-    impl<Key, F, T> LinkFetchMany for OptionalToMany<Key, F, T>
+    impl<Key, F, T> LinkFetch for OptionalToMany<Key, F, T>
     where
         Key: Clone + AsRef<str>,
         T: Collection<Id: SingleColumnId + Identifier> + TableNameExpression + Clone,
@@ -412,7 +412,7 @@ mod impl_link_fetch_many {
             ForeignKeyName<Key, T::TableNameExpression>,
         >;
 
-        fn non_duplicating_join(&self) -> Self::Join {
+        fn non_duplicating_join_expressions(&self) -> Self::Join {
             JoinExpression {
                 join_type: "LEFT JOIN",
                 foreign_table: self.to.table_name_expression(),
@@ -427,16 +427,16 @@ mod impl_link_fetch_many {
 
         type Wheres = ();
 
-        fn wheres(&self) -> Self::Wheres {}
+        fn where_expressions(&self) -> Self::Wheres {}
 
-        type PostOperation = ();
+        type Op = ();
 
         type Output = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>;
 
-        fn take(
+        fn take_many(
             &self,
             item: <Self::SelectItems as FromRowData>::RData,
-            _: &mut <Self::PostOperation as OperationOutput>::Output,
+            _: &mut <Self::Op as OperationOutput>::Output,
         ) -> Self::Output
         where
             Self::SelectItems: FromRowData,
@@ -447,20 +447,20 @@ mod impl_link_fetch_many {
             })
         }
 
-        fn post_select_each(
+        fn operation_fix_on_many(
             &self,
             _: &<Self::SelectItems as FromRowData>::RData,
-            _: &mut Self::PostOperation,
+            _: &mut Self::Op,
         ) where
             Self::SelectItems: FromRowData,
         {
         }
 
-        type PostOperationInput = ();
+        type OpInput = ();
 
-        fn post_operation_input_init(&self) -> Self::PostOperationInput {}
+        fn operation_initialize_input(&self) -> Self::OpInput {}
 
-        fn post_select(&self, _: Self::PostOperationInput) -> Self::PostOperation
+        fn operation_construct(&self, _: Self::OpInput) -> Self::Op
         where
             Self::SelectItems: FromRowData,
         {

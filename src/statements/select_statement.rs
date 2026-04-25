@@ -23,7 +23,7 @@ impl<SelectItems, From, Joins, GroupBy, Wheres, Limit, Order> OpExpression
 }
 
 impl<'q, S, SelectItems, From, Joins, Wheres, Limit, Order, GroupBy> Expression<'q, S>
-    for SelectStatement<SelectItems, From, Joins, Wheres, GroupBy, Limit, Order>
+    for SelectStatement<SelectItems, From, Joins, Wheres, GroupBy, Order, Limit>
 where
     SelectItems: ManyExpressions<'q, S> + 'q,
     From: Expression<'q, S> + 'q,
@@ -31,7 +31,7 @@ where
     GroupBy: ManyExpressions<'q, S> + 'q,
     Wheres: ManyExpressions<'q, S> + 'q,
     Limit: PossibleExpression<'q, S> + 'q,
-    Order: PossibleExpression<'q, S> + 'q,
+    Order: ManyExpressions<'q, S> + 'q,
 {
     #[track_caller]
     fn expression(self, ctx: &mut StatementBuilder<'q, S>)
@@ -49,7 +49,7 @@ where
         self.joins.expression(" ", ", ", ctx);
         self.wheres.expression(" WHERE ", " AND ", ctx);
         self.group_by.expression(" GROUP BY ", ", ", ctx);
-        self.order.expression_starting(" ORDER BY ", ctx);
+        self.order.expression(" ORDER BY ", ", ", ctx);
 
         self.limit.expression_starting(" LIMIT ", ctx);
         ctx.syntax(";");

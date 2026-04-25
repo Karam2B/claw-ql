@@ -376,7 +376,7 @@ mod impl_fetch_many {
         extentions::common_expressions::{Aliased, TableNameExpression},
         from_row::{FromRowAlias, FromRowData},
         links::timestamp::{Timestamp, TimestampOutput},
-        operations::fetch_many::LinkFetchMany,
+        operations::fetch_many::LinkFetch,
         query_builder::SanitizeMany,
     };
 
@@ -499,7 +499,7 @@ mod impl_fetch_many {
         }
     }
 
-    impl<C> LinkFetchMany for Timestamp<C>
+    impl<C> LinkFetch for Timestamp<C>
     where
         TimestampSelectItems<C::TableNameExpression>: FromRowData<RData = TimestampOutput>,
         C: TableNameExpression,
@@ -514,41 +514,41 @@ mod impl_fetch_many {
 
         type Join = ();
 
-        fn non_duplicating_join(&self) -> Self::Join {}
+        fn non_duplicating_join_expressions(&self) -> Self::Join {}
 
         type Wheres = ();
 
-        fn wheres(&self) -> Self::Wheres {}
+        fn where_expressions(&self) -> Self::Wheres {}
 
-        type PostOperationInput = ();
+        type OpInput = ();
 
-        fn post_operation_input_init(&self) -> Self::PostOperationInput {}
+        fn operation_initialize_input(&self) -> Self::OpInput {}
 
-        type PostOperation = ();
+        type Op = ();
 
-        fn post_select(&self, _: Self::PostOperationInput) -> Self::PostOperation
+        fn operation_construct(&self, _: Self::OpInput) -> Self::Op
         where
             Self::SelectItems: crate::from_row::FromRowData,
         {
         }
 
-        fn post_select_each(
+        fn operation_fix_on_many(
             &self,
             _: &<Self::SelectItems as crate::from_row::FromRowData>::RData,
-            _: &mut Self::PostOperationInput,
+            _: &mut Self::OpInput,
         ) where
             Self::SelectItems: crate::from_row::FromRowData,
         {
         }
 
-        fn take(
+        fn take_many(
             &self,
             item: <Self::SelectItems as crate::from_row::FromRowData>::RData,
-            _: &mut <Self::PostOperation as crate::operations::OperationOutput>::Output,
+            _: &mut <Self::Op as crate::operations::OperationOutput>::Output,
         ) -> Self::Output
         where
             Self::SelectItems: crate::from_row::FromRowData,
-            Self::PostOperation: crate::operations::OperationOutput,
+            Self::Op: crate::operations::OperationOutput,
         {
             item
         }

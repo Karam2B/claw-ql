@@ -8,91 +8,112 @@ use crate::{
     from_row::{FromRowAlias, FromRowData, RowPreAliased},
     operations::{LinkedOutput, Operation, OperationOutput},
     query_builder::{
-        Bind, Expression, ManyExpressions, PossibleExpression, PossibleImplMany, StatementBuilder,
-        functional_expr::ManyFlat,
+        Bind, Expression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat,
     },
     statements::select_statement::SelectStatement,
 };
 use sqlx::{Encode, Type};
 
-#[derive(Clone, Debug)]
-pub struct SortOnlyById;
+pub trait LinkFetch {
+    type SelectItems;
+    fn non_aggregating_select_items(&self) -> Self::SelectItems;
 
-mod sort_only_by_id {
-    use crate::database_extention::DatabaseExt;
-    use crate::extentions::common_expressions::OnInsert;
-    use crate::from_row::FromRowAlias;
+    type Join;
+    fn non_duplicating_join_expressions(&self) -> Self::Join;
+
+    type Wheres;
+    fn where_expressions(&self) -> Self::Wheres;
+
+    type Op;
+    type OpInput;
+
+    fn operation_construct_once(&self, item: &<Self::SelectItems as FromRowData>::RData) -> Self::Op
+    where
+        Self::SelectItems: FromRowData,
+    {
+        let mut ret = self.operation_initialize_input();
+        self.operation_fix_on_many(item, &mut ret);
+        self.operation_construct(ret)
+    }
+
+    fn operation_initialize_input(&self) -> Self::OpInput;
+
+    fn operation_fix_on_many(
+        &self,
+        item: &<Self::SelectItems as FromRowData>::RData,
+        poi: &mut Self::OpInput,
+    ) where
+        Self::SelectItems: FromRowData;
+
+    fn operation_construct(&self, input: Self::OpInput) -> Self::Op
+    where
+        Self::SelectItems: FromRowData;
+
+    type Output;
+
+    fn take_once(
+        self,
+        item: <Self::SelectItems as FromRowData>::RData,
+        mut op: <Self::Op as OperationOutput>::Output,
+    ) -> Self::Output
+    where
+        Self: Sized,
+        Self::SelectItems: FromRowData,
+        Self::Op: OperationOutput,
+    {
+        self.take_many(item, &mut op)
+    }
+
+    fn take_many(
+        &self,
+        item: <Self::SelectItems as FromRowData>::RData,
+        op: &mut <Self::Op as OperationOutput>::Output,
+    ) -> Self::Output
+    where
+        Self::SelectItems: FromRowData,
+        Self::Op: OperationOutput;
+}
+
+mod functional_impls {
+    use super::LinkFetch;
     use crate::from_row::FromRowData;
-    use crate::operations::fetch_many::SortOnlyById;
-    use crate::query_builder::IsOpExpression;
-    use crate::query_builder::PossibleExpression;
-    use crate::query_builder::StatementBuilder;
 
-    impl OnInsert for SortOnlyById {
-        type InsertInput = ();
+    impl LinkFetch for () {
+        type Output = ();
+        type SelectItems = ();
+        fn non_aggregating_select_items(&self) -> Self::SelectItems {}
 
-        type InsertExpression = Self;
+        type Join = ();
+        fn non_duplicating_join_expressions(&self) -> Self::Join {}
 
-        fn validate_on_insert(&self, _: Self::InsertInput) -> Self::InsertExpression {
-            SortOnlyById
-        }
-    }
+        type Wheres = ();
 
-    impl IsOpExpression for SortOnlyById {
-        fn is_op(&self) -> bool {
-            false
-        }
-    }
-    impl<'q, S> PossibleExpression<'q, S> for SortOnlyById {
-        fn expression_starting(self, _: &'static str, _: &mut StatementBuilder<'q, S>)
+        fn where_expressions(&self) -> Self::Wheres {}
+
+        type Op = ();
+        type OpInput = ();
+        fn operation_initialize_input(&self) -> Self::OpInput {}
+        fn operation_construct(&self, _: Self::OpInput) -> Self::Op
         where
-            S: DatabaseExt,
+            Self::SelectItems: FromRowData,
         {
         }
-        fn expression(self, _: &mut StatementBuilder<'q, S>)
-        where
-            S: DatabaseExt,
-        {
-        }
-    }
 
-    impl FromRowData for SortOnlyById {
-        type RData = ();
-    }
-
-    impl<'r, R> FromRowAlias<'r, R> for SortOnlyById {
-        fn no_alias(&self, _: &'r R) -> Result<Self::RData, crate::from_row::FromRowError> {
-            Ok(())
-        }
-
-        fn pre_alias(
+        fn operation_fix_on_many(
             &self,
-            _: crate::from_row::RowPreAliased<'r, R>,
-        ) -> Result<Self::RData, crate::from_row::FromRowError>
-        where
-            R: sqlx::Row,
+            _: &<Self::SelectItems as FromRowData>::RData,
+            _: &mut Self::Op,
+        ) where
+            Self::SelectItems: FromRowData,
         {
-            Ok(())
         }
 
-        fn post_alias(
+        fn take_many(
             &self,
-            _: crate::from_row::RowPostAliased<'r, R>,
-        ) -> Result<Self::RData, crate::from_row::FromRowError>
-        where
-            R: sqlx::Row,
-        {
-            Ok(())
-        }
-
-        fn two_alias(
-            &self,
-            _: crate::from_row::RowTwoAliased<'r, R>,
-        ) -> Result<Self::RData, crate::from_row::FromRowError>
-        where
-            R: sqlx::Row,
-        {
-            Ok(())
+            item: <Self::SelectItems as FromRowData>::RData,
+            _: &mut <Self::Op as crate::operations::OperationOutput>::Output,
+        ) -> Self::Output {
+            item
         }
     }
 }
@@ -106,86 +127,6 @@ pub struct FetchMany<From, Links, Wheres, Order, FirstItem> {
     pub limit: i64,
 }
 
-pub trait LinkFetchMany {
-    type Output;
-
-    type SelectItems;
-    fn non_aggregating_select_items(&self) -> Self::SelectItems;
-
-    type Join;
-    fn non_duplicating_join(&self) -> Self::Join;
-
-    type Wheres;
-    fn wheres(&self) -> Self::Wheres;
-
-    type PostOperationInput;
-    fn post_operation_input_init(&self) -> Self::PostOperationInput;
-    type PostOperation;
-    fn post_select(&self, input: Self::PostOperationInput) -> Self::PostOperation
-    where
-        Self::SelectItems: FromRowData;
-
-    fn post_select_each(
-        &self,
-        item: &<Self::SelectItems as FromRowData>::RData,
-        poi: &mut Self::PostOperationInput,
-    ) where
-        Self::SelectItems: FromRowData;
-
-    fn take(
-        &self,
-        item: <Self::SelectItems as FromRowData>::RData,
-        op: &mut <Self::PostOperation as OperationOutput>::Output,
-    ) -> Self::Output
-    where
-        Self::SelectItems: FromRowData,
-        Self::PostOperation: OperationOutput;
-}
-
-mod functional_impls {
-    use super::LinkFetchMany;
-    use crate::from_row::FromRowData;
-
-    impl LinkFetchMany for () {
-        type Output = ();
-        type SelectItems = ();
-        fn non_aggregating_select_items(&self) -> Self::SelectItems {}
-
-        type Join = ();
-        fn non_duplicating_join(&self) -> Self::Join {}
-
-        type Wheres = ();
-
-        fn wheres(&self) -> Self::Wheres {}
-
-        type PostOperation = ();
-        type PostOperationInput = ();
-        fn post_operation_input_init(&self) -> Self::PostOperationInput {}
-        fn post_select(&self, _: Self::PostOperationInput) -> Self::PostOperation
-        where
-            Self::SelectItems: FromRowData,
-        {
-        }
-
-        fn post_select_each(
-            &self,
-            _: &<Self::SelectItems as FromRowData>::RData,
-            _: &mut Self::PostOperation,
-        ) where
-            Self::SelectItems: FromRowData,
-        {
-        }
-
-        fn take(
-            &self,
-            item: <Self::SelectItems as FromRowData>::RData,
-            _: &mut <Self::PostOperation as crate::operations::OperationOutput>::Output,
-        ) -> Self::Output {
-            item
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ManyOutput<T, Next> {
@@ -196,11 +137,12 @@ pub struct ManyOutput<T, Next> {
 impl<B, L, W, O, F> OperationOutput for FetchMany<B, L, W, O, (<B::Id as CollectionId>::IdData, F)>
 where
     B: Collection,
-    L: LinkFetchMany,
+    L: LinkFetch,
+    O: FromRowData,
 {
     type Output = ManyOutput<
         LinkedOutput<<B::Id as CollectionId>::IdData, B::Data, L::Output>,
-        (<B::Id as CollectionId>::IdData, F),
+        (<B::Id as CollectionId>::IdData, O::RData),
     >;
 }
 
@@ -214,13 +156,13 @@ where
     First: Send,
     Wheres: Send,
     Wheres: for<'q> ManyExpressions<'q, S>,
-    Links: Send + LinkFetchMany<Output: Send>,
+    Links: Send + LinkFetch<Output: Send>,
     Links::Wheres: for<'q> ManyExpressions<'q, S>,
     Links::SelectItems: Send + Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
     Links::SelectItems: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
     Links::Join: for<'q> ManyExpressions<'q, S>,
-    Links::PostOperation: Operation<S>,
-    Links::PostOperationInput: Send,
+    Links::Op: Operation<S>,
+    Links::OpInput: Send,
     Base: Collection<Data: Send, Id: Send>,
     Base: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
     Base: FromRowData<RData = Base::Data>,
@@ -230,11 +172,14 @@ where
     Base::Id: CollectionId<IdData: Send + for<'q> Encode<'q, S> + Type<S>>,
     Base::Id: Scoped<Scoped: for<'q> Expression<'q, S>>,
     Base::Id: Aliased<Aliased: for<'q> Expression<'q, S>>,
-    Links: LinkFetchMany<Output: Send>,
+    Links: LinkFetch<Output: Send>,
     i64: for<'q> Encode<'q, S> + Type<S>,
-    OrderBy: Clone + for<'q> PossibleExpression<'q, S>,
-    OrderBy: OnInsert<InsertInput = First, InsertExpression: for<'q> PossibleExpression<'q, S>>,
-    OrderBy: for<'r> FromRowAlias<'r, S::Row, RData = First>,
+    OrderBy: Send + Clone,
+    OrderBy: Scoped<Scoped: for<'q> ManyExpressions<'q, S>>,
+    OrderBy: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
+    First: Send,
+    First: Scoped<Scoped: for<'q> ManyExpressions<'q, S>>,
+    First: OnInsert<InsertInput = (), InsertExpression: for<'q> ManyExpressions<'q, S>>,
 {
     async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output {
         // let db = S::singleton();
@@ -247,27 +192,27 @@ where
                 link_items.aliased("l"),
             )),
             from: self.base.table_name().to_string(),
-            joins: self.links.non_duplicating_join(),
+            joins: self.links.non_duplicating_join_expressions(),
             group_by: (),
-            order: self.cursor_order_by.clone(),
+            order: self.cursor_order_by.scoped(),
             wheres: ManyFlat((
                 self.wheres,
-                self.cursor_first_item.map(|(id, first)| LargerThanOrEqual {
-                    id: ManyFlat((
-                        PossibleImplMany(self.cursor_order_by.clone()),
-                        self.base.id().scoped(),
-                    )),
-                    values: ManyFlat((
-                        PossibleImplMany(self.cursor_order_by.validate_on_insert(first)),
-                        Bind(id),
-                    )),
+                self.cursor_first_item.map(|(id, first)| {
+                    let idents = first.scoped();
+                    let first = first.on_insert(());
+                    LargerThanOrEqual {
+                        id: ManyFlat((idents, self.base.id().scoped())),
+                        values: ManyFlat((first, Bind(id))),
+                    }
                 }),
-                self.links.wheres(),
+                self.links.where_expressions(),
             )),
-            limit: Bind(self.limit),
+            limit: Bind(self.limit + 1),
         });
 
         let (stmt, arg) = query_builder.unwrap();
+
+        tracing::info!(sql_stmt = %stmt, "fetch many");
 
         let mut s = S::fetch_all(
             &mut *pool,
@@ -290,17 +235,17 @@ where
             let id = id.pre_alias(RowPreAliased::new(&last, "i")).unwrap();
             Some((id, next))
         } else {
-            None::<(<Base::Id as CollectionId>::IdData, First)>
+            None
         };
 
-        let mut input = self.links.post_operation_input_init();
+        let mut input = self.links.operation_initialize_input();
 
         let all = s
             .into_iter()
             .map(|e| {
                 let id = id.pre_alias(RowPreAliased::new(&e, "i")).unwrap();
                 let link = link_items.pre_alias(RowPreAliased::new(&e, "l")).unwrap();
-                self.links.post_select_each(&link, &mut input);
+                self.links.operation_fix_on_many(&link, &mut input);
                 return LinkedOutput {
                     id,
                     attributes: self.base.pre_alias(RowPreAliased::new(&e, "b")).unwrap(),
@@ -311,7 +256,7 @@ where
 
         let mut po = self
             .links
-            .post_select(input)
+            .operation_construct(input)
             .exec_operation(&mut *pool)
             .await;
 
@@ -320,7 +265,7 @@ where
             .map(|e| LinkedOutput {
                 id: e.id,
                 attributes: e.attributes,
-                links: self.links.take(e.links, &mut po),
+                links: self.links.take_many(e.links, &mut po),
             })
             .collect::<Vec<_>>();
 
@@ -332,12 +277,12 @@ where
 }
 
 #[cfg(test)]
-#[claw_ql_macros::skip]
 mod test {
     use sqlx::{Sqlite, query};
 
     use crate::{
         connect_in_memory::ConnectInMemory,
+        extentions::common_expressions::OnInsert,
         operations::{
             LinkedOutput, Operation, SafeOperation,
             fetch_many::{FetchMany, ManyOutput},
@@ -371,18 +316,21 @@ mod test {
         .await
         .unwrap();
 
-        let safe_op = FetchMany {
-            base: test_module::todo,
-            wheres: (),
-            links: (),
-            cursor_order_by: todo_members::title,
-            cursor_first_item: Some((4, String::from("non_unique"))),
-            limit: 2,
-        }
-        .safety_check()
-        .unwrap();
-
-        let output = Operation::<Sqlite>::exec_operation(safe_op, &mut conn).await;
+        let output = Operation::<Sqlite>::exec_operation(
+            FetchMany {
+                base: test_module::todo,
+                wheres: (),
+                links: (),
+                cursor_order_by: todo_members::title,
+                cursor_first_item: Some((
+                    4,
+                    todo_members::title.on_insert(String::from("non_unique")),
+                )),
+                limit: 2,
+            },
+            &mut conn,
+        )
+        .await;
 
         pretty_assertions::assert_eq!(
             output,
@@ -420,8 +368,8 @@ mod deprecate_vec_impls {
     use crate::collections::CollectionId;
     use crate::from_row::FromRowData;
     use crate::operations::OperationOutput;
-    use crate::operations::fetch_many::LinkFetchManyTakeId;
-    use crate::operations::fetch_many::functional_impls::select_items_supported_in_vec::VecCollection;
+    use crate::operations::fetch_many_cursor_multi_col::LinkFetchManyTakeId;
+    use crate::operations::fetch_many_cursor_multi_col::functional_impls::select_items_supported_in_vec::VecCollection;
 
     mod select_items_supported_in_vec {
         use std::ops::Not;
@@ -650,9 +598,9 @@ mod deprecate_vec_impls {
         }
     }
 
-    impl<T> LinkFetchMany for Vec<T>
+    impl<T> LinkFetch for Vec<T>
     where
-        T: LinkFetchMany,
+        T: LinkFetch,
     {
         type Output = Vec<T::Output>;
         type SelectItems = VecCollection<T::SelectItems>;

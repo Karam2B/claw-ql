@@ -21,7 +21,7 @@ mod test {
         connect_in_memory::ConnectInMemory,
         operations::{
             LinkedOutput, Operation, SafeOperation,
-            fetch_many::{FetchMany, ManyOutput},
+            fetch_many_cursor_multi_col::{FetchMany, ManyOutput},
         },
         test_module::{self, Todo, todo_members},
     };

@@ -14,7 +14,7 @@ use crate::{
         single_col_expressions::{MigratingCol, UpdatingCol},
     },
     extentions::common_expressions::{
-        MembersAndIdAliased, Numbered, OnInsert, OnUpdate, TableNameExpression,
+        MembersAndIdAliased, OnInsert, OnUpdate, TableNameExpression,
     },
     query_builder::{
         Expression, IsOpExpression, ManyExpressions, OpExpression, PossibleImplExpression,
@@ -128,7 +128,7 @@ const _: () = {
         type UpdateInput = CategoryPartial;
         type UpdateExpression = CategoryPartial;
 
-        fn validate_on_update(&self, input: Self::UpdateInput) -> Self::UpdateExpression {
+        fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression {
             input
         }
     }
@@ -137,7 +137,7 @@ const _: () = {
         type InsertInput = Category;
         type InsertExpression = Category;
 
-        fn validate_on_insert(&self, input: Self::InsertInput) -> Self::InsertExpression {
+        fn on_insert(self, input: Self::InsertInput) -> Self::InsertExpression {
             input
         }
     }
@@ -785,13 +785,40 @@ mod impl_link {
 #[macro_export]
 macro_rules! member_impl_expression {
     ($member:ident) => {
+        impl $crate::extentions::common_expressions::Identifier for $member {
+            type Identifier = &'static str;
+            fn identifier(&self) -> Self::Identifier {
+                stringify!($member)
+            }
+        }
         impl $crate::extentions::common_expressions::OnInsert for $member {
             type InsertInput = <Self as $crate::collections::Member>::Data;
-            type InsertExpression =
-                $crate::query_builder::Bind<<Self as $crate::collections::Member>::Data>;
+            type InsertExpression = $crate::extentions::named_bind::NamedBind<
+                &'static str,
+                Self,
+                <Self as $crate::collections::Member>::Data,
+            >;
 
-            fn validate_on_insert(&self, input: Self::InsertInput) -> Self::InsertExpression {
-                $crate::query_builder::Bind(input)
+            fn on_insert(self, input: Self::InsertInput) -> Self::InsertExpression {
+                $crate::extentions::named_bind::NamedBind {
+                    table: $crate::extentions::common_expressions::TableNameExpression::table_name_expression(&<Self as $crate::collections::Member>::CollectionHandler::default()),
+                    name: $member,
+                    value: input,
+                }
+            }
+        }
+
+        impl $crate::extentions::common_expressions::Scoped for $member {
+            type Scoped =
+                $crate::expressions::single_col_expressions::ScopedCol<&'static str, Self>;
+            fn scoped(&self) -> Self::Scoped {
+                $crate::expressions::single_col_expressions::ScopedCol {
+                    table:
+                    $crate::extentions::common_expressions::TableNameExpression::table_name_expression(
+                        &<Self as $crate::collections::Member>::CollectionHandler::default()
+                    ),
+                    col: $member,
+                }
             }
         }
 
@@ -799,7 +826,7 @@ macro_rules! member_impl_expression {
             type UpdateInput = <Self as $crate::collections::Member>::Data;
             type UpdateExpression = <Self as $crate::collections::Member>::Data;
 
-            fn validate_on_update(&self, input: Self::UpdateInput) -> Self::UpdateExpression {
+            fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression {
                 input
             }
         }

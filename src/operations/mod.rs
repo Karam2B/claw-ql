@@ -4,7 +4,7 @@ use sqlx::Database;
 // pub mod delete_by_id;
 // pub mod delete_one;
 pub mod fetch_many;
-// pub mod fetch_one;
+pub mod fetch_one;
 // pub mod insert_one;
 // pub mod update_one;
 
@@ -82,7 +82,8 @@ pub struct LinkedOutput<Id, C, L> {
     pub links: L,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CollectionOutput<Id, C> {
     pub id: Id,
     pub attributes: C,

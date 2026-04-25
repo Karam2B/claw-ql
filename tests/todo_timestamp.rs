@@ -5,7 +5,7 @@ use claw_ql::{
     on_migrate::OnMigrate,
     operations::{
         LinkedOutput, Operation,
-        fetch_many::{FetchMany, ManyOutput, SortOnlyById},
+        fetch_many::{FetchMany, ManyOutput},
     },
     query_builder::{
         StatementBuilder,
@@ -53,8 +53,8 @@ async fn test_fetch_many() {
             links: Timestamp {
                 collection: test_module::todo,
             },
-            cursor_order_by: SortOnlyById,
-            cursor_first_item: None,
+            cursor_order_by: (),
+            cursor_first_item: None::<(i64, ())>,
             limit: 10,
         },
         &mut conn,

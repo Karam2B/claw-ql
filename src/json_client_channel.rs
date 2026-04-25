@@ -71,7 +71,6 @@ pub mod sqlx_executor {
     use sqlx::Database;
     use sqlx::IntoArguments;
     use sqlx::Pool;
-    use sqlx::Sqlite;
     use std::collections::HashMap;
     use std::convert::Infallible;
     use std::sync::Arc;
@@ -139,6 +138,8 @@ pub mod sqlx_executor {
         S: ExecutorTrait,
         OptionalToMany<DefaultRelationKey, DynamicCollection<S>, DynamicCollection<S>>:
             JsonLinkFetchMany<S>,
+        for<'q> &'q str: sqlx::ColumnIndex<<S as sqlx::Database>::Row>,
+        i64: for<'q> sqlx::Encode<'q, S> + for<'q> sqlx::Decode<'q, S> + sqlx::Type<S>,
     {
         pub fn run(mut self) -> impl Future<Output = Infallible> {
             async move {
@@ -146,7 +147,7 @@ pub mod sqlx_executor {
                     let operation = self.reciever.recv().await.unwrap();
 
                     macro_rules! macr {
-                        ($([$operation:ident, $fn:ident]),*) => {
+                        ($([$operation:ident, $fn:ident])*) => {
                             match operation.0 {
                                 $(
                                     Operation::$operation(input) => {
@@ -192,9 +193,9 @@ pub mod sqlx_executor {
                     }
 
                     macr!(
-                        [AddCollection, add_collection],
-                        [AddLink, add_link],
-                        [FetchMany, fetch_many],
+                        [AddCollection, add_collection]
+                        [AddLink, add_link]
+                        [FetchMany, fetch_many]
                         [DropCollection, drop_collection]
                     );
                 }
@@ -204,21 +205,83 @@ pub mod sqlx_executor {
 }
 
 pub mod json_client {
+    use serde::{Deserialize, Serialize};
     use std::convert::Infallible;
     use tokio::sync::mpsc as tokio_mpsc;
 
     use crate::json_client as old_mod;
+    use crate::json_client::fetch_many::SupportedLinkFetchMany;
+    use crate::json_client::supported_filter::SupportedFilter;
     use crate::json_client_channel::{
         add_collection::{AddCollectionInput, AddCollectionOutput},
         http_client_error::HttpClientError,
     };
+    use crate::operations::fetch_many::ManyOutput;
+    use crate::operations::{CollectionOutput, LinkedOutput};
 
     pub type AddLinkInput = old_mod::add_link::AddLinkInput;
     pub type AddLinkOutput = old_mod::add_link::AddLinkOutput;
-    pub type FetchManyInput = old_mod::fetch_many::FetchManyInput;
-    pub type FetchManyOutput = old_mod::fetch_many::FetchManyOutput;
 
-    #[derive(Debug)]
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct FetchManyInput {
+        pub base: String,
+        pub filters: Vec<SupportedFilter>,
+        pub links: Vec<SupportedLinkFetchMany>,
+        pub pagination: Pagination,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct Pagination {
+        pub limit: i64,
+        pub first_item: Option<CollectionOutput<i64, serde_json::Map<String, serde_json::Value>>>,
+        pub order_by: Vec<PagniationOrderBy>,
+    }
+
+    #[derive(Debug, Deserialize, Clone)]
+    pub struct PagniationOrderBy {
+        pub col: String,
+        pub direction: OrderDirection,
+    }
+
+    mod pagination_order_by_impls {
+        use super::OrderDirection;
+        use crate::database_extention::DatabaseExt;
+        use crate::query_builder::Expression;
+        use crate::query_builder::OpExpression;
+        use crate::query_builder::StatementBuilder;
+
+        impl OpExpression for super::PagniationOrderBy {}
+
+        impl<'q, S> Expression<'q, S> for super::PagniationOrderBy
+        where
+            S: DatabaseExt,
+        {
+            fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+                ctx.sanitize(self.col.as_str());
+                ctx.syntax(" ");
+                match self.direction {
+                    OrderDirection::Asc => ctx.syntax("ASC"),
+                    OrderDirection::Desc => ctx.syntax("DESC"),
+                }
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, Deserialize)]
+    pub enum OrderDirection {
+        #[serde(rename = "asc")]
+        Asc,
+        #[serde(rename = "desc")]
+        Desc,
+    }
+
+    pub type FetchManyOutput = ManyOutput<
+        LinkedOutput<i64, serde_json::Value, Vec<serde_json::Value>>,
+        CollectionOutput<i64, serde_json::Map<String, serde_json::Value>>,
+    >;
+
+    #[derive(Debug, Deserialize)]
     #[non_exhaustive]
     pub enum Operation {
         AddCollection(AddCollectionInput),
@@ -227,7 +290,7 @@ pub mod json_client {
         DropCollection(&'static str),
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Serialize)]
     #[non_exhaustive]
     pub enum OperationOutput {
         AddCollection(AddCollectionOutput),
@@ -236,104 +299,47 @@ pub mod json_client {
         DropCollection(&'static str),
     }
 
-    impl JsonClient {
-        pub fn add_collection(
-            &self,
-            input: AddCollectionInput,
-        ) -> impl Future<Output = Result<AddCollectionOutput, HttpClientError>> + 'static + Send + use<>
-        {
-            let (sender, reciever) =
-                oneshot::async_channel::<Result<OperationOutput, HttpClientError>>();
-            self.sender
-                .send((Operation::AddCollection(input), sender))
-                .unwrap();
+    macro_rules! ops {
+        ($([$method_name:ident, $op_name:ident, $input:ident, $output:ident])*) => {
+            impl JsonClient {
+                $(
+                    pub fn $method_name(
+                        &self,
+                        input: $input,
+                    ) -> impl Future<Output = Result<$output, HttpClientError>> + 'static + Send + use<>
+                    {
+                        let (sender, reciever) =
+                            oneshot::async_channel::<Result<OperationOutput, HttpClientError>>();
+                        self.sender
+                            .send((Operation::$op_name(input), sender))
+                            .unwrap();
 
-            async move {
-                reciever
-                    .await
-                    .map_err(|_| HttpClientError {
-                        status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                        payload: serde_json::to_value(format!("internal server error")).unwrap(),
-                    })?
-                    .map(|e| match e {
-                        OperationOutput::AddCollection(e) => e,
-                        _ => panic!("bug: unexpected operation output"),
-                    })
+                        async move {
+                            return reciever
+                                .await
+                                .map_err(|_| HttpClientError {
+                                    status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                                    payload: serde_json::to_value(format!("internal server error")).unwrap(),
+                                })?
+                                .map(|e| match e {
+                                    OperationOutput::$op_name(e) => Ok(e),
+                                    _ => Err(HttpClientError {
+                                        status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                                        payload: serde_json::to_value(format!("internal server error")).unwrap(),
+                                    }),
+                                })?;
+                        }
+                    }
+                )*
             }
-        }
-        pub fn add_link(
-            &self,
-            input: AddLinkInput,
-        ) -> impl Future<Output = Result<AddLinkOutput, HttpClientError>> + 'static + Send + use<>
-        {
-            let (sender, reciever) =
-                oneshot::async_channel::<Result<OperationOutput, HttpClientError>>();
-            self.sender
-                .send((Operation::AddLink(input), sender))
-                .unwrap();
-
-            async move {
-                reciever
-                    .await
-                    .map_err(|_| HttpClientError {
-                        status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                        payload: serde_json::to_value(format!("internal server error")).unwrap(),
-                    })?
-                    .map(|e| match e {
-                        OperationOutput::AddLink(e) => e,
-                        _ => panic!("bug: unexpected operation output"),
-                    })
-            }
-        }
-
-        pub fn fetch_many(
-            &self,
-            input: FetchManyInput,
-        ) -> impl Future<Output = Result<FetchManyOutput, HttpClientError>> + 'static + Send + use<>
-        {
-            let (sender, reciever) =
-                oneshot::async_channel::<Result<OperationOutput, HttpClientError>>();
-            self.sender
-                .send((Operation::FetchMany(input), sender))
-                .unwrap();
-
-            async move {
-                reciever
-                    .await
-                    .map_err(|_| HttpClientError {
-                        status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                        payload: serde_json::to_value(format!("internal server error")).unwrap(),
-                    })?
-                    .map(|e| match e {
-                        OperationOutput::FetchMany(e) => e,
-                        _ => panic!("bug: unexpected operation output"),
-                    })
-            }
-        }
-        pub fn drop_collection(
-            &self,
-            input: &'static str,
-        ) -> impl Future<Output = Result<&'static str, HttpClientError>> + 'static + Send + use<>
-        {
-            let (sender, reciever) =
-                oneshot::async_channel::<Result<OperationOutput, HttpClientError>>();
-            self.sender
-                .send((Operation::DropCollection(input), sender))
-                .unwrap();
-            async move {
-                reciever
-                    .await
-                    .map_err(|_| HttpClientError {
-                        status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                        payload: serde_json::to_value(format!("internal server error")).unwrap(),
-                    })?
-                    .map(|e| match e {
-                        OperationOutput::DropCollection(e) => e,
-                        _ => panic!("bug: unexpected operation output"),
-                    })
-            }
-        }
+        };
     }
+
+    ops!(
+        [add_collection, AddCollection, AddCollectionInput, AddCollectionOutput]
+        [add_link, AddLink, AddLinkInput, AddLinkOutput]
+        [fetch_many, FetchMany, FetchManyInput, FetchManyOutput]
+    );
 
     pub struct JsonClientSetting {
         pub check_for_unique_filters_on_update: bool,
@@ -505,6 +511,7 @@ pub mod add_link {
         operations::LinkedOutput,
         prelude::sql::{self, ManyPossible},
         query_builder::{Expression, StatementBuilder, functional_expr::ManyImplExpression},
+        utils_some_is_err::SomeIsErr,
     };
 
     pub(crate) fn add_link<S: Database>(
@@ -517,6 +524,15 @@ pub mod add_link {
         async move {
             match input {
                 crate::json_client::add_link::AddLinkInput::OptionalToMany { from, to } => {
+                    let mut linfo_gaurd = this.link_info.write().await;
+
+                    if linfo_gaurd
+                        .optional_to_many
+                        .contains(&(to.clone(), from.clone()))
+                    {
+                        Err("link already exists")?
+                    }
+
                     let col_gaurd = this.collections.read().await;
                     let from_gaurd = col_gaurd
                         .get(from.as_str())
@@ -538,7 +554,6 @@ pub mod add_link {
                         .expect("bug: migrations should not have any aditional data");
 
                     let mut mig_gaurd = this.migration.write().await;
-                    let mut linfo_gaurd = this.link_info.write().await;
 
                     let mut conn = this.pool.acquire().await.unwrap();
                     // panic!("{}", mig.as_str());
@@ -547,10 +562,7 @@ pub mod add_link {
                     mig_gaurd.push(mig);
                     linfo_gaurd
                         .optional_to_many
-                        .insert((to.clone(), from.clone()), true);
-                    linfo_gaurd
-                        .optional_to_many
-                        .insert((to.clone(), from.clone()), false);
+                        .insert((to.clone(), from.clone()));
 
                     drop(linfo_gaurd);
                     drop(mig_gaurd);
@@ -604,9 +616,193 @@ pub mod add_link {
     }
 }
 
+pub mod dynamic_order_by {
+    use sqlx::Database;
+
+    use crate::{
+        database_extention::DatabaseExt,
+        expressions::{
+            multi_col_expressions_stack_heavy::ScopedCols, single_col_expressions::ScopedCol,
+        },
+        extentions::common_expressions::{Identifier, Scoped},
+        from_row::{FromRowAlias, FromRowData, FromRowError},
+        json_client::sqlx_type_ident::SqlxTypeHandler,
+        json_client_channel::json_client::OrderDirection,
+        query_builder::{Expression, OpExpression, StatementBuilder},
+    };
+
+    pub struct DynamicOrderBy<S> {
+        pub table: String,
+        pub col: String,
+        pub sqlx_ident: Box<dyn SqlxTypeHandler<S> + Send + Sync>,
+        pub direction: OrderDirection,
+    }
+
+    impl<S> Clone for DynamicOrderBy<S> {
+        fn clone(&self) -> Self {
+            Self {
+                table: self.table.clone(),
+                col: self.col.clone(),
+                sqlx_ident: self.sqlx_ident.clone_self(),
+                direction: self.direction.clone(),
+            }
+        }
+    }
+
+    impl<S> Scoped for Vec<DynamicOrderBy<S>> {
+        type Scoped = Vec<DynamicOrderBy<S>>;
+        fn scoped(&self) -> Self::Scoped {
+            self.iter()
+                .map(|e| DynamicOrderBy {
+                    table: e.table.clone(),
+                    col: e.col.clone(),
+                    sqlx_ident: e.sqlx_ident.clone_self(),
+                    direction: e.direction.clone(),
+                })
+                .collect()
+        }
+    }
+
+    impl<S> OpExpression for DynamicOrderBy<S> where S: Database {}
+
+    impl<'q, S> Expression<'q, S> for DynamicOrderBy<S>
+    where
+        S: DatabaseExt,
+    {
+        fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+            ctx.sanitize(self.table.as_str());
+            ctx.syntax(".");
+            ctx.sanitize(self.col.as_str());
+            ctx.syntax(" ");
+            match self.direction {
+                OrderDirection::Asc => ctx.syntax("ASC"),
+                OrderDirection::Desc => ctx.syntax("DESC"),
+            }
+        }
+    }
+
+    impl<S> FromRowData for DynamicOrderBy<S> {
+        type RData = (String, serde_json::Value);
+    }
+
+    impl<'r, S: Database> FromRowAlias<'r, S::Row> for DynamicOrderBy<S> {
+        fn no_alias(&self, row: &'r S::Row) -> Result<Self::RData, FromRowError> {
+            let ret = self.sqlx_ident.from_row_no_alias(false, &self.col, row)?;
+
+            Ok((self.col.clone(), ret))
+        }
+
+        fn pre_alias(
+            &self,
+            row: crate::from_row::RowPreAliased<'r, S::Row>,
+        ) -> Result<Self::RData, crate::from_row::FromRowError>
+        where
+            S::Row: sqlx::Row,
+        {
+            let ret = self.sqlx_ident.from_row_pre_alias(false, &self.col, row)?;
+
+            Ok((self.col.clone(), ret))
+        }
+
+        fn post_alias(
+            &self,
+            row: crate::from_row::RowPostAliased<'r, S::Row>,
+        ) -> Result<Self::RData, crate::from_row::FromRowError>
+        where
+            S::Row: sqlx::Row,
+        {
+            let _ = row;
+            panic!("in the process of deprecating this method");
+        }
+
+        fn two_alias(
+            &self,
+            row: crate::from_row::RowTwoAliased<'r, S::Row>,
+        ) -> Result<Self::RData, crate::from_row::FromRowError>
+        where
+            S::Row: sqlx::Row,
+        {
+            let ret = self.sqlx_ident.from_row_two_alias(false, &self.col, row)?;
+
+            Ok((self.col.clone(), ret))
+        }
+    }
+
+    impl<S> FromRowData for Vec<DynamicOrderBy<S>> {
+        type RData = serde_json::Map<String, serde_json::Value>;
+    }
+
+    impl<'r, S> FromRowAlias<'r, S::Row> for Vec<DynamicOrderBy<S>>
+    where
+        S: Database,
+    {
+        fn no_alias(&self, row: &'r S::Row) -> Result<Self::RData, FromRowError> {
+            let mut ret = serde_json::Map::new();
+            for each in self.iter() {
+                ret.insert(
+                    each.col.clone(),
+                    each.sqlx_ident.from_row_no_alias(false, &each.col, row)?,
+                );
+            }
+
+            Ok(ret)
+        }
+
+        fn pre_alias(
+            &self,
+            row: crate::from_row::RowPreAliased<'r, S::Row>,
+        ) -> Result<Self::RData, FromRowError>
+        where
+            S::Row: sqlx::Row,
+        {
+            let mut ret = serde_json::Map::new();
+            for each in self.iter() {
+                ret.insert(
+                    each.col.clone(),
+                    each.sqlx_ident
+                        .from_row_pre_alias(false, &each.col, row.clone())?,
+                );
+            }
+
+            Ok(ret)
+        }
+
+        fn post_alias(
+            &self,
+            row: crate::from_row::RowPostAliased<'r, S::Row>,
+        ) -> Result<Self::RData, FromRowError>
+        where
+            S::Row: sqlx::Row,
+        {
+            let _ = row;
+            panic!("in the process of deprecating this method");
+        }
+
+        fn two_alias(
+            &self,
+            row: crate::from_row::RowTwoAliased<'r, S::Row>,
+        ) -> Result<Self::RData, FromRowError>
+        where
+            S::Row: sqlx::Row,
+        {
+            let mut ret = serde_json::Map::new();
+            for each in self.iter() {
+                ret.insert(
+                    each.col.clone(),
+                    each.sqlx_ident
+                        .from_row_two_alias(false, &each.col, row.clone())?,
+                );
+            }
+
+            Ok(ret)
+        }
+    }
+}
+
 pub mod fetch_many {
     use crate::{
         database_extention::DatabaseExt,
+        extentions::named_bind::NamedBind,
         fix_executor::ExecutorTrait,
         json_client::{
             dynamic_collection::DynamicCollection,
@@ -614,14 +810,18 @@ pub mod fetch_many {
             supported_filter::parse_supported_filter,
         },
         json_client_channel::{
+            dynamic_order_by::DynamicOrderBy,
             http_client_error::HttpClientError,
             json_client::{FetchManyInput, FetchManyOutput},
             sqlx_executor::ClientData,
         },
-        links::{DefaultRelationKey, relation_optional_to_many::OptionalToMany},
+        links::{
+            DefaultRelationKey, relation_optional_to_many::OptionalToMany, timestamp::Timestamp,
+        },
+        operations::{CollectionOutput, Operation, fetch_many::FetchMany},
     };
     use sqlx::Database;
-    use std::sync::Arc;
+    use std::{ops::Not, sync::Arc};
 
     pub(crate) fn fetch_many<S: Database>(
         this: Arc<ClientData<S>>,
@@ -631,6 +831,9 @@ pub mod fetch_many {
         S: DatabaseExt + ExecutorTrait,
         OptionalToMany<DefaultRelationKey, DynamicCollection<S>, DynamicCollection<S>>:
             JsonLinkFetchMany<S>,
+        Timestamp<DynamicCollection<S>>: JsonLinkFetchMany<S>,
+        for<'q> &'q str: sqlx::ColumnIndex<<S as sqlx::Database>::Row>,
+        i64: for<'q> sqlx::Encode<'q, S> + for<'q> sqlx::Decode<'q, S> + sqlx::Type<S>,
     {
         async move {
             let cols_gaurd = this.collections.read().await;
@@ -661,31 +864,112 @@ pub mod fetch_many {
                                 Err(String::from("related collection is not found"))?
                             };
 
-                            if rel_gaurd.optional_to_many.contains_key(&(
-                                base.name_lower_case.clone(),
+                            if rel_gaurd.optional_to_many.contains(&(
                                 to.name_lower_case.clone(),
+                                base.name_lower_case.clone(),
                             )) {
                                 links.push(Box::new(OptionalToMany {
                                     foriegn_key: DefaultRelationKey,
                                     from: base.clone(),
                                     to,
                                 }));
-                            } else if rel_gaurd.optional_to_many.contains_key(&(
-                                to.name_lower_case.clone(),
+
+                                continue;
+                            } else if rel_gaurd.optional_to_many.contains(&(
                                 base.name_lower_case.clone(),
+                                to.name_lower_case.clone(),
                             )) {
                                 todo!("reverse optional to many ")
                             } else {
                                 Err("relation doesn't exist between x, y")?
                             };
                         }
-                        _ => todo!("unsupported link"),
+                        SupportedLinkFetchMany::Timestamp => {
+                            if rel_gaurd.timestamped.contains(input.base.as_str()).not() {
+                                Err("collection is not timestamped")?
+                            }
+
+                            links.push(Box::new(Timestamp {
+                                collection: base.clone(),
+                            }));
+                        }
                     }
                 }
                 links
             };
 
-            todo!()
+            let order_by = {
+                let mut order_by = vec![];
+
+                for any in input.pagination.order_by {
+                    let found = base.fields.iter().find(|e| e.name == any.col);
+
+                    if let Some(found) = found {
+                        order_by.push(DynamicOrderBy {
+                            table: base.name.clone(),
+                            col: any.col,
+                            sqlx_ident: found.type_info.clone_self(),
+                            direction: any.direction,
+                        });
+                    } else {
+                        Err("column doesn't exist")?
+                    }
+                }
+
+                order_by
+            };
+
+            let first_item = if let Some(first_item) = input.pagination.first_item {
+                let mut named_binds = vec![];
+                for (key, value) in first_item.attributes {
+                    let found = base.fields.iter().find(|e| e.name == key);
+
+                    if let Some(found) = found {
+                        let bind = found
+                            .type_info
+                            .to_bind(value)
+                            .map_err(|_| "faile to parse")?;
+                        named_binds.push(NamedBind {
+                            table: base.name.clone(),
+                            name: key.clone(),
+                            value: bind,
+                        });
+                    } else {
+                        Err("column doesn't exist")?
+                    }
+                }
+
+                Some((first_item.id, named_binds))
+            } else {
+                None
+            };
+
+            let mut conn = this.pool.acquire().await.unwrap();
+
+            let s = FetchMany {
+                base,
+                wheres,
+                links,
+                cursor_order_by: order_by,
+                cursor_first_item: first_item,
+                limit: input.pagination.limit,
+            };
+
+            let out = Operation::<S>::exec_operation(s, &mut conn).await;
+
+            let out = crate::operations::fetch_many::ManyOutput {
+                items: out.items,
+                next_item: out.next_item.map(|(id, mut next)| CollectionOutput {
+                    id,
+                    attributes: next,
+                }),
+            };
+
+            drop(rel_gaurd);
+            drop(all_gaurds);
+            drop(cols_gaurd);
+
+            Ok(out)
         }
     }
 }
