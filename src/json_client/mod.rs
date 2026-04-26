@@ -856,6 +856,10 @@ pub mod dynamic_collection {
             fn table_name_expression(&self) -> Self::TableNameExpression {
                 self.name.clone()
             }
+            type LowerCaseTableNameExpression = String;
+            fn lower_case_table_name_expression(&self) -> Self::LowerCaseTableNameExpression {
+                self.name_lower_case.clone()
+            }
         }
     }
 

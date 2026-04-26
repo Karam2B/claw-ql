@@ -233,6 +233,27 @@ pub trait ManyExpressions<'q, S>: IsOpExpression + 'q {
         S: DatabaseExt;
 }
 
+impl<'q> IsOpExpression for &'q [&'q str] {
+    fn is_op(&self) -> bool {
+        self.len() != 0
+    }
+}
+impl<'q, S> ManyExpressions<'q, S> for &'static [&'static str] {
+    fn expression(self, start: &'static str, join: &'static str, ctx: &mut StatementBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+        for (i, each) in self.into_iter().enumerate() {
+            if i == 0 {
+                ctx.syntax(start);
+            } else {
+                ctx.syntax(join);
+            }
+            ctx.sanitize(each);
+        }
+    }
+}
+
 pub trait ManyBoxedExpressions<S> {
     fn is_op(&self) -> bool;
     fn boxed_expression<'q>(

@@ -74,6 +74,10 @@ const _: () = {
         fn table_name_expression(&self) -> Self::TableNameExpression {
             "Category"
         }
+        type LowerCaseTableNameExpression = &'static str;
+        fn lower_case_table_name_expression(&self) -> Self::LowerCaseTableNameExpression {
+            "category"
+        }
     }
 
     impl Scoped for category {
@@ -212,6 +216,10 @@ const _: () = {
         fn table_name_expression(&self) -> Self::TableNameExpression {
             "Todo"
         }
+        type LowerCaseTableNameExpression = &'static str;
+        fn lower_case_table_name_expression(&self) -> Self::LowerCaseTableNameExpression {
+            "todo"
+        }
     }
 
     impl Scoped for todo {
@@ -286,6 +294,15 @@ const _: () = {
                     phantom: std::marker::PhantomData,
                 },
             )
+        }
+    }
+
+    impl OnInsert for todo {
+        type InsertInput = Todo;
+        type InsertExpression = Todo;
+
+        fn on_insert(self, input: Self::InsertInput) -> Self::InsertExpression {
+            input
         }
     }
 

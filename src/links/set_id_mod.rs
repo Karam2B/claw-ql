@@ -1,35 +1,33 @@
-#![allow(unused)]
-use crate::links::Link;
-use sqlx::{ColumnIndex, Decode, Encode, prelude::Type};
-use sqlx::{IntoArguments, Row};
-use std::{future::Future, usize};
-
-#[allow(non_camel_case_types)]
-pub struct set_id<T> {
-    pub to: T,
-    pub id: i64,
+pub struct SetId<Relation, Id> {
+    pub relation: Relation,
+    pub id: Id,
 }
 
-pub struct SetIdSpec<OgSpec, Input> {
-    pub og_spec: OgSpec,
-    pub input: Input,
-}
+pub mod hardcode_api {
+    use crate::links::{Link, set_id_mod::SetId};
 
-impl<To, From> Link<From> for set_id<To>
-where
-    From: Clone,
-    To: Clone,
-    To: Link<From>,
-{
-    type Spec = SetIdSpec<To::Spec, i64>;
+    #[allow(non_camel_case_types)]
+    pub struct set_id<T> {
+        pub to: T,
+        pub id: i64,
+    }
 
-    fn spec(self) -> Self::Spec
+    impl<To, From> Link<From> for set_id<To>
     where
-        Self: Sized,
+        From: Clone,
+        To: Clone,
+        To: Link<From>,
     {
-        SetIdSpec {
-            og_spec: self.to.spec(),
-            input: self.id,
+        type Spec = SetId<To::Spec, i64>;
+
+        fn spec(self) -> Self::Spec
+        where
+            Self: Sized,
+        {
+            SetId {
+                relation: self.to.spec(),
+                id: self.id,
+            }
         }
     }
 }

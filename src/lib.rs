@@ -675,6 +675,10 @@ pub mod fix_executor {
     /// for the operation I implement
     /// + incoorporate "fix_executor" feature, until sqlx::Executor is fixed
     pub trait ExecutorTrait: Database {
+        fn fetch_optional<'e, E: 'e + Execute<'e, Self>>(
+            conn: &mut Self::Connection,
+            execute: E,
+        ) -> BoxFuture<'e, Result<Option<Self::Row>, sqlx::Error>>;
         fn fetch_all<'e, E: 'e + Execute<'e, Self>>(
             conn: &mut Self::Connection,
             execute: E,
@@ -723,6 +727,13 @@ pub mod fix_executor {
         S: Database,
         for<'e> &'e mut S::Connection: sqlx::executor_2::Executor2<Database = S>,
     {
+        fn fetch_optional<'e, E: 'e + Execute<'e, Self>>(
+            conn: &mut Self::Connection,
+            execute: E,
+        ) -> BoxFuture<'e, Result<Option<Self::Row>, sqlx::Error>> {
+            let keep_conn_out = sqlx::executor_2::Executor2::fetch_optional(conn, execute);
+            Box::pin(async move { keep_conn_out.await })
+        }
         fn fetch_all<'e, E: 'e + Execute<'e, Self>>(
             conn: &mut Self::Connection,
             execute: E,

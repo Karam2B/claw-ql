@@ -48,11 +48,15 @@ pub mod common_expressions {
     pub trait TableNameExpression {
         type TableNameExpression;
         fn table_name_expression(&self) -> Self::TableNameExpression;
+        type LowerCaseTableNameExpression;
+        fn lower_case_table_name_expression(&self) -> Self::LowerCaseTableNameExpression;
     }
 
     impl TableNameExpression for () {
         type TableNameExpression = ();
         fn table_name_expression(&self) -> Self::TableNameExpression {}
+        type LowerCaseTableNameExpression = ();
+        fn lower_case_table_name_expression(&self) -> Self::LowerCaseTableNameExpression {}
     }
 
     /// list identifier aliased, ex: 'Todo.title AS btitle'

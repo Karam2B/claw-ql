@@ -1,7 +1,4 @@
 #![allow(unused)]
-// 1. remove skip from json_cient
-// 2. remove skip from relation_optional_to_many::impl_on_migrate
-
 use claw_ql::connect_in_memory::ConnectInMemory;
 use claw_ql::operations::{LinkedOutput, Operation, SafeOperation};
 use claw_ql::row_utils::RowToJson;
@@ -10,8 +7,6 @@ use serde_json::json;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{FromRow, Row, Sqlite, query};
 use std::marker::PhantomData;
-
-fn understands_lifetime<'a>(_: &'a str) {}
 
 #[claw_ql_macros::skip]
 mod test {

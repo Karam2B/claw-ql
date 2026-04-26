@@ -1,5 +1,3 @@
-#![allow(unexpected_cfgs)]
-
 use crate::links::{LinkedToBase, LinkedViaId};
 
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -188,7 +186,6 @@ mod optional_to_many_items_names {
 
     // "from" id exists in the sql statement, and I want attributes and id of "to"
     #[derive(Clone, Debug)]
-
     pub struct OptionaToManyItems<FromId, ToId, ToAttributes> {
         pub from_id: FromId,
         pub to_id: ToId,
@@ -273,6 +270,7 @@ mod optional_to_many_items_names {
         FromId: fmt::Debug,
     {
         fn no_alias(&self, row: &'r R) -> Result<Self::RData, crate::from_row::FromRowError> {
+            let _ = row;
             todo!()
         }
 
@@ -367,7 +365,6 @@ pub mod join_expression {
 }
 
 mod impl_link_fetch_many {
-
     use crate::{
         collections::{Collection, CollectionId, SingleColumnId},
         expressions::standard_naming_conventions::ForeignKeyName,
@@ -527,4 +524,149 @@ mod impl_link_fetch_many {
     //         all.pop().flatten()
     //     }
     // }
+}
+
+mod impl_set_id_for_insert {
+    use crate::{
+        collections::{Collection, CollectionId},
+        database_extention::DatabaseExt,
+        extentions::common_expressions::{Identifier, OnInsert, TableNameExpression},
+        from_row::{FromRowAlias, FromRowData},
+        links::{relation_optional_to_many::OptionalToMany, set_id_mod::SetId},
+        operations::insert_one::InsertLink,
+        query_builder::{Bind, Expression, OpExpression, StatementBuilder},
+    };
+
+    #[derive(Clone)]
+    pub struct InsertItem<ToTableName, Key, ToId> {
+        pub to_table_name: ToTableName,
+        pub key: Key,
+        pub to_id: ToId,
+    }
+
+    pub struct LocalForeignKeyIdent<ToTableName, Key> {
+        pub to_table_name: ToTableName,
+        pub key: Key,
+    }
+
+    impl<ToTableName: Clone, Key: Clone, ToId> Identifier for InsertItem<ToTableName, Key, ToId> {
+        type Identifier = LocalForeignKeyIdent<ToTableName, Key>;
+
+        fn identifier(&self) -> Self::Identifier {
+            LocalForeignKeyIdent {
+                to_table_name: self.to_table_name.clone(),
+                key: self.key.clone(),
+            }
+        }
+    }
+
+    impl<ToTableName, Key> OpExpression for LocalForeignKeyIdent<ToTableName, Key> {}
+    impl<'q, S: DatabaseExt, ToTableName: 'q + AsRef<str>, Key: 'q + AsRef<str>> Expression<'q, S>
+        for LocalForeignKeyIdent<ToTableName, Key>
+    {
+        fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+            ctx.sanitize_strings(("fk_", self.to_table_name.as_ref(), self.key.as_ref()));
+        }
+    }
+
+    impl<ToTableName, Key, ToId> OnInsert for InsertItem<ToTableName, Key, ToId> {
+        type InsertInput = ();
+        type InsertExpression = Bind<ToId>;
+
+        fn on_insert(self, _: Self::InsertInput) -> Self::InsertExpression {
+            Bind(self.to_id)
+        }
+    }
+
+    impl<ToTableName, Key, SetId> FromRowData for InsertItem<ToTableName, Key, SetId> {
+        type RData = ();
+    }
+
+    impl<'r, R, ToTableName, Key, SetId> FromRowAlias<'r, R> for InsertItem<ToTableName, Key, SetId> {
+        fn no_alias(&self, _: &'r R) -> Result<Self::RData, crate::from_row::FromRowError> {
+            Ok(())
+        }
+
+        fn pre_alias(
+            &self,
+            _: crate::from_row::RowPreAliased<'r, R>,
+        ) -> Result<Self::RData, crate::from_row::FromRowError>
+        where
+            R: sqlx::Row,
+        {
+            Ok(())
+        }
+
+        fn post_alias(
+            &self,
+            _: crate::from_row::RowPostAliased<'r, R>,
+        ) -> Result<Self::RData, crate::from_row::FromRowError>
+        where
+            R: sqlx::Row,
+        {
+            Ok(())
+        }
+
+        fn two_alias(
+            &self,
+            _: crate::from_row::RowTwoAliased<'r, R>,
+        ) -> Result<Self::RData, crate::from_row::FromRowError>
+        where
+            R: sqlx::Row,
+        {
+            Ok(())
+        }
+    }
+
+    impl<Key, From, To> InsertLink
+        for SetId<OptionalToMany<Key, From, To>, <To::Id as CollectionId>::IdData>
+    where
+        To: Collection,
+        To: TableNameExpression,
+        <To::Id as CollectionId>::IdData: Clone,
+        Key: Clone,
+    {
+        type PreOp = ();
+
+        fn pre_operation(&self) -> Self::PreOp {}
+
+        type InsertItems =
+            InsertItem<To::LowerCaseTableNameExpression, Key, <To::Id as CollectionId>::IdData>;
+
+        fn insert_items(&self, _: ()) -> Self::InsertItems
+        where
+            Self::PreOp: crate::operations::OperationOutput,
+        {
+            InsertItem {
+                to_table_name: self.relation.to.lower_case_table_name_expression(),
+                to_id: self.id.clone(),
+                key: self.relation.foriegn_key.clone(),
+            }
+        }
+
+        type PostOp = ();
+
+        fn post_operation(
+            &self,
+            _: &<Self::InsertItems as crate::from_row::FromRowData>::RData,
+        ) -> Self::PostOp
+        where
+            Self::InsertItems: crate::from_row::FromRowData,
+        {
+        }
+
+        type Output = <To::Id as CollectionId>::IdData;
+
+        fn take(
+            self,
+            _: <Self::PostOp as crate::operations::OperationOutput>::Output,
+            _: <Self::InsertItems as crate::from_row::FromRowData>::RData,
+        ) -> Self::Output
+        where
+            Self::PostOp: crate::operations::OperationOutput,
+            Self::InsertItems: crate::from_row::FromRowData,
+        {
+            self.id
+        }
+    }
 }
