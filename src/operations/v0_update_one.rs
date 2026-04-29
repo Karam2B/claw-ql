@@ -208,7 +208,7 @@ where
 mod test {
     use crate::connect_in_memory::ConnectInMemory;
     use crate::expressions::col_eq;
-    use crate::operations::update_one::UpdateOne;
+    use crate::operations::v0_update_one::UpdateOne;
     use crate::operations::{Operation, SafeOperation};
     use crate::test_module::{self, *};
     use crate::update_mod::Update;

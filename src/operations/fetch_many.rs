@@ -197,6 +197,7 @@ where
             order: self.cursor_order_by.scoped(),
             wheres: ManyFlat((
                 self.wheres,
+                self.links.where_expressions(),
                 self.cursor_first_item.map(|(id, first)| {
                     let idents = first.scoped();
                     let first = first.on_insert(());
@@ -205,7 +206,6 @@ where
                         values: ManyFlat((first, Bind(id))),
                     }
                 }),
-                self.links.where_expressions(),
             )),
             limit: Bind(self.limit + 1),
         });

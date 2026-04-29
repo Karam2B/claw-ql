@@ -1930,7 +1930,7 @@ pub mod update_one {
     use crate::json_client::json_client::JsonClient;
     use crate::json_client::supported_filters::{InvalidFilter, SupportedFilter};
     use crate::operations::{self, SafeOperation};
-    use crate::operations::{LinkedOutput, Operation, update_one::UpdateOne};
+    use crate::operations::{LinkedOutput, Operation, v0_update_one::UpdateOne};
     use serde::Deserialize;
     use serde_json::Error as DeserializeError;
     use serde_json::Value as JsonValue;

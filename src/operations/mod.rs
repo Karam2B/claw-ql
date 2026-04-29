@@ -4,9 +4,9 @@ use sqlx::Database;
 // pub mod delete_by_id;
 // pub mod delete_one;
 pub mod fetch_many;
-// pub mod fetch_one;
+pub mod fetch_one;
 pub mod insert_one;
-// pub mod update_one;
+pub mod update;
 
 pub trait OperationOutput {
     type Output;
