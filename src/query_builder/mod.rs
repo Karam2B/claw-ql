@@ -672,7 +672,7 @@ mod mut_query_builder {
 
     use crate::{
         OpExpression,
-        expressions::{col, col_eq},
+        expressions::{ColumnEqual, col},
     };
 
     pub trait MutBuilder<'q> {

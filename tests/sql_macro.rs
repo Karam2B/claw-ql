@@ -37,7 +37,7 @@ async fn main() {
         .await
         .unwrap();
 
-    use claw_ql::expressions::col_eq;
+    use claw_ql::expressions::ColumnEqual;
     use claw_ql::links::relation_optional_to_many::OptionalToMany;
     use claw_ql::links::set_new_mod::set_new;
     use claw_ql::prelude::sql::*;

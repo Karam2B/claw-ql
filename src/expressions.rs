@@ -48,8 +48,8 @@ where
 }
 
 impl<T> member_as_expression<T> {
-    pub fn eq<V>(self, eq: V) -> col_eq<Self, V> {
-        col_eq { col: self, eq }
+    pub fn eq<V>(self, eq: V) -> ColumnEqual<Self, V> {
+        ColumnEqual { col: self, eq }
     }
 }
 
@@ -438,8 +438,8 @@ impl<Column> col<Column> {
     pub fn pre_alias<Alias>(self, alias: Alias) -> PreAlias<col<Column>, Alias> {
         PreAlias { on: self, alias }
     }
-    pub fn eq<Eq>(self, eq: Eq) -> col_eq<Self, Eq> {
-        col_eq { col: self, eq }
+    pub fn eq<Eq>(self, eq: Eq) -> ColumnEqual<Self, Eq> {
+        ColumnEqual { col: self, eq }
     }
 }
 
@@ -523,23 +523,23 @@ impl<'a, S> Expression<'a, S> for left_join {
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize))]
-pub struct col_eq<Col, Eq> {
+pub struct ColumnEqual<Col, Eq> {
     pub col: Col,
     pub eq: Eq,
 }
 
-impl<A, E> AliasAndExpr<A, E> for col_eq<A, E> {
+impl<A, E> AliasAndExpr<A, E> for ColumnEqual<A, E> {
     fn aliase_and_expr(alias: A, expr: E) -> Self {
-        col_eq {
+        ColumnEqual {
             col: alias,
             eq: expr,
         }
     }
 }
 
-impl<Col, Eq> OpExpression for col_eq<Col, Eq> {}
+impl<Col, Eq> OpExpression for ColumnEqual<Col, Eq> {}
 
-impl<'q, S, Col, Eq> Expression<'q, S> for col_eq<Col, Eq>
+impl<'q, S, Col, Eq> Expression<'q, S> for ColumnEqual<Col, Eq>
 where
     S: DatabaseExt,
     Eq: 'q + Encode<'q, S> + Type<S>,
@@ -581,8 +581,8 @@ pub struct scoped_column<Table, Column> {
 }
 
 impl<Table, Column> scoped_column<Table, Column> {
-    pub fn eq<V>(self, eq: V) -> col_eq<Self, V> {
-        col_eq { col: self, eq }
+    pub fn eq<V>(self, eq: V) -> ColumnEqual<Self, V> {
+        ColumnEqual { col: self, eq }
     }
     pub fn pre_alias<Alias>(self, alias: Alias) -> PreAlias<scoped_column<Table, Column>, Alias> {
         PreAlias { on: self, alias }

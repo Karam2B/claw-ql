@@ -306,6 +306,15 @@ const _: () = {
         }
     }
 
+    impl OnUpdate for todo {
+        type UpdateInput = TodoPartial;
+        type UpdateExpression = TodoPartial;
+
+        fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression {
+            input
+        }
+    }
+
     impl IsOpExpression for Todo {
         fn is_op(&self) -> bool {
             true

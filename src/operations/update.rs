@@ -25,6 +25,10 @@ pub trait UpdateLink {
     type Output;
 }
 
+impl UpdateLink for () {
+    type Output = ();
+}
+
 impl<Handler, Partial, Wheres, Links> OperationOutput for Update<Handler, Partial, Wheres, Links>
 where
     Handler: Collection,
@@ -43,7 +47,7 @@ where
     Base: Identifier<Identifier: Send + for<'q> ManyExpressions<'q, S>>,
     Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
     Base: Collection<Data: Send>,
-    Base: OnUpdate<UpdateInput = Partial, UpdateExpression: for<'q> ManyExpressions<'q, S>>,
+    Base: OnUpdate<UpdateInput = Partial, UpdateExpression: Send + for<'q> ManyExpressions<'q, S>>,
     Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::Data>,
     Base::Id: Send + CollectionId<IdData: Send>,
     Base::Id: Identifier<Identifier: Send + for<'q> ManyExpressions<'q, S>>,
@@ -64,9 +68,9 @@ where
         async move {
             let id = self.base.id();
 
-            let returning = ManyFlat((id.identifier(), self.base.identifier()));
+            let values = ManyFlat((self.base.clone().on_update(self.partial),));
 
-            if returning.is_op().not() {
+            if values.is_op().not() {
                 panic!(
                     "bug: update operation is not operational, the bug should be catched before using Update"
                 );
@@ -75,8 +79,8 @@ where
             let (stmt, args) = StatementBuilder::<'_, S>::new(UpdateStatement {
                 table_name: self.base.table_name_expression(),
                 wheres: ManyFlat((self.wheres,)),
-                returning,
-                values: self.base.clone().on_update(self.partial),
+                returning: ManyFlat((id.identifier(), self.base.identifier())),
+                values,
             })
             .unwrap();
 
@@ -105,34 +109,100 @@ where
     }
 }
 
-pub struct OnOneRecord<Operation> {
-    pub operation: Operation,
-}
+#[cfg(test)]
+mod test {
+    use crate::expressions::ColumnEqual;
+    use crate::from_row::FromRowAlias;
+    use crate::operations::{CollectionOutput, LinkedOutput, Operation};
+    use crate::test_module::{self, *};
+    use crate::update_mod::Update;
+    use crate::{connect_in_memory::ConnectInMemory, operations::update::Update as UpdateOp};
+    use sqlx::Sqlite;
 
-impl<V, Op: OperationOutput<Output = Vec<V>>> OperationOutput for OnOneRecord<Op> {
-    type Output = Option<V>;
-}
+    #[tokio::test]
+    async fn main() {
+        let mut pool = Sqlite::connect_in_memory_2().await;
 
-impl<V, S, Op> Operation<S> for OnOneRecord<Op>
-where
-    V: Send,
-    Op: Operation<S, Output = Vec<V>>,
-{
-    fn exec_operation(self, pool: &mut <S>::Connection) -> impl Future<Output = Self::Output> + Send
-    where
-        S: sqlx::Database,
-        Self: Sized,
-    {
-        async move {
-            let mut res = self.operation.exec_operation(pool).await;
+        sqlx::query("
+            CREATE TABLE Todo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                done BOOLEAN NOT NULL,
+                description TEXT
+            );
+            INSERT INTO Todo (title, done, description) VALUES ('todo_1', false, 'description_1'), ('todo_2', true, 'description_2'), ('todo_3', false, 'description_3');
+        ").execute(&mut pool).await.unwrap();
 
-            let last = res.pop();
+        let output = Operation::<Sqlite>::exec_operation(
+            UpdateOp {
+                base: test_module::todo,
+                wheres: ColumnEqual {
+                    col: todo_members::id,
+                    eq: 2,
+                },
+                partial: TodoPartial {
+                    title: Update::Set("new_title".to_string()),
+                    done: Update::Keep,
+                    description: Update::Keep,
+                },
+                links: (),
+            },
+            &mut pool,
+        )
+        .await;
 
-            if res.len() != 0 {
-                panic!("made an operation on multiple records!")
-            }
+        pretty_assertions::assert_eq!(
+            output,
+            vec![LinkedOutput {
+                id: 2,
+                attributes: Todo {
+                    title: "new_title".to_string(),
+                    done: true,
+                    description: Some("description_2".to_string()),
+                },
+                links: ()
+            }]
+        );
 
-            return last;
-        }
+        let check = sqlx::query("SELECT * FROM Todo;")
+            .fetch_all(&mut pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| CollectionOutput {
+                id: todo_members::id.no_alias(&row).unwrap(),
+                attributes: test_module::todo.no_alias(&row).unwrap(),
+            })
+            .collect::<Vec<_>>();
+
+        pretty_assertions::assert_eq!(
+            check,
+            vec![
+                CollectionOutput {
+                    id: 1,
+                    attributes: Todo {
+                        title: "todo_1".to_string(),
+                        done: false,
+                        description: Some("description_1".to_string()),
+                    },
+                },
+                CollectionOutput {
+                    id: 2,
+                    attributes: Todo {
+                        title: "new_title".to_string(),
+                        done: true,
+                        description: Some("description_2".to_string()),
+                    },
+                },
+                CollectionOutput {
+                    id: 3,
+                    attributes: Todo {
+                        title: "todo_3".to_string(),
+                        done: false,
+                        description: Some("description_3".to_string()),
+                    },
+                },
+            ]
+        );
     }
 }

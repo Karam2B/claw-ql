@@ -403,7 +403,7 @@ pub mod json_client {
 
 pub mod supported_filter {
     use crate::database_extention::DatabaseExt;
-    use crate::expressions::col_eq;
+    use crate::expressions::ColumnEqual;
     use crate::json_client::dynamic_collection::DynamicCollection;
     use crate::query_builder::functional_expr::BoxedExpression;
     use serde::{Deserialize, Serialize};
@@ -412,7 +412,7 @@ pub mod supported_filter {
     #[derive(Deserialize, Clone, Debug)]
     #[non_exhaustive]
     pub enum SupportedFilter {
-        ColEq(col_eq<String, JsonValue>),
+        ColEq(ColumnEqual<String, JsonValue>),
     }
 
     #[derive(Debug, Serialize)]
@@ -431,10 +431,10 @@ pub mod supported_filter {
         let mut ret: Vec<Box<dyn BoxedExpression<S> + Send>> = vec![];
         for each in input {
             match each {
-                SupportedFilter::ColEq(col_eq { col, eq }) => {
+                SupportedFilter::ColEq(ColumnEqual { col, eq }) => {
                     if let Some(o) = base.fields.iter().find(|f| f.name == col) {
                         if let Ok(s) = o.type_info.to_bind(eq) {
-                            ret.push(Box::new(col_eq { col, eq: s }));
+                            ret.push(Box::new(ColumnEqual { col, eq: s }));
                         } else {
                             return Err(InvalidFilter::TypeMismatch(col));
                         }

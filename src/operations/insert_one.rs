@@ -170,8 +170,9 @@ where
 mod test {
     use crate::{
         connect_in_memory::ConnectInMemory,
-        operations::{LinkedOutput, Operation, insert_one::InsertOne},
-        test_module::{self, Todo},
+        from_row::FromRowAlias,
+        operations::{CollectionOutput, LinkedOutput, Operation, insert_one::InsertOne},
+        test_module::{self, Todo, todo_members},
     };
     use sqlx::{Sqlite, query};
 
@@ -219,6 +220,29 @@ mod test {
                 },
                 links: ()
             }
+        );
+
+        let check = sqlx::query("SELECT * FROM Todo;")
+            .fetch_all(&mut conn)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| CollectionOutput {
+                id: todo_members::id.no_alias(&row).unwrap(),
+                attributes: test_module::todo.no_alias(&row).unwrap(),
+            })
+            .collect::<Vec<_>>();
+
+        pretty_assertions::assert_eq!(
+            check,
+            vec![CollectionOutput {
+                id: 1,
+                attributes: Todo {
+                    title: String::from("todo"),
+                    done: false,
+                    description: None,
+                },
+            }]
         );
     }
 }

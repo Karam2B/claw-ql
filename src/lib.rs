@@ -675,6 +675,22 @@ pub mod fix_executor {
     /// for the operation I implement
     /// + incoorporate "fix_executor" feature, until sqlx::Executor is fixed
     pub trait ExecutorTrait: Database {
+        fn fetch_all_mapped<'e, E, R, F>(
+            conn: &mut Self::Connection,
+            execute: E,
+            mapper: F,
+        ) -> BoxFuture<'e, Result<Vec<R>, sqlx::Error>>
+        where
+            E: 'e + Execute<'e, Self>,
+            F: Send + 'e + FnMut(Self::Row) -> R,
+        {
+            let keep_conn_out = Self::fetch_all(conn, execute);
+            Box::pin(async move {
+                let rows = keep_conn_out.await?;
+                Ok(rows.into_iter().map(mapper).collect::<Vec<_>>())
+            })
+        }
+
         fn fetch_optional<'e, E: 'e + Execute<'e, Self>>(
             conn: &mut Self::Connection,
             execute: E,

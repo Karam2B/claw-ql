@@ -3,9 +3,11 @@ use sqlx::Database;
 
 // pub mod delete_by_id;
 // pub mod delete_one;
+pub mod delete;
 pub mod fetch_many;
 pub mod fetch_one;
 pub mod insert_one;
+pub mod insert_one_refactor_link_trait;
 pub mod update;
 
 pub trait OperationOutput {
@@ -112,6 +114,280 @@ impl<I, C, L> From<LinkedOutput<I, C, L>> for IdOutput<I> {
 impl<I, C> From<CollectionOutput<I, C>> for IdOutput<I> {
     fn from(value: CollectionOutput<I, C>) -> Self {
         IdOutput { id: value.id }
+    }
+}
+
+pub mod by_id {
+    use crate::{
+        collections::{Collection, CollectionId},
+        expressions::ColumnEqual,
+        extentions::common_expressions::Scoped,
+        operations::{Operation, OperationOutput, delete::Delete, update::Update},
+        query_builder::functional_expr::ManyFlat,
+    };
+
+    #[allow(type_alias_bounds)]
+    #[doc(hidden)]
+    pub type ExtendExpressionByIdEqualTo<W, C>
+    where
+        C: Collection,
+        C::Id: Scoped,
+    = ManyFlat<(
+        ColumnEqual<<C::Id as Scoped>::Scoped, <C::Id as CollectionId>::IdData>,
+        W,
+    )>;
+
+    #[doc(hidden)]
+    pub fn extend_expression_by_id_equal_to<W, C>(
+        wheres: W,
+        base: &C,
+        id: <C::Id as CollectionId>::IdData,
+    ) -> ExtendExpressionByIdEqualTo<W, C>
+    where
+        C: Collection,
+        C::Id: Scoped,
+    {
+        ManyFlat((
+            ColumnEqual {
+                col: base.id().scoped(),
+                eq: id,
+            },
+            wheres,
+        ))
+    }
+
+    pub struct OperationById<OgOperation, Id> {
+        pub operation: OgOperation,
+        pub id: Id,
+    }
+
+    pub trait ExtendById<Id> {
+        type TransformedOperation;
+        fn transform_operation(self, id: Id) -> Self::TransformedOperation;
+    }
+
+    impl<Base, Partial, Wheres, Links> ExtendById<<Base::Id as CollectionId>::IdData>
+        for Update<Base, Partial, Wheres, Links>
+    where
+        Base: Collection,
+        Base::Id: Scoped,
+    {
+        type TransformedOperation =
+            Update<Base, Partial, ExtendExpressionByIdEqualTo<Wheres, Base>, Links>;
+
+        fn transform_operation(
+            self,
+            id: <Base::Id as CollectionId>::IdData,
+        ) -> Self::TransformedOperation {
+            Update {
+                wheres: extend_expression_by_id_equal_to(self.wheres, &self.base, id),
+                base: self.base,
+                partial: self.partial,
+                links: self.links,
+            }
+        }
+    }
+
+    impl<Base, Wheres, Links> ExtendById<<Base::Id as CollectionId>::IdData>
+        for Delete<Base, Wheres, Links>
+    where
+        Base: Collection,
+        Base::Id: Scoped,
+    {
+        type TransformedOperation = Delete<Base, ExtendExpressionByIdEqualTo<Wheres, Base>, Links>;
+        fn transform_operation(
+            self,
+            id: <Base::Id as CollectionId>::IdData,
+        ) -> Self::TransformedOperation {
+            Delete {
+                wheres: extend_expression_by_id_equal_to(self.wheres, &self.base, id),
+                base: self.base,
+                links: self.links,
+            }
+        }
+    }
+
+    impl<V, OgOperation, Id> OperationOutput for OperationById<OgOperation, Id>
+    where
+        OgOperation: OperationOutput<Output = Vec<V>>,
+        OgOperation::TransformedOperation: OperationOutput<Output = Vec<V>>,
+        OgOperation: ExtendById<Id>,
+    {
+        type Output = Option<V>;
+    }
+
+    impl<S, V, OgOperation, Id> Operation<S> for OperationById<OgOperation, Id>
+    where
+        OgOperation: OperationOutput<Output = Vec<V>>,
+        OgOperation::TransformedOperation: Operation<S, Output = Vec<V>>,
+        OgOperation: ExtendById<Id>,
+        V: Send,
+        Id: Send,
+        OgOperation: Send,
+    {
+        fn exec_operation(
+            self,
+            pool: &mut <S>::Connection,
+        ) -> impl Future<Output = Self::Output> + Send
+        where
+            S: sqlx::Database,
+            Self: Sized,
+        {
+            async move {
+                let mut vec_output = self
+                    .operation
+                    .transform_operation(self.id)
+                    .exec_operation(pool)
+                    .await;
+
+                let last = vec_output.pop();
+
+                if vec_output.len() != 0 {
+                    panic!("made an operation on multiple records!")
+                }
+
+                last
+            }
+        }
+    }
+
+    pub struct DeleteById<Base: Collection, Wheres, Links> {
+        pub base: Base,
+        pub id: <Base::Id as CollectionId>::IdData,
+        pub wheres: Wheres,
+        pub links: Links,
+    }
+
+    impl<T, Base: Collection, Wheres, Links> OperationOutput for DeleteById<Base, Wheres, Links>
+    where
+        OperationById<Delete<Base, Wheres, Links>, <Base::Id as CollectionId>::IdData>:
+            OperationOutput<Output = Option<T>>,
+    {
+        type Output = Option<T>;
+    }
+
+    impl<S, T, Base, Wheres, Links> Operation<S> for DeleteById<Base, Wheres, Links>
+    where
+        Base: Send + Collection,
+        Wheres: Send,
+        Links: Send,
+        T: Send,
+        OperationById<Delete<Base, Wheres, Links>, <Base::Id as CollectionId>::IdData>:
+            Operation<S, Output = Option<T>>,
+        <Base::Id as CollectionId>::IdData: Send,
+    {
+        fn exec_operation(
+            self,
+            pool: &mut <S>::Connection,
+        ) -> impl Future<Output = Self::Output> + Send
+        where
+            S: sqlx::Database,
+            Self: Sized,
+        {
+            async move {
+                OperationById {
+                    operation: Delete {
+                        base: self.base,
+                        wheres: self.wheres,
+                        links: self.links,
+                    },
+                    id: self.id,
+                }
+                .exec_operation(pool)
+                .await
+            }
+        }
+    }
+
+    pub struct UpdateById<Base: Collection, Partial, Wheres, Links> {
+        pub base: Base,
+        pub id: <Base::Id as CollectionId>::IdData,
+        pub partial: Partial,
+        pub wheres: Wheres,
+        pub links: Links,
+    }
+
+    impl<T, Base: Collection, Partial, Wheres, Links> OperationOutput
+        for UpdateById<Base, Partial, Wheres, Links>
+    where
+        OperationById<Update<Base, Partial, Wheres, Links>, <Base::Id as CollectionId>::IdData>:
+            OperationOutput<Output = Option<T>>,
+    {
+        type Output = Option<T>;
+    }
+
+    impl<S, T, Base, Partial, Wheres, Links> Operation<S> for UpdateById<Base, Partial, Wheres, Links>
+    where
+        Base: Send + Collection,
+        Partial: Send,
+        Wheres: Send,
+        Links: Send,
+        T: Send,
+        OperationById<Update<Base, Partial, Wheres, Links>, <Base::Id as CollectionId>::IdData>:
+            Operation<S, Output = Option<T>>,
+        <Base::Id as CollectionId>::IdData: Send,
+    {
+        fn exec_operation(
+            self,
+            pool: &mut <S>::Connection,
+        ) -> impl Future<Output = Self::Output> + Send
+        where
+            S: sqlx::Database,
+            Self: Sized,
+        {
+            async move {
+                OperationById {
+                    operation: Update {
+                        base: self.base,
+                        partial: self.partial,
+                        wheres: self.wheres,
+                        links: self.links,
+                    },
+                    id: self.id,
+                }
+                .exec_operation(pool)
+                .await
+            }
+        }
+    }
+}
+
+pub mod on_one_record {
+    use crate::operations::{Operation, OperationOutput};
+
+    pub struct OnOneRecord<Operation> {
+        pub operation: Operation,
+    }
+
+    impl<V, Op: OperationOutput<Output = Vec<V>>> OperationOutput for OnOneRecord<Op> {
+        type Output = Option<V>;
+    }
+
+    impl<V, S, Op> Operation<S> for OnOneRecord<Op>
+    where
+        V: Send,
+        Op: Operation<S, Output = Vec<V>>,
+    {
+        fn exec_operation(
+            self,
+            pool: &mut <S>::Connection,
+        ) -> impl Future<Output = Self::Output> + Send
+        where
+            S: sqlx::Database,
+            Self: Sized,
+        {
+            async move {
+                let mut res = self.operation.exec_operation(pool).await;
+
+                let last = res.pop();
+
+                if res.len() != 0 {
+                    panic!("made an operation on multiple records!")
+                }
+
+                return last;
+            }
+        }
     }
 }
 
