@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use crate::{
     collections::{Collection, CollectionId},
     database_extention::DatabaseExt,
@@ -10,19 +12,138 @@ use crate::{
     statements::insert_statement::{InsertStatement, One},
 };
 
-pub trait InsertLinkSplit {
-    type LinkSpec: Send + InsertLink;
-    type PreOpInput: Send;
-    type InsertItemsInput: Send;
-    type PostOpInput: Send;
-    fn split(
+pub trait LinkDataSplit {
+    type Link: InsertLink;
+    fn consume_data_only_once(
         self,
     ) -> (
-        Self::LinkSpec,
-        Self::PreOpInput,
-        Self::InsertItemsInput,
-        Self::PostOpInput,
+        Self::Link,
+        InsertLinkData<
+            <Self::Link as InsertLink>::PreOpInput,
+            <Self::Link as InsertLink>::OnInsertInput,
+            <Self::Link as InsertLink>::PostOpInput,
+        >,
     );
+}
+
+pub struct InsertId<Base, Id> {
+    base: Base,
+    id: Id,
+}
+
+impl<Base, Id> LinkDataSplit for InsertId<Base, Id> {
+    type Link = InsertId<Base, PhantomData<Id>>;
+    fn consume_data_only_once(self) -> (Self::Link, InsertLinkData<(), Id, ()>) {
+        (
+            InsertId {
+                base: self.base,
+                id: PhantomData,
+            },
+            InsertLinkData {
+                pre_op_input: (),
+                insert_items_input: self.id,
+                post_op_input: (),
+            },
+        )
+    }
+}
+
+impl<Base, Id> InsertLink for InsertId<Base, PhantomData<Id>> {
+    type PreOp = ();
+
+    type PreOpInput = ();
+
+    fn pre_operation(&self, _: Self::PreOpInput) -> Self::PreOp {}
+
+    type OnInsertIdent = ();
+
+    type OnInsertReturning = ();
+
+    fn on_insert_ident(&self) -> Self::OnInsertIdent {}
+
+    fn on_insert_returning(&self) -> Self::OnInsertReturning {}
+
+    type OnInsertExpr = ();
+
+    type OnInsertInput = Id;
+
+    fn on_insert(
+        &self,
+        input: Id,
+        _: <Self::PreOp as OperationOutput>::Output,
+    ) -> Self::OnInsertExpr
+    where
+        Self::PreOp: OperationOutput,
+    {
+        let _consume_id_only_once = input;
+        todo!()
+    }
+
+    type FromRow = ();
+
+    fn from_row(&self) -> Self::FromRow {}
+
+    type FromRowPostOpInput = ();
+
+    type FromRowTakeInput = ();
+
+    fn insert_once(
+        &self,
+        _: <Self::FromRow as FromRowData>::RData,
+    ) -> (Self::FromRowPostOpInput, Self::FromRowTakeInput)
+    where
+        Self::FromRow: FromRowData,
+    {
+        ((), ())
+    }
+
+    fn insert_many(
+        &self,
+        _: <Self::FromRow as FromRowData>::RData,
+        _: &mut Self::InsertManyPostOpOutput,
+        _: &mut Self::InsertManyTakeOutput,
+    ) -> Self::FromRowTakeInput
+    where
+        Self::FromRow: FromRowData,
+    {
+        todo!()
+    }
+
+    type PostOpMany: OperationOutput<Output = <Self::PostOp as OperationOutput>::Output>;
+    fn post_op_many(&self, _: Self::PostOpInput, _: Self::FromRowPostOpInput) -> Self::PostOpMany
+    where
+        Self::FromRow: FromRowData,
+    {
+        todo!()
+    }
+
+    type PostOp = ();
+
+    type PostOpInput = ();
+
+    fn post_operation(&self, _: Self::PostOpInput, _: Self::FromRowPostOpInput) -> Self::PostOp {}
+
+    type Output = ();
+
+    fn take(
+        self,
+        _: <Self::PostOp as OperationOutput>::Output,
+        _: Self::FromRowTakeInput,
+    ) -> Self::Output {
+    }
+
+    fn take_many(
+        self,
+        _: &mut <Self::PostOp as OperationOutput>::Output,
+        _: Self::FromRowTakeInput,
+    ) -> Self::Output {
+    }
+}
+
+pub struct InsertLinkData<PreOpInput, InsertItemsInput, PostOpInput> {
+    pub pre_op_input: PreOpInput,
+    pub insert_items_input: InsertItemsInput,
+    pub post_op_input: PostOpInput,
 }
 
 pub trait InsertLink {
@@ -50,7 +171,7 @@ pub trait InsertLink {
 
     type FromRowPostOpInput;
     type FromRowTakeInput;
-    fn split_from_row(
+    fn insert_once(
         &self,
         from_row: <Self::FromRow as FromRowData>::RData,
     ) -> (Self::FromRowPostOpInput, Self::FromRowTakeInput)
@@ -73,20 +194,17 @@ pub trait InsertLink {
     ) -> Self::Output;
 }
 
-impl InsertLinkSplit for () {
-    type LinkSpec = ();
-    type PreOpInput = ();
-    type InsertItemsInput = ();
-    type PostOpInput = ();
-    fn split(
-        self,
-    ) -> (
-        Self::LinkSpec,
-        Self::PreOpInput,
-        Self::InsertItemsInput,
-        Self::PostOpInput,
-    ) {
-        ((), (), (), ())
+impl LinkDataSplit for () {
+    type Link = ();
+    fn consume_data_only_once(self) -> (Self::Link, InsertLinkData<(), (), ()>) {
+        (
+            (),
+            InsertLinkData {
+                pre_op_input: (),
+                insert_items_input: (),
+                post_op_input: (),
+            },
+        )
     }
 }
 
@@ -137,7 +255,7 @@ impl InsertLink for () {
 
     type FromRowTakeInput = ();
 
-    fn split_from_row(&self, _: ()) -> (Self::FromRowPostOpInput, Self::FromRowTakeInput)
+    fn insert_once(&self, _: ()) -> (Self::FromRowPostOpInput, Self::FromRowTakeInput)
     where
         Self::FromRow: FromRowData,
     {
@@ -151,35 +269,34 @@ pub struct InsertOne<Handler, Data, Links> {
     pub links: Links,
 }
 
-impl<H, LSpec, L> OperationOutput for InsertOne<H, H::Data, L>
+impl<H, L, D> OperationOutput for InsertOne<H, H::Data, (L, D)>
 where
-    L: InsertLinkSplit<LinkSpec = LSpec>,
-    LSpec: InsertLink,
+    L: InsertLink,
     H: Collection,
 {
-    type Output = LinkedOutput<<H::Id as CollectionId>::IdData, H::Data, LSpec::Output>;
+    type Output = LinkedOutput<<H::Id as CollectionId>::IdData, H::Data, L::Output>;
 }
 
-impl<S, Base, L, Link, PreOpInput, InsertItemsInput, PostOpInput> Operation<S>
-    for InsertOne<Base, Base::Data, L>
+impl<S, Base, Link, PreOpInput, InsertItemsInput, PostOpInput> Operation<S>
+    for InsertOne<
+        Base,
+        Base::Data,
+        (
+            Link,
+            InsertLinkData<PreOpInput, InsertItemsInput, PostOpInput>,
+        ),
+    >
 where
     S: DatabaseExt,
     S: ExecutorTrait,
-    L: Send,
-    L: InsertLinkSplit<
-            LinkSpec = Link,
-            LinkSpec: Send,
+    Link: Send
+        + InsertLink<
             PreOpInput = PreOpInput,
             PreOpInput: Send,
-            InsertItemsInput = InsertItemsInput,
-            InsertItemsInput: Send,
             PostOpInput = PostOpInput,
             PostOpInput: Send,
-        >,
-    Link: InsertLink<
-            PreOpInput = L::PreOpInput,
-            PostOpInput = L::PostOpInput,
             OnInsertInput = InsertItemsInput,
+            OnInsertInput: Send,
         >,
     Base: Collection<Data: Send, Id: Send + CollectionId<IdData: Send>>,
     Base: Send,
@@ -204,24 +321,26 @@ where
         Self: Sized,
     {
         async move {
-            let (link, pre_op_input, insert_items_input, post_op_input) = self.links.split();
-
-            let pre_op = link
-                .pre_operation(pre_op_input)
+            let pre_op = self
+                .links
+                .0
+                .pre_operation(self.links.1.pre_op_input)
                 .exec_operation(&mut *pool)
                 .await;
 
             let (stmt, arg) = StatementBuilder::<'_, S>::new(InsertStatement {
                 table_name: self.base.table_name(),
-                identifiers: ManyFlat((self.base.identifier(), link.on_insert_ident())),
+                identifiers: ManyFlat((self.base.identifier(), self.links.0.on_insert_ident())),
                 returning: ManyFlat((
                     self.base.id().identifier(),
                     self.base.identifier(),
-                    link.on_insert_returning(),
+                    self.links.0.on_insert_returning(),
                 )),
                 values: One(ManyFlat((
                     self.base.clone().on_insert(self.data),
-                    link.on_insert(insert_items_input, pre_op),
+                    self.links
+                        .0
+                        .on_insert(self.links.1.insert_items_input, pre_op),
                 ))),
             })
             .unwrap();
@@ -241,13 +360,15 @@ where
             let attributes = self.base.no_alias(&row).unwrap();
 
             let links = {
-                let ii = link.from_row().no_alias(&row).unwrap();
-                let (post_op_input_2, from_row_take_input) = link.split_from_row(ii);
-                let po = link
-                    .post_operation(post_op_input, post_op_input_2)
+                let ii = self.links.0.from_row().no_alias(&row).unwrap();
+                let (post_op_input_2, from_row_take_input) = self.links.0.insert_once(ii);
+                let po = self
+                    .links
+                    .0
+                    .post_operation(self.links.1.post_op_input, post_op_input_2)
                     .exec_operation(&mut *pool)
                     .await;
-                link.take(po, from_row_take_input)
+                self.links.0.take(po, from_row_take_input)
             };
 
             LinkedOutput {

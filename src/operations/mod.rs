@@ -8,6 +8,7 @@ pub mod fetch_many;
 pub mod fetch_one;
 pub mod insert_one;
 pub mod insert_one_refactor_link_trait;
+// pub mod insert_one_refactor_link_trait2;
 pub mod update;
 
 pub trait OperationOutput {
