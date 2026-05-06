@@ -3,7 +3,7 @@ use crate::{
     database_extention::DatabaseExt,
     execute::Executable,
     expressions::larger_than_or_equal::LargerThanOrEqual,
-    extentions::common_expressions::{Aliased, OnInsert, Scoped},
+    extentions::common_expressions::{Aliased, V0OnInsert, Scoped},
     fix_executor::ExecutorTrait,
     from_row::{FromRowAlias, FromRowData, RowPreAliased},
     operations::{LinkedOutput, Operation, OperationOutput},
@@ -179,7 +179,7 @@ where
     OrderBy: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
     First: Send,
     First: Scoped<Scoped: for<'q> ManyExpressions<'q, S>>,
-    First: OnInsert<InsertInput = (), InsertExpression: for<'q> ManyExpressions<'q, S>>,
+    First: V0OnInsert<InsertInput = (), InsertExpression: for<'q> ManyExpressions<'q, S>>,
 {
     async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output {
         // let db = S::singleton();
@@ -282,7 +282,7 @@ mod test {
 
     use crate::{
         connect_in_memory::ConnectInMemory,
-        extentions::common_expressions::OnInsert,
+        extentions::common_expressions::V0OnInsert,
         operations::{
             LinkedOutput, Operation, SafeOperation,
             fetch_many::{FetchMany, ManyOutput},

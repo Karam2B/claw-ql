@@ -266,29 +266,53 @@ pub mod common_expressions {
 
     /// important for operations that require runtime checks
     /// to be valid.
-    pub trait OnInsert: Sized {
+    pub trait V0OnInsert: Sized {
         type InsertInput;
         type InsertExpression;
         fn on_insert(self, input: Self::InsertInput) -> Self::InsertExpression;
     }
 
-    impl OnInsert for () {
+    impl V0OnInsert for () {
         type InsertInput = ();
         type InsertExpression = ();
         fn on_insert(self, _: Self::InsertInput) -> Self::InsertExpression {}
     }
 
-    pub trait OnUpdate: Sized {
+    pub trait V0OnUpdate: Sized {
         type UpdateInput;
         type UpdateExpression;
         fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression;
+    }
+
+    pub trait OnInsert {
+        type InsertInput;
+        type InsertExpression;
+        fn on_insert(&self, input: Self::InsertInput) -> Self::InsertExpression;
+    }
+
+    impl OnInsert for () {
+        type InsertInput = ();
+        type InsertExpression = ();
+        fn on_insert(&self, _: Self::InsertInput) -> Self::InsertExpression {}
+    }
+
+    pub trait OnUpdate {
+        type UpdateInput;
+        type UpdateExpression;
+        fn on_update(&self, input: Self::UpdateInput) -> Self::UpdateExpression;
+    }
+
+    impl OnUpdate for () {
+        type UpdateInput = ();
+        type UpdateExpression = ();
+        fn on_update(&self, _: Self::UpdateInput) -> Self::UpdateExpression {}
     }
 }
 
 pub mod named_bind {
     use crate::{
         expressions::single_col_expressions::ScopedCol,
-        extentions::common_expressions::{Identifier, OnInsert, Scoped},
+        extentions::common_expressions::{Identifier, Scoped, V0OnInsert},
     };
 
     pub struct NamedBind<Table, Name, Value> {
@@ -324,7 +348,7 @@ pub mod named_bind {
         }
     }
 
-    impl<T, N, V> OnInsert for NamedBind<T, N, V> {
+    impl<T, N, V> V0OnInsert for NamedBind<T, N, V> {
         type InsertInput = ();
 
         type InsertExpression = V;
@@ -334,7 +358,7 @@ pub mod named_bind {
         }
     }
 
-    impl<T, N, V> OnInsert for Vec<NamedBind<T, N, V>> {
+    impl<T, N, V> V0OnInsert for Vec<NamedBind<T, N, V>> {
         type InsertInput = ();
         type InsertExpression = Vec<V>;
         fn on_insert(self, input: Self::InsertInput) -> Self::InsertExpression {

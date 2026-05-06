@@ -7,7 +7,7 @@ pub mod delete;
 pub mod fetch_many;
 pub mod fetch_one;
 pub mod insert_one;
-pub mod insert_one_refactor_link_trait;
+pub mod v1_insert_one;
 // pub mod insert_one_refactor_link_trait2;
 pub mod update;
 

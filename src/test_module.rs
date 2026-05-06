@@ -14,7 +14,7 @@ use crate::{
         single_col_expressions::{MigratingCol, UpdatingCol},
     },
     extentions::common_expressions::{
-        MembersAndIdAliased, OnInsert, OnUpdate, TableNameExpression,
+        MembersAndIdAliased, OnInsert, OnUpdate, TableNameExpression, V0OnInsert, V0OnUpdate,
     },
     query_builder::{
         Expression, IsOpExpression, ManyExpressions, OpExpression, PossibleImplExpression,
@@ -128,7 +128,7 @@ const _: () = {
         }
     }
 
-    impl OnUpdate for category {
+    impl V0OnUpdate for category {
         type UpdateInput = CategoryPartial;
         type UpdateExpression = CategoryPartial;
 
@@ -137,11 +137,29 @@ const _: () = {
         }
     }
 
-    impl OnInsert for category {
+    impl V0OnInsert for category {
         type InsertInput = Category;
         type InsertExpression = Category;
 
         fn on_insert(self, input: Self::InsertInput) -> Self::InsertExpression {
+            input
+        }
+    }
+
+    impl OnInsert for category {
+        type InsertInput = Category;
+        type InsertExpression = Category;
+
+        fn on_insert(&self, input: Self::InsertInput) -> Self::InsertExpression {
+            input
+        }
+    }
+
+    impl OnUpdate for category {
+        type UpdateInput = CategoryPartial;
+        type UpdateExpression = CategoryPartial;
+
+        fn on_update(&self, input: Self::UpdateInput) -> Self::UpdateExpression {
             input
         }
     }
@@ -297,7 +315,7 @@ const _: () = {
         }
     }
 
-    impl OnInsert for todo {
+    impl V0OnInsert for todo {
         type InsertInput = Todo;
         type InsertExpression = Todo;
 
@@ -306,11 +324,29 @@ const _: () = {
         }
     }
 
-    impl OnUpdate for todo {
+    impl OnInsert for todo {
+        type InsertInput = Todo;
+        type InsertExpression = Todo;
+
+        fn on_insert(&self, input: Self::InsertInput) -> Self::InsertExpression {
+            input
+        }
+    }
+
+    impl V0OnUpdate for todo {
         type UpdateInput = TodoPartial;
         type UpdateExpression = TodoPartial;
 
         fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression {
+            input
+        }
+    }
+
+    impl OnUpdate for todo {
+        type UpdateInput = TodoPartial;
+        type UpdateExpression = TodoPartial;
+
+        fn on_update(&self, input: Self::UpdateInput) -> Self::UpdateExpression {
             input
         }
     }
@@ -416,7 +452,7 @@ mod impl_zero_or_more_expressions_for_todo_partial {
 #[allow(non_camel_case_types)]
 pub mod todo_members {
     use super::todo;
-    use crate::extentions::common_expressions::{OnInsert, OnUpdate};
+    use crate::extentions::common_expressions::{V0OnInsert, V0OnUpdate};
     use crate::prelude::macro_derive_collection::*;
     use crate::query_builder::OpExpression;
 
@@ -800,7 +836,7 @@ mod impl_link {
         type Spec = OptionalToMany<DefaultRelationKey, todo, category>;
         fn spec(self) -> Self::Spec {
             OptionalToMany {
-                foriegn_key: DefaultRelationKey,
+                fk_unique_id: DefaultRelationKey,
                 from: todo,
                 to: category,
             }
@@ -817,7 +853,7 @@ macro_rules! member_impl_expression {
                 stringify!($member)
             }
         }
-        impl $crate::extentions::common_expressions::OnInsert for $member {
+        impl $crate::extentions::common_expressions::V0OnInsert for $member {
             type InsertInput = <Self as $crate::collections::Member>::Data;
             type InsertExpression = $crate::extentions::named_bind::NamedBind<
                 &'static str,
@@ -831,6 +867,15 @@ macro_rules! member_impl_expression {
                     name: $member,
                     value: input,
                 }
+            }
+        }
+
+        impl $crate::extentions::common_expressions::OnInsert for $member {
+            type InsertInput = <Self as $crate::collections::Member>::Data;
+            type InsertExpression = <Self as $crate::collections::Member>::Data;
+
+            fn on_insert(&self, input: Self::InsertInput) -> Self::InsertExpression {
+                input
             }
         }
 
@@ -848,11 +893,20 @@ macro_rules! member_impl_expression {
             }
         }
 
-        impl $crate::extentions::common_expressions::OnUpdate for $member {
+        impl $crate::extentions::common_expressions::V0OnUpdate for $member {
             type UpdateInput = <Self as $crate::collections::Member>::Data;
             type UpdateExpression = <Self as $crate::collections::Member>::Data;
 
             fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression {
+                input
+            }
+        }
+
+        impl $crate::extentions::common_expressions::OnUpdate for $member {
+            type UpdateInput = <Self as $crate::collections::Member>::Data;
+            type UpdateExpression = <Self as $crate::collections::Member>::Data;
+
+            fn on_update(&self, input: Self::UpdateInput) -> Self::UpdateExpression {
                 input
             }
         }

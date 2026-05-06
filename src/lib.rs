@@ -333,7 +333,7 @@ pub mod select_items_trait_object {
                 Box::new(OptionalToMany {
                     from: todo_collection.clone(),
                     to: category_collection.clone(),
-                    foriegn_key: DefaultRelationKey,
+                    fk_unique_id: DefaultRelationKey,
                 }) as Box<dyn JsonLinkFetchMany<Sqlite> + Send>
             };
 

@@ -2,9 +2,114 @@ use crate::links::{LinkedToBase, LinkedViaId};
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub struct OptionalToMany<Id, F, T> {
-    pub foriegn_key: Id,
+    pub fk_unique_id: Id,
     pub from: F,
     pub to: T,
+}
+
+pub mod fk_name {
+    use core::fmt;
+
+    use crate::{
+        collections::Collection,
+        database_extention::DatabaseExt,
+        extentions::common_expressions::TableNameExpression,
+        links::relation_optional_to_many::OptionalToMany,
+        query_builder::{Expression, OpExpression, StatementBuilder},
+    };
+
+    pub struct AsIdentifier<Relation> {
+        pub relation: Relation,
+    }
+
+    impl<Id, F, T> OptionalToMany<Id, F, T>
+    where
+        Id: Clone,
+        F: Clone,
+        T: Clone,
+    {
+        pub fn fk_name(&self) -> AsIdentifier<Self> {
+            AsIdentifier {
+                relation: self.clone(),
+            }
+        }
+    }
+
+    impl<Id, F, T> fmt::Display for AsIdentifier<OptionalToMany<Id, F, T>>
+    where
+        Id: AsRef<str>,
+        T: Collection,
+    {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                f,
+                "fk_{}{}",
+                self.relation.to.table_name_lower_case(),
+                self.relation.fk_unique_id.as_ref(),
+            )
+        }
+    }
+
+    impl<Id, F, T> OpExpression for AsIdentifier<OptionalToMany<Id, F, T>> {}
+
+    impl<'q, S, Id, F, T> Expression<'q, S> for AsIdentifier<OptionalToMany<Id, F, T>>
+    where
+        S: DatabaseExt,
+        Id: 'q + AsRef<str>,
+        F: 'q,
+        T: 'q + TableNameExpression<LowerCaseTableNameExpression: AsRef<str>>,
+    {
+        fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+            ctx.sanitize_strings((
+                "fk_",
+                self.relation.to.lower_case_table_name_expression().as_ref(),
+                self.relation.fk_unique_id.as_ref(),
+            ));
+        }
+    }
+}
+
+pub mod find_place_for_this {
+    use std::marker::PhantomData;
+
+    use sqlx::{ColumnIndex, Decode, Row, Type};
+
+    use crate::from_row::{
+        FromRowAlias, FromRowData, FromRowError, RowPostAliased, RowPreAliased, RowTwoAliased,
+    };
+
+    pub struct OneColumn<Name, ExpectedType> {
+        pub as_name: Name,
+        pub as_type: PhantomData<ExpectedType>,
+    }
+
+    impl<AsName, AsType> FromRowData for OneColumn<AsName, AsType> {
+        type RData = AsType;
+    }
+
+    impl<'r, R, AsName, AsType> FromRowAlias<'r, R> for OneColumn<AsName, AsType>
+    where
+        AsName: ToString,
+        AsType: for<'q> Decode<'q, R::Database> + Type<R::Database>,
+        R: Row,
+        for<'q> &'q str: ColumnIndex<R>,
+    {
+        fn no_alias(&self, row: &'r R) -> Result<Self::RData, FromRowError> {
+            let data: AsType = row.try_get(self.as_name.to_string().as_str())?;
+            Ok(data)
+        }
+        fn pre_alias(&self, row: RowPreAliased<'r, R>) -> Result<Self::RData, FromRowError> {
+            let data: AsType = row.try_get(self.as_name.to_string().as_str())?;
+            Ok(data)
+        }
+        fn post_alias(&self, _: RowPostAliased<'r, R>) -> Result<Self::RData, FromRowError> {
+            panic!("debug in the process of deprecating this method");
+        }
+        fn two_alias(&self, row: RowTwoAliased<'r, R>) -> Result<Self::RData, FromRowError> {
+            let data: AsType = row.try_get(self.as_name.to_string().as_str())?;
+            Ok(data)
+        }
+    }
 }
 
 impl<Id, F, T> LinkedViaId for OptionalToMany<Id, F, T> {}
@@ -51,7 +156,7 @@ mod impl_on_migrate {
                 table: self.from.table_name_expression(),
                 col_def: ColumnDefinition {
                     name: ForeignKeyName {
-                        key: self.foriegn_key.clone(),
+                        key: self.fk_unique_id.clone(),
                         to: self.to.table_name_expression(),
                     },
                     ty: PhantomData,
@@ -416,7 +521,7 @@ mod impl_link_fetch_many {
                 foreign_column: self.to.id().identifier(),
                 local_table: self.from.table_name_expression(),
                 local_column: ForeignKeyName {
-                    key: self.foriegn_key.clone(),
+                    key: self.fk_unique_id.clone(),
                     to: self.to.table_name_expression(),
                 },
             }
@@ -526,14 +631,509 @@ mod impl_link_fetch_many {
     // }
 }
 
+mod impl_set_new_for_insert {
+    use std::marker::PhantomData;
+
+    use crate::{
+        collections::{AutoGenerate, Collection, CollectionId},
+        links::{
+            relation_optional_to_many::{OptionalToMany, fk_name::AsIdentifier},
+            set_new_mod::SetNew,
+        },
+        operations::{
+            CollectionOutput, OperationOutput,
+            insert_one::{
+                ConstraintViolation, InsertLinkConsumeData, InsertLinkData, InsertOne,
+                InsertOneLink,
+            },
+        },
+        query_builder::Bind,
+    };
+
+    impl<Key, From, To> InsertLinkConsumeData for SetNew<OptionalToMany<Key, From, To>, To::Data>
+    where
+        To: Collection,
+        Key: Clone,
+        From: Clone,
+        To: Clone,
+        <To::Id as CollectionId>::IdData: Clone,
+    {
+        type Link = SetNew<OptionalToMany<Key, From, To>, PhantomData<To::Data>>;
+
+        fn consume_data(
+            self,
+        ) -> (
+            Self::Link,
+            crate::operations::insert_one::InsertLinkData<
+                <Self::Link as crate::operations::insert_one::InsertOneLink>::PreOpData,
+                <Self::Link as crate::operations::insert_one::InsertOneLink>::InsertValuesData,
+                <Self::Link as crate::operations::insert_one::InsertOneLink>::PostOpData,
+            >,
+        ) {
+            (
+                SetNew {
+                    relation: self.relation,
+                    data: PhantomData,
+                },
+                InsertLinkData {
+                    pre_op_data: self.data,
+                    insert_value_data: (),
+                    post_op_data: (),
+                },
+            )
+        }
+    }
+
+    impl<Key, From, To> InsertOneLink for SetNew<OptionalToMany<Key, From, To>, PhantomData<To::Data>>
+    where
+        To: Clone,
+        From: Clone,
+        Key: Clone,
+        To: Collection,
+        To::Id: CollectionId<IdData: Clone>,
+    {
+        type PreOp = InsertOne<AutoGenerate, To, To::Data, ()>;
+
+        type PreOpData = To::Data;
+
+        fn pre_operation_init(&self, input: Self::PreOpData) -> Self::PreOp {
+            InsertOne {
+                id: AutoGenerate,
+                data: input,
+                base: self.relation.to.clone(),
+                links: (),
+            }
+        }
+
+        type PreOpError = ConstraintViolation;
+
+        fn pre_op_split(
+            &self,
+            pre_op_output: <Self::PreOp as OperationOutput>::Output,
+        ) -> Result<
+            (
+                Self::PreOpToInsertValue,
+                Self::PreOpToTake,
+                Self::PreOpToPostOp,
+            ),
+            Self::PreOpError,
+        > {
+            let unwrapped = pre_op_output?;
+            Ok((unwrapped.id.clone(), unwrapped.into(), ()))
+        }
+
+        type PostOpError = ();
+
+        fn post_op_error(
+            &self,
+            _: &<Self::PostOp as OperationOutput>::Output,
+        ) -> Result<(), Self::PostOpError> {
+            Ok(())
+        }
+
+        type PreOpToInsertValue = <To::Id as CollectionId>::IdData;
+        type PreOpToTake = CollectionOutput<<To::Id as CollectionId>::IdData, To::Data>;
+        type PreOpToPostOp = ();
+
+        type InsertNames = AsIdentifier<OptionalToMany<Key, From, To>>;
+
+        fn insert_names(&self) -> Self::InsertNames {
+            self.relation.fk_name()
+        }
+
+        type InsertReturning = AsIdentifier<OptionalToMany<Key, From, To>>;
+
+        fn insert_returning(&self) -> Self::InsertReturning {
+            self.relation.fk_name()
+        }
+
+        type InsertValuesData = ();
+
+        type InsertValues = Bind<<To::Id as CollectionId>::IdData>;
+
+        fn insert_value(&self, _: (), id: Self::PreOpToInsertValue) -> Self::InsertValues {
+            Bind(id)
+        }
+
+        type FromRow = ();
+
+        fn from_row(&self) -> Self::FromRow {}
+
+        type TakeInput = ();
+
+        type PostOp = ();
+
+        type PostOpData = ();
+
+        fn from_row_result(
+            &self,
+            _: Self::PostOpData,
+            _: <Self::FromRow as crate::from_row::FromRowData>::RData,
+            _: Self::PreOpToPostOp,
+        ) -> (Self::PostOp, Self::TakeInput) {
+            ((), ())
+        }
+
+        type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::Data>;
+
+        fn take(
+            self,
+            _: <Self::PostOp as crate::operations::OperationOutput>::Output,
+            _: Self::TakeInput,
+            take: Self::PreOpToTake,
+        ) -> Self::Output {
+            take
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use sqlx::Sqlite;
+
+        use crate::{
+            collections::AutoGenerate,
+            connect_in_memory::ConnectInMemory,
+            links::{Link, set_new_mod::SetNew},
+            operations::{CollectionOutput, LinkedOutput, Operation, insert_one::InsertOne},
+            test_module::{self, Category, Todo, category},
+        };
+
+        #[tokio::test]
+        async fn test_insert_one_set_new() {
+            let mut conn = Sqlite::connect_in_memory_2().await;
+
+            sqlx::query(
+                "
+                CREATE TABLE Category (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL
+                );
+                CREATE TABLE Todo (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    done BOOLEAN NOT NULL,
+                    description TEXT,
+                    fk_category_def INTEGER,
+                    FOREIGN KEY (fk_category_def) REFERENCES Category(id)
+                );
+                ",
+            )
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+            let output = Operation::<Sqlite>::exec_operation(
+                InsertOne {
+                    id: AutoGenerate,
+                    base: test_module::todo,
+                    data: Todo {
+                        title: "first_todo".to_string(),
+                        done: true,
+                        description: None,
+                    },
+                    links: SetNew {
+                        data: Category {
+                            title: "category_1".to_string(),
+                        },
+                        relation: <category as Link<test_module::todo>>::spec(category),
+                    },
+                },
+                &mut conn,
+            )
+            .await;
+
+            pretty_assertions::assert_eq!(
+                output,
+                Ok(LinkedOutput {
+                    id: 1,
+                    attributes: Todo {
+                        title: "first_todo".to_string(),
+                        done: true,
+                        description: None,
+                    },
+                    links: CollectionOutput {
+                        id: 1,
+                        attributes: Category {
+                            title: "category_1".to_string(),
+                        },
+                    },
+                })
+            );
+        }
+    }
+}
+
 mod impl_set_id_for_insert {
+    use std::marker::PhantomData;
+
+    use crate::{
+        collections::{Collection, CollectionId},
+        expressions::ColumnEqual,
+        extentions::common_expressions::Identifier,
+        links::{
+            relation_optional_to_many::{
+                OptionalToMany, find_place_for_this::OneColumn, fk_name::AsIdentifier,
+            },
+            set_id_mod::SetId,
+        },
+        operations::{
+            CollectionOutput, LinkedOutput, OperationOutput,
+            fetch_one::FetchOne,
+            insert_one::{InsertLinkConsumeData, InsertLinkData, InsertOneLink},
+        },
+        query_builder::Bind,
+    };
+
+    impl<Key, From, To> InsertLinkConsumeData
+        for SetId<OptionalToMany<Key, From, To>, <To::Id as CollectionId>::IdData>
+    where
+        To: Collection,
+        Key: Clone,
+        From: Clone,
+        To: Clone,
+        To::Id: Identifier,
+    {
+        type Link =
+            SetId<OptionalToMany<Key, From, To>, PhantomData<<To::Id as CollectionId>::IdData>>;
+
+        fn consume_data(
+            self,
+        ) -> (
+            Self::Link,
+            crate::operations::insert_one::InsertLinkData<
+                <Self::Link as InsertOneLink>::PreOpData,
+                <Self::Link as InsertOneLink>::InsertValuesData,
+                <Self::Link as InsertOneLink>::PostOpData,
+            >,
+        ) {
+            (
+                SetId {
+                    relation: self.relation,
+                    id: PhantomData,
+                },
+                InsertLinkData {
+                    pre_op_data: (),
+                    insert_value_data: self.id,
+                    post_op_data: (),
+                },
+            )
+        }
+    }
+
+    pub struct ForeignKeyFor<Relation> {
+        pub relation: Relation,
+    }
+
+    impl<Key, From, To> OptionalToMany<Key, From, To>
+    where
+        Self: Clone,
+    {
+        pub fn foreign_key(&self) -> ForeignKeyFor<Self> {
+            ForeignKeyFor {
+                relation: self.clone(),
+            }
+        }
+    }
+
+    impl<Key, From, To> InsertOneLink
+        for SetId<OptionalToMany<Key, From, To>, PhantomData<<To::Id as CollectionId>::IdData>>
+    where
+        To: Collection,
+        Key: Clone,
+        From: Clone,
+        To: Clone,
+        To::Id: Identifier,
+    {
+        type PreOp = ();
+        type PreOpError = ();
+
+        type PreOpData = ();
+
+        fn pre_operation_init(&self, _: Self::PreOpData) -> Self::PreOp {}
+
+        fn pre_op_split(
+            &self,
+            _: <Self::PreOp as OperationOutput>::Output,
+        ) -> Result<
+            (
+                Self::PreOpToInsertValue,
+                Self::PreOpToTake,
+                Self::PreOpToPostOp,
+            ),
+            Self::PreOpError,
+        > {
+            Ok(((), (), ()))
+        }
+
+        type PreOpToInsertValue = ();
+        type PreOpToTake = ();
+        type PreOpToPostOp = ();
+
+        type InsertNames = AsIdentifier<OptionalToMany<Key, From, To>>;
+
+        fn insert_names(&self) -> Self::InsertNames {
+            self.relation.fk_name()
+        }
+
+        type InsertReturning = AsIdentifier<OptionalToMany<Key, From, To>>;
+
+        fn insert_returning(&self) -> Self::InsertReturning {
+            self.relation.fk_name()
+        }
+
+        type InsertValuesData = <To::Id as CollectionId>::IdData;
+
+        type InsertValues = Bind<<To::Id as CollectionId>::IdData>;
+
+        fn insert_value(&self, from_data: Self::InsertValuesData, _: ()) -> Self::InsertValues {
+            Bind(from_data)
+        }
+
+        type FromRow = OneColumn<
+            AsIdentifier<OptionalToMany<Key, From, To>>,
+            <To::Id as CollectionId>::IdData,
+        >;
+
+        fn from_row(&self) -> Self::FromRow {
+            OneColumn {
+                as_name: self.relation.fk_name(),
+                as_type: PhantomData,
+            }
+        }
+
+        type TakeInput = ();
+
+        type PostOp = FetchOne<
+            To,
+            (),
+            ColumnEqual<<To::Id as Identifier>::Identifier, <To::Id as CollectionId>::IdData>,
+        >;
+
+        type PostOpError = ();
+        fn post_op_error(
+            &self,
+            _: &<Self::PostOp as OperationOutput>::Output,
+        ) -> Result<(), Self::PostOpError> {
+            Ok(())
+        }
+
+        type PostOpData = ();
+
+        fn from_row_result(
+            &self,
+            _: (),
+            from_row: <To::Id as CollectionId>::IdData,
+            _: Self::PreOpToPostOp,
+        ) -> (Self::PostOp, Self::TakeInput) {
+            (
+                FetchOne {
+                    base: self.relation.to.clone(),
+                    links: (),
+                    wheres: ColumnEqual {
+                        col: self.relation.to.id().identifier(),
+                        eq: from_row,
+                    },
+                },
+                (),
+            )
+        }
+
+        type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::Data>;
+
+        fn take(
+            self,
+            pre_op: Option<LinkedOutput<<To::Id as CollectionId>::IdData, To::Data, ()>>,
+            _: (),
+            _: Self::PreOpToTake,
+        ) -> Self::Output {
+            pre_op.expect("sql query should have failed by now").into()
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use sqlx::Sqlite;
+
+        use crate::{
+            collections::AutoGenerate,
+            connect_in_memory::ConnectInMemory,
+            links::{Link, set_id_mod::SetId},
+            operations::{CollectionOutput, LinkedOutput, Operation, insert_one::InsertOne},
+            test_module::{self, Category, Todo, category},
+        };
+
+        #[tokio::test]
+        async fn test_insert_one() {
+            let mut conn = Sqlite::connect_in_memory_2().await;
+
+            sqlx::query(
+                "
+                CREATE TABLE Category (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL
+                );
+                CREATE TABLE Todo (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    done BOOLEAN NOT NULL,
+                    description TEXT,
+                    fk_category_def INTEGER,
+                    FOREIGN KEY (fk_category_def) REFERENCES Category(id)
+                );
+
+                INSERT INTO Category (title) VALUES ('category_1');
+                ",
+            )
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+            let output = Operation::<Sqlite>::exec_operation(
+                InsertOne {
+                    id: AutoGenerate,
+                    base: test_module::todo,
+                    data: Todo {
+                        title: "first_todo".to_string(),
+                        done: true,
+                        description: None,
+                    },
+                    links: SetId {
+                        id: 1,
+                        relation: <category as Link<test_module::todo>>::spec(category),
+                    },
+                },
+                &mut conn,
+            )
+            .await;
+
+            pretty_assertions::assert_eq!(
+                output,
+                Ok(LinkedOutput {
+                    id: 1,
+                    attributes: Todo {
+                        title: "first_todo".to_string(),
+                        done: true,
+                        description: None,
+                    },
+                    links: CollectionOutput {
+                        id: 1,
+                        attributes: Category {
+                            title: "category_1".to_string(),
+                        },
+                    },
+                })
+            );
+        }
+    }
+}
+mod impl_set_id_for_insert_v0 {
     use crate::{
         collections::{Collection, CollectionId},
         database_extention::DatabaseExt,
-        extentions::common_expressions::{Identifier, OnInsert, TableNameExpression},
+        extentions::common_expressions::{Identifier, TableNameExpression, V0OnInsert},
         from_row::{FromRowAlias, FromRowData},
         links::{relation_optional_to_many::OptionalToMany, set_id_mod::SetId},
-        operations::insert_one::InsertLink,
+        operations::v1_insert_one::InsertLink,
         query_builder::{Bind, Expression, OpExpression, StatementBuilder},
     };
 
@@ -569,7 +1169,7 @@ mod impl_set_id_for_insert {
         }
     }
 
-    impl<ToTableName, Key, ToId> OnInsert for InsertItem<ToTableName, Key, ToId> {
+    impl<ToTableName, Key, ToId> V0OnInsert for InsertItem<ToTableName, Key, ToId> {
         type InsertInput = ();
         type InsertExpression = Bind<ToId>;
 
@@ -640,7 +1240,7 @@ mod impl_set_id_for_insert {
             InsertItem {
                 to_table_name: self.relation.to.lower_case_table_name_expression(),
                 to_id: self.id.clone(),
-                key: self.relation.foriegn_key.clone(),
+                key: self.relation.fk_unique_id.clone(),
             }
         }
 

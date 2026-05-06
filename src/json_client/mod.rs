@@ -481,7 +481,7 @@ pub mod links_utils {
         };
 
         Ok(OptionalToMany {
-            foriegn_key: DefaultRelationKey,
+            fk_unique_id: DefaultRelationKey,
             from: base.clone(),
             to,
         })
@@ -959,7 +959,7 @@ pub mod dynamic_collection {
     mod expression_on_update {
         use super::*;
         use crate::database_extention::DatabaseExt;
-        use crate::extentions::common_expressions::OnUpdate;
+        use crate::extentions::common_expressions::V0OnUpdate;
         use crate::json_client::to_bind_trait::ToBind;
         use crate::query_builder::IsOpExpression;
         use crate::query_builder::ManyExpressions;

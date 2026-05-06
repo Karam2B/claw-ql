@@ -547,7 +547,7 @@ pub mod add_link {
 
                     let mig =
                         StatementBuilder::new_no_data(OnMigrate::statments(&OptionalToMany {
-                            foriegn_key: DefaultRelationKey,
+                            fk_unique_id: DefaultRelationKey,
                             from: from_gaurd.clone(),
                             to: to_gaurd.clone(),
                         }))
@@ -869,7 +869,7 @@ pub mod fetch_many {
                                 base.name_lower_case.clone(),
                             )) {
                                 links.push(Box::new(OptionalToMany {
-                                    foriegn_key: DefaultRelationKey,
+                                    fk_unique_id: DefaultRelationKey,
                                     from: base.clone(),
                                     to,
                                 }));

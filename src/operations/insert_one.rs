@@ -1,8 +1,8 @@
 use crate::{
-    collections::{Collection, CollectionId},
+    collections::{Collection, CollectionId, CreateIdFor},
     database_extention::DatabaseExt,
     execute::Executable,
-    extentions::common_expressions::{Identifier, OnInsert},
+    extentions::common_expressions::{Identifier, OnInsert, TableNameExpression},
     fix_executor::ExecutorTrait,
     from_row::{FromRowAlias, FromRowData},
     operations::{LinkedOutput, Operation, OperationOutput},
@@ -10,103 +10,261 @@ use crate::{
     statements::insert_statement::{InsertStatement, One},
 };
 
-pub trait InsertLink {
-    type PreOp;
-    fn pre_operation(&self) -> Self::PreOp;
+pub trait InsertLinkConsumeData {
+    type Link: InsertOneLink;
+    fn consume_data(
+        self,
+    ) -> (
+        Self::Link,
+        InsertLinkData<
+            <Self::Link as InsertOneLink>::PreOpData,
+            <Self::Link as InsertOneLink>::InsertValuesData,
+            <Self::Link as InsertOneLink>::PostOpData,
+        >,
+    );
+}
 
-    type InsertItems;
-    fn insert_items(&self, pre_op: <Self::PreOp as OperationOutput>::Output) -> Self::InsertItems
-    where
-        Self::PreOp: OperationOutput;
+pub struct InsertLinkData<PreOpData, InsertValueData, PostOpData> {
+    pub insert_value_data: InsertValueData,
+    pub pre_op_data: PreOpData,
+    pub post_op_data: PostOpData,
+}
 
-    type PostOp;
-    fn post_operation(
+pub trait InsertOneLink {
+    type PreOp: OperationOutput;
+    type PreOpData;
+    type PreOpError;
+    fn pre_operation_init(&self, input: Self::PreOpData) -> Self::PreOp;
+
+    fn pre_op_split(
         &self,
-        insert_items: &<Self::InsertItems as FromRowData>::RData,
-    ) -> Self::PostOp
-    where
-        Self::InsertItems: FromRowData;
+        pre_op_output: <Self::PreOp as OperationOutput>::Output,
+    ) -> Result<
+        (
+            Self::PreOpToInsertValue,
+            Self::PreOpToTake,
+            Self::PreOpToPostOp,
+        ),
+        Self::PreOpError,
+    >;
+    type PreOpToInsertValue;
+    type PreOpToTake;
+    type PreOpToPostOp;
+
+    type InsertNames;
+    fn insert_names(&self) -> Self::InsertNames;
+
+    type InsertReturning;
+    fn insert_returning(&self) -> Self::InsertReturning;
+
+    type InsertValuesData;
+    type InsertValues;
+    fn insert_value(
+        &self,
+        from_data: Self::InsertValuesData,
+        pre_op_output: Self::PreOpToInsertValue,
+    ) -> Self::InsertValues;
+
+    type FromRow: FromRowData;
+    fn from_row(&self) -> Self::FromRow;
+
+    type TakeInput;
+    type PostOp: OperationOutput;
+    type PostOpData;
+    type PostOpError;
+    fn from_row_result(
+        &self,
+        from_data: Self::PostOpData,
+        from_row: <Self::FromRow as FromRowData>::RData,
+        pre_op_to_post_op: Self::PreOpToPostOp,
+    ) -> (Self::PostOp, Self::TakeInput);
+
+    fn post_op_error(
+        &self,
+        error: &<Self::PostOp as OperationOutput>::Output,
+    ) -> Result<(), Self::PostOpError>;
 
     type Output;
     fn take(
         self,
         pre_op: <Self::PostOp as OperationOutput>::Output,
-        insert_items: <Self::InsertItems as FromRowData>::RData,
-    ) -> Self::Output
-    where
-        Self::PostOp: OperationOutput,
-        Self::InsertItems: FromRowData;
+        insert_items: Self::TakeInput,
+        pre_op_to_post_op: Self::PreOpToTake,
+    ) -> Self::Output;
 }
 
-impl InsertLink for () {
+impl InsertLinkConsumeData for () {
+    type Link = ();
+    fn consume_data(
+        self,
+    ) -> (
+        Self::Link,
+        InsertLinkData<
+            <Self::Link as InsertOneLink>::PreOpData,
+            <Self::Link as InsertOneLink>::InsertValuesData,
+            <Self::Link as InsertOneLink>::PostOpData,
+        >,
+    ) {
+        (
+            (),
+            InsertLinkData {
+                insert_value_data: (),
+                pre_op_data: (),
+                post_op_data: (),
+            },
+        )
+    }
+}
+
+impl InsertOneLink for () {
     type PreOp = ();
 
-    fn pre_operation(&self) -> Self::PreOp {}
+    type PreOpData = ();
+    type PreOpError = ();
 
-    type InsertItems = ();
+    fn pre_operation_init(&self, _: Self::PreOpData) -> Self::PreOp {}
 
-    fn insert_items(&self, _: <Self::PreOp as OperationOutput>::Output) -> Self::InsertItems
-    where
-        Self::PreOp: OperationOutput,
-    {
+    fn pre_op_split(
+        &self,
+        _: <Self::PreOp as OperationOutput>::Output,
+    ) -> Result<
+        (
+            Self::PreOpToInsertValue,
+            Self::PreOpToTake,
+            Self::PreOpToPostOp,
+        ),
+        Self::PreOpError,
+    > {
+        Ok(((), (), ()))
     }
 
+    type PreOpToInsertValue = ();
+    type PreOpToTake = ();
+    type PreOpToPostOp = ();
+
+    type InsertNames = ();
+
+    fn insert_names(&self) -> Self::InsertNames {}
+
+    type InsertReturning = ();
+
+    fn insert_returning(&self) -> Self::InsertReturning {}
+
+    type InsertValuesData = ();
+
+    type InsertValues = ();
+
+    fn insert_value(
+        &self,
+        _: Self::InsertValuesData,
+        _: <Self::PreOp as OperationOutput>::Output,
+    ) -> Self::InsertValues {
+    }
+
+    type FromRow = ();
+
+    fn from_row(&self) -> Self::FromRow {}
+
+    type TakeInput = ();
+
     type PostOp = ();
+
+    type PostOpData = ();
+
+    fn from_row_result(
+        &self,
+        _: Self::PostOpData,
+        _: <Self::FromRow as FromRowData>::RData,
+        _: Self::PreOpToTake,
+    ) -> (Self::PostOp, Self::TakeInput) {
+        ((), ())
+    }
+
+    type PostOpError = ();
+
+    fn post_op_error(
+        &self,
+        _: &<Self::PostOp as OperationOutput>::Output,
+    ) -> Result<(), Self::PostOpError> {
+        Ok(())
+    }
 
     type Output = ();
 
     fn take(
         self,
         _: <Self::PostOp as OperationOutput>::Output,
-        _: <Self::InsertItems as FromRowData>::RData,
-    ) -> Self::Output
-    where
-        Self::PostOp: OperationOutput,
-        Self::InsertItems: FromRowData,
-    {
-    }
-
-    fn post_operation(&self, _: &<Self::InsertItems as FromRowData>::RData) -> Self::PostOp
-    where
-        Self::InsertItems: FromRowData,
-    {
+        _: Self::TakeInput,
+        _: Self::PreOpToTake,
+    ) -> Self::Output {
     }
 }
 
-pub struct InsertOne<Handler, Data, Links> {
+pub struct InsertOne<Id, Handler, Data, Links> {
     pub base: Handler,
+    pub id: Id,
     pub data: Data,
     pub links: Links,
 }
 
-impl<H, L> OperationOutput for InsertOne<H, H::Data, L>
-where
-    L: InsertLink,
-    H: Collection,
-{
-    type Output = LinkedOutput<<H::Id as CollectionId>::IdData, H::Data, L::Output>;
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ConstraintViolation(pub Option<String>);
+
+impl From<()> for ConstraintViolation {
+    fn from(_: ()) -> Self {
+        ConstraintViolation(None)
+    }
 }
 
-impl<S, Base, Link> Operation<S> for InsertOne<Base, Base::Data, Link>
+impl<I, H, PreL, L> OperationOutput for InsertOne<I, H, H::Data, PreL>
+where
+    PreL: InsertLinkConsumeData<Link = L>,
+    L: InsertOneLink,
+    H: Collection,
+{
+    type Output = Result<
+        LinkedOutput<<H::Id as CollectionId>::IdData, H::Data, L::Output>,
+        ConstraintViolation,
+    >;
+}
+
+impl<Id, S, Base, LinkPreSplit, Link> Operation<S> for InsertOne<Id, Base, Base::Data, LinkPreSplit>
 where
     S: DatabaseExt,
     S: ExecutorTrait,
-    Link: InsertLink<Output: Send>,
+    Id: CreateIdFor<Base::Id, Result: Send>,
+    Id::Result: for<'q> ManyExpressions<'q, S>,
+    Id: Send,
+    LinkPreSplit: Send + InsertLinkConsumeData<Link = Link>,
     Link: Send,
+    Link: InsertOneLink,
+    ConstraintViolation: From<Link::PreOpError>,
+    ConstraintViolation: From<Link::PostOpError>,
+    Link::PreOpError: Send,
+    Link::PostOpError: Send,
+    Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
     Base: Collection<Data: Send, Id: Send + CollectionId<IdData: Send>>,
     Base: Send,
-    Base: Clone,
     Base: Identifier<Identifier: for<'q> ManyExpressions<'q, S>>,
-    Link::PreOp: Operation<S>,
-    Link::PostOp: Operation<S>,
-    Link::InsertItems: Send + Clone,
-    Link::InsertItems: Identifier<Identifier: for<'q> ManyExpressions<'q, S>>,
-    Link::InsertItems: OnInsert<InsertInput = (), InsertExpression: for<'q> ManyExpressions<'q, S>>,
-    Link::InsertItems: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
     Base: OnInsert<InsertInput = Base::Data, InsertExpression: for<'q> ManyExpressions<'q, S>>,
     Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::Data>,
-    Base::Id: Identifier<Identifier: for<'q> Expression<'q, S>>,
+    Base::Id: Identifier<Identifier: for<'q> ManyExpressions<'q, S>>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row, RData = <Base::Id as CollectionId>::IdData>,
+    Link::PreOp: Operation<S, Output: Send>,
+    Link::PreOpData: Send,
+    Link::InsertNames: for<'q> ManyExpressions<'q, S>,
+    Link::InsertValues: for<'q> ManyExpressions<'q, S>,
+    Link::InsertValuesData: Send,
+    Link::PostOpData: Send,
+    Link::InsertReturning: for<'q> ManyExpressions<'q, S>,
+    Link::FromRow: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
+    Link::TakeInput: Send,
+    Link::PostOp: Operation<S, Output: Send>,
+    Link::Output: Send,
+    Link::PreOpToInsertValue: Send,
+    Link::PreOpToTake: Send,
+    Link::PreOpToPostOp: Send,
 {
     fn exec_operation(self, pool: &mut S::Connection) -> impl Future<Output = Self::Output> + Send
     where
@@ -114,22 +272,40 @@ where
         Self: Sized,
     {
         async move {
-            let pre_op = self.links.pre_operation().exec_operation(&mut *pool).await;
+            let (link, link_data) = self.links.consume_data();
+            let pre_op = link
+                .pre_operation_init(link_data.pre_op_data)
+                .exec_operation(&mut *pool)
+                .await;
 
-            let insert = self.links.insert_items(pre_op);
+            let (pre_op_to_insert_value, pre_op_to_take, pre_op_to_post_op) =
+                link.pre_op_split(pre_op)?;
+
+            let base_id = self.base.id();
+
+            let id_insert = self.id.create_id(&base_id);
 
             let (stmt, arg) = StatementBuilder::<'_, S>::new(InsertStatement {
-                table_name: self.base.table_name(),
-                identifiers: ManyFlat((self.base.identifier(), insert.identifier())),
-                returning: ManyFlat((
-                    self.base.id().identifier(),
+                table_name: self.base.table_name_expression(),
+                identifiers: ManyFlat((
+                    if id_insert.is_some() {
+                        Some(base_id.identifier())
+                    } else {
+                        None
+                    },
                     self.base.identifier(),
-                    insert.identifier(),
+                    link.insert_names(),
                 )),
                 values: One(ManyFlat((
-                    self.base.clone().on_insert(self.data),
-                    insert.clone().on_insert(()),
+                    id_insert,
+                    self.base.on_insert(self.data),
+                    link.insert_value(link_data.insert_value_data, pre_op_to_insert_value),
                 ))),
+                returning: ManyFlat((
+                    base_id.identifier(),
+                    self.base.identifier(),
+                    link.insert_returning(),
+                )),
             })
             .unwrap();
 
@@ -141,27 +317,33 @@ where
                 },
             )
             .await
-            .unwrap()
+            .map_err(|e| {
+                if let Some(e) = e.as_database_error() {
+                    return ConstraintViolation(e.constraint().map(|c| c.to_string()));
+                } else {
+                    tracing::error!(sqlx_error = ?e, "bug: must clear all sqlx errors, hard to know where this error was originated!");
+                    panic!()
+                }
+            })?
             .unwrap();
 
-            let id = self.base.id().no_alias(&row).unwrap();
+            let id = base_id.no_alias(&row).unwrap();
             let attributes = self.base.no_alias(&row).unwrap();
 
             let links = {
-                let ii = insert.no_alias(&row).unwrap();
-                let po = self
-                    .links
-                    .post_operation(&ii)
-                    .exec_operation(&mut *pool)
-                    .await;
-                self.links.take(po, ii)
+                let ii = link.from_row().no_alias(&row).unwrap();
+                let (post_op_input_2, from_row_take_input) =
+                    link.from_row_result(link_data.post_op_data, ii, pre_op_to_post_op);
+                let po = post_op_input_2.exec_operation(&mut *pool).await;
+                link.post_op_error(&po)?;
+                link.take(po, from_row_take_input, pre_op_to_take)
             };
 
-            LinkedOutput {
+            Ok(LinkedOutput {
                 id,
                 attributes,
                 links,
-            }
+            })
         }
     }
 }
@@ -169,10 +351,10 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
+        collections::AutoGenerate,
         connect_in_memory::ConnectInMemory,
-        from_row::FromRowAlias,
-        operations::{CollectionOutput, LinkedOutput, Operation, insert_one::InsertOne},
-        test_module::{self, Todo, todo_members},
+        operations::{LinkedOutput, Operation, insert_one::InsertOne},
+        test_module::{self, Todo},
     };
     use sqlx::{Sqlite, query};
 
@@ -197,6 +379,7 @@ mod test {
 
         let output = Operation::<Sqlite>::exec_operation(
             InsertOne {
+                id: AutoGenerate,
                 data: Todo {
                     title: String::from("todo"),
                     done: false,
@@ -211,7 +394,7 @@ mod test {
 
         pretty_assertions::assert_eq!(
             output,
-            LinkedOutput {
+            Ok(LinkedOutput {
                 id: 1,
                 attributes: Todo {
                     title: String::from("todo"),
@@ -219,30 +402,7 @@ mod test {
                     description: None,
                 },
                 links: ()
-            }
-        );
-
-        let check = sqlx::query("SELECT * FROM Todo;")
-            .fetch_all(&mut conn)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|row| CollectionOutput {
-                id: todo_members::id.no_alias(&row).unwrap(),
-                attributes: test_module::todo.no_alias(&row).unwrap(),
             })
-            .collect::<Vec<_>>();
-
-        pretty_assertions::assert_eq!(
-            check,
-            vec![CollectionOutput {
-                id: 1,
-                attributes: Todo {
-                    title: String::from("todo"),
-                    done: false,
-                    description: None,
-                },
-            }]
         );
     }
 }

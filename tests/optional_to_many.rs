@@ -2,12 +2,12 @@ use sqlx::{Sqlite, query};
 
 use claw_ql::{
     connect_in_memory::ConnectInMemory,
-    extentions::common_expressions::OnInsert,
+    extentions::common_expressions::V0OnInsert,
     links::{Link, set_id_mod::SetId},
     operations::{
         CollectionOutput, LinkedOutput, Operation,
         fetch_many::{FetchMany, ManyOutput},
-        insert_one::InsertOne,
+        v1_insert_one::InsertOne,
     },
     test_module::{self, Category, Todo, category, todo_members},
 };

@@ -38,6 +38,14 @@ pub trait CollectionId {
     type IdData;
 }
 
+pub struct AutoGenerate;
+pub struct Manual<T>(pub T);
+
+pub trait CreateIdFor<Id: CollectionId> {
+    type Result;
+    fn create_id(self, id_spec: &Id) -> Option<Self::Result>;
+}
+
 pub trait SingleColumnId: CollectionId + AsRef<str> {}
 
 #[derive(Clone, Debug)]
@@ -46,14 +54,17 @@ pub struct SingleIncremintalInt<T>(pub T);
 pub(crate) mod impl_id {
 
     use sqlx::Sqlite;
+    use tracing::warn;
 
     use crate::{
-        collections::{CollectionId, SingleColumnId, SingleIncremintalInt},
+        collections::{
+            AutoGenerate, CollectionId, CreateIdFor, Manual, SingleColumnId, SingleIncremintalInt,
+        },
         expressions::single_col_expressions::{AliasedCol, ScopedCol, UpdatingCol},
         extentions::common_expressions::{
-            Aliased, Identifier, MigrateExpression, OnUpdate, Scoped,
+            Aliased, Identifier, MigrateExpression, Scoped, V0OnUpdate,
         },
-        query_builder::{Expression, OpExpression, SanitizeMany, StatementBuilder},
+        query_builder::{Bind, Expression, OpExpression, SanitizeMany, StatementBuilder},
         update_mod::Update,
     };
 
@@ -65,6 +76,22 @@ pub(crate) mod impl_id {
 
     impl<T> CollectionId for SingleIncremintalInt<T> {
         type IdData = i64;
+    }
+
+    impl<T> CreateIdFor<SingleIncremintalInt<T>> for AutoGenerate {
+        type Result = ();
+        fn create_id(self, _: &SingleIncremintalInt<T>) -> Option<()> {
+            None
+        }
+    }
+
+    impl<T> CreateIdFor<SingleIncremintalInt<T>> for Manual<i64> {
+        type Result = Bind<i64>;
+        fn create_id(self, _: &SingleIncremintalInt<T>) -> Option<Self::Result> {
+            warn!("todo: bind can be used in set sytax (id = $0)");
+
+            Some(Bind(self.0))
+        }
     }
 
     impl<T> SingleColumnId for SingleIncremintalInt<T> {}
@@ -140,7 +167,7 @@ pub(crate) mod impl_id {
         }
     }
 
-    impl OnUpdate for SingleIncremintalInt<&'static str> {
+    impl V0OnUpdate for SingleIncremintalInt<&'static str> {
         type UpdateInput = Update<i64>;
         type UpdateExpression = UpdatingCol<&'static str, i64>;
         fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression {
@@ -151,7 +178,7 @@ pub(crate) mod impl_id {
         }
     }
 
-    impl OnUpdate for SingleIncremintalInt<String> {
+    impl V0OnUpdate for SingleIncremintalInt<String> {
         type UpdateInput = Update<i64>;
         type UpdateExpression = UpdatingCol<String, i64>;
         fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression {
