@@ -4,10 +4,10 @@ use crate::{
     collections::{Collection, CollectionId},
     database_extention::DatabaseExt,
     execute::Executable,
-    extentions::common_expressions::{Identifier, V0OnUpdate, TableNameExpression},
+    extentions::common_expressions::{Identifier, TableNameExpression, V0OnUpdate},
     fix_executor::ExecutorTrait,
-    from_row::FromRowAlias,
-    operations::{LinkedOutput, Operation, OperationOutput},
+    from_row::{FromRowAlias, FromRowData},
+    operations::{LinkedOutput, Operation, OperationOutput, insert_one::ConstraintViolation},
     query_builder::{
         Expression, IsOpExpression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat,
     },
@@ -21,24 +21,157 @@ pub struct Update<Base, Partial, Wheres, Links> {
     pub links: Links,
 }
 
+pub trait UpdateLinkSplit {
+    type Link: UpdateLink;
+    fn init_split(
+        self,
+    ) -> (
+        Self::Link,
+        UpdateLinkData<
+            <Self::Link as UpdateLink>::InitSplitForWheres,
+            <Self::Link as UpdateLink>::InitSplitForUpdateValues,
+            <Self::Link as UpdateLink>::PreOp,
+            <Self::Link as UpdateLink>::InitSplitPostOp,
+        >,
+    );
+}
+
+pub struct UpdateLinkData<Wheres, UpdateValues, PreOp, PostOp> {
+    pub wheres: Wheres,
+    pub update_values: UpdateValues,
+    pub pre_op: PreOp,
+    pub post_op: PostOp,
+}
+
 pub trait UpdateLink {
+    type PreOp: OperationOutput;
+
+    type PreOpWheres;
+    type PreOpValues;
+    type PreOpSplitPostOp;
+    fn split_pre_op(
+        &self,
+        pre_op: <Self::PreOp as OperationOutput>::Output,
+    ) -> Result<(Self::PreOpWheres, Self::PreOpValues, Self::PreOpSplitPostOp), ConstraintViolation>;
+
+    type InitSplitForWheres;
+
+    type UpdateWhere;
+    fn wheres(&self, wheres: Self::InitSplitForWheres) -> Self::UpdateWhere;
+
+    type UpdateNames;
+    fn update_names(&self) -> Self::UpdateNames;
+
+    type InitSplitForUpdateValues;
+    type UpdateValues;
+    fn update_values(&self, values: Self::InitSplitForUpdateValues) -> Self::UpdateValues;
+
+    type FromRow: FromRowData;
+    fn from_row(&self) -> Self::FromRow;
+
+    type PostOp: OperationOutput;
+    type InitSplitPostOp;
+    fn post_op(
+        &self,
+        from_init_split: Self::InitSplitPostOp,
+        from_pre_op: Self::PreOpSplitPostOp,
+    ) -> Self::PostOp;
+
+    fn from_row_result(
+        &self,
+        row_data: &<Self::FromRow as FromRowData>::RData,
+        post_op: &mut Self::PostOp,
+    );
+
     type Output;
+    type PostOpOutput;
+    fn post_op_output(&self,
+        poo: <Self::PostOp as OperationOutput>::Output,
+    ) -> Result<Self::PostOpOutput, ConstraintViolation> ;
+
+    fn take(
+        &self,
+        from_row: <Self::FromRow as FromRowData>::RData,
+        post_op: &mut Self::PostOpOutput,
+    ) -> Self::Output;
+}
+
+impl UpdateLinkSplit for () {
+    type Link = ();
+    fn init_split(self) -> (Self::Link, UpdateLinkData<(), (), (), ()>) {
+        (
+            (),
+            UpdateLinkData {
+                wheres: (),
+                update_values: (),
+                pre_op: (),
+                post_op: (),
+            },
+        )
+    }
 }
 
 impl UpdateLink for () {
+    type InitSplitForWheres = ();
+    type UpdateWhere = ();
+    fn wheres(&self, _: Self::InitSplitForWheres) -> Self::UpdateWhere {}
+
+    type PreOp = ();
+    type PreOpWheres = ();
+    type PreOpValues = ();
+    type PreOpSplitPostOp = ();
+    fn split_pre_op(
+        &self,
+        _: (),
+    ) -> Result<(Self::PreOpWheres, Self::PreOpValues, Self::PreOpSplitPostOp), ConstraintViolation> {
+        Ok(((), (), ()))
+    }
+
+    type UpdateNames = ();
+    fn update_names(&self) -> Self::UpdateNames {}
+
+    type InitSplitForUpdateValues = ();
+    type UpdateValues = ();
+    fn update_values(&self, _: Self::InitSplitForUpdateValues) -> Self::UpdateValues {}
+
+    type FromRow = ();
+    fn from_row(&self) -> Self::FromRow {}
+
+    type PostOp = ();
+    type InitSplitPostOp = ();
+    fn post_op(&self, _: Self::InitSplitPostOp, _: Self::PreOpSplitPostOp) -> Self::PostOp {}
+    fn from_row_result(&self, _: &<Self::FromRow as FromRowData>::RData, _: &mut Self::PostOp) {}
+
+    type PostOpOutput = ();
+    fn post_op_output(&self,
+        _: <Self::PostOp as OperationOutput>::Output,
+    ) -> Result<Self::PostOpOutput, ConstraintViolation> {
+        Ok(())
+    }
+
     type Output = ();
+    fn take(
+        &self,
+        _: <Self::FromRow as FromRowData>::RData,
+        _: &mut <Self::PostOp as OperationOutput>::Output,
+    ) -> Self::Output {
+    }
 }
 
-impl<Handler, Partial, Wheres, Links> OperationOutput for Update<Handler, Partial, Wheres, Links>
+impl<Handler, Partial, Wheres, PL, Links> OperationOutput for Update<Handler, Partial, Wheres, PL>
 where
     Handler: Collection,
+    PL: UpdateLinkSplit<Link = Links>,
     Links: UpdateLink,
 {
-    type Output =
-        Vec<LinkedOutput<<Handler::Id as CollectionId>::IdData, Handler::Data, Links::Output>>;
+    type Output = Result<
+        Vec<LinkedOutput<<Handler::Id as CollectionId>::IdData, Handler::Data, Links::Output>>,
+        ConstraintViolation,
+    >;
 }
 
-impl<S, Base, Partial, Wheres, Links> Operation<S> for Update<Base, Partial, Wheres, Links>
+impl<S, Base, Partial, Wheres, PreSplitLink, Links> Operation<S>
+    for Update<Base, Partial, Wheres, PreSplitLink>
 where
     S: DatabaseExt,
     S: ExecutorTrait,
@@ -47,7 +180,8 @@ where
     Base: Identifier<Identifier: Send + for<'q> ManyExpressions<'q, S>>,
     Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
     Base: Collection<Data: Send>,
-    Base: V0OnUpdate<UpdateInput = Partial, UpdateExpression: Send + for<'q> ManyExpressions<'q, S>>,
+    Base:
+        V0OnUpdate<UpdateInput = Partial, UpdateExpression: Send + for<'q> ManyExpressions<'q, S>>,
     Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::Data>,
     Base::Id: Send + CollectionId<IdData: Send>,
     Base::Id: Identifier<Identifier: Send + for<'q> ManyExpressions<'q, S>>,
@@ -55,10 +189,20 @@ where
     Partial: Send,
     Wheres: Send,
     Wheres: for<'q> ManyExpressions<'q, S>,
-    Links: Send,
-    Links: UpdateLink<Output: Send>,
-    // continue here
-    Links: UpdateLink<Output = ()>,
+    PreSplitLink: Send + UpdateLinkSplit<Link = Links>,
+    Links: Send + UpdateLink,
+    Links::InitSplitForWheres: Send,
+    Links::UpdateWhere: for<'q> ManyExpressions<'q, S>,
+    Links::InitSplitForUpdateValues: Send,
+    Links::UpdateValues: Send + for<'q> ManyExpressions<'q, S>,
+    Links::UpdateNames: Send + for<'q> ManyExpressions<'q, S>,
+    Links::FromRow: Send + for<'r> FromRowAlias<'r, S::Row, RData: Send>,
+    Links::InitSplitPostOp: Send,
+    Links::PreOp: Send + Operation<S>,
+    Links::PreOpWheres: Send + for<'q> ManyExpressions<'q, S>,
+    Links::PreOpValues: Send + for<'q> ManyExpressions<'q, S>,
+    Links::PostOp: Send + Operation<S>,
+    Links::Output: Send,
 {
     fn exec_operation(self, pool: &mut <S>::Connection) -> impl Future<Output = Self::Output> + Send
     where
@@ -66,9 +210,19 @@ where
         Self: Sized,
     {
         async move {
+            let (self_link, self_link_data) = self.links.init_split();
             let id = self.base.id();
 
-            let values = ManyFlat((self.base.clone().on_update(self.partial),));
+            let pre_op = self_link_data.pre_op.exec_operation(&mut *pool).await;
+
+            let (pre_op_wheres, pre_op_values, pre_op_split_for_post_op) =
+                self_link.split_pre_op(pre_op)?;
+
+            let values = ManyFlat((
+                self.base.clone().on_update(self.partial),
+                self_link.update_names(),
+                pre_op_values,
+            ));
 
             if values.is_op().not() {
                 panic!(
@@ -78,11 +232,23 @@ where
 
             let (stmt, args) = StatementBuilder::<'_, S>::new(UpdateStatement {
                 table_name: self.base.table_name_expression(),
-                wheres: ManyFlat((self.wheres,)),
-                returning: ManyFlat((id.identifier(), self.base.identifier())),
+                wheres: ManyFlat((
+                    self.wheres,
+                    self_link.wheres(self_link_data.wheres),
+                    pre_op_wheres,
+                )),
+                returning: ManyFlat((
+                    id.identifier(),
+                    self.base.identifier(),
+                    self_link.update_names(),
+                )),
                 values,
             })
             .unwrap();
+
+            let link_from_row = self_link.from_row();
+            let mut from_row_data = vec![];
+            let mut post_op = self_link.post_op(self_link_data.post_op, pre_op_split_for_post_op);
 
             let res = S::fetch_all(
                 &mut *pool,
@@ -92,19 +258,47 @@ where
                 },
             )
             .await
-            .unwrap()
+            .map_err(|e| {
+                if let Some(db) = e.as_database_error() {
+                    if db.is_check_violation() || db.is_unique_violation() || db.is_foreign_key_violation() {
+                        return ConstraintViolation(db.constraint().map(|c| c.to_string()));
+                    }
+                }
+            
+                tracing::error!(sqlx_error = ?e, "bug: must clear all sqlx errors, hard to know where this error was originated!");
+                panic!()
+            })?
             .into_iter()
             .map(|e| {
                 let id = self.base.id().no_alias(&e).unwrap();
                 let attributes = self.base.no_alias(&e).unwrap();
+                let link_r = link_from_row.no_alias(&e).unwrap();
+                from_row_data.push(link_r);
+
                 LinkedOutput {
                     id,
                     attributes,
                     links: (),
                 }
+            })
+            .collect::<Vec<_>>();
+
+            from_row_data.iter().for_each(|e| {
+                self_link.from_row_result(e, &mut post_op);
             });
 
-            res.collect()
+            let  poo = post_op.exec_operation(pool).await;
+            let mut poo = self_link.post_op_output(poo)?;
+
+            Ok(res
+                .into_iter()
+                .zip(from_row_data.into_iter())
+                .map(|(e, f)| LinkedOutput {
+                    id: e.id,
+                    attributes: e.attributes,
+                    links: self_link.take(f, &mut poo),
+                })
+                .collect())
         }
     }
 }
@@ -149,7 +343,8 @@ mod test {
             },
             &mut pool,
         )
-        .await;
+        .await
+        .unwrap();
 
         pretty_assertions::assert_eq!(
             output,

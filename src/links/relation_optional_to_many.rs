@@ -705,8 +705,6 @@ mod impl_set_new_for_insert {
             }
         }
 
-        type PreOpError = ConstraintViolation;
-
         fn pre_op_split(
             &self,
             pre_op_output: <Self::PreOp as OperationOutput>::Output,
@@ -716,19 +714,10 @@ mod impl_set_new_for_insert {
                 Self::PreOpToTake,
                 Self::PreOpToPostOp,
             ),
-            Self::PreOpError,
+            ConstraintViolation,
         > {
             let unwrapped = pre_op_output?;
             Ok((unwrapped.id.clone(), unwrapped.into(), ()))
-        }
-
-        type PostOpError = ();
-
-        fn post_op_error(
-            &self,
-            _: &<Self::PostOp as OperationOutput>::Output,
-        ) -> Result<(), Self::PostOpError> {
-            Ok(())
         }
 
         type PreOpToInsertValue = <To::Id as CollectionId>::IdData;
@@ -775,6 +764,14 @@ mod impl_set_new_for_insert {
         }
 
         type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::Data>;
+
+        type PostOpOutput = ();
+        fn post_op_output(
+            &self,
+            _: <Self::PostOp as OperationOutput>::Output,
+        ) -> Result<Self::PostOpOutput, ConstraintViolation> {
+            Ok(())
+        }
 
         fn take(
             self,
@@ -879,7 +876,9 @@ mod impl_set_id_for_insert {
         operations::{
             CollectionOutput, LinkedOutput, OperationOutput,
             fetch_one::FetchOne,
-            insert_one::{InsertLinkConsumeData, InsertLinkData, InsertOneLink},
+            insert_one::{
+                ConstraintViolation, InsertLinkConsumeData, InsertLinkData, InsertOneLink,
+            },
         },
         query_builder::Bind,
     };
@@ -945,7 +944,6 @@ mod impl_set_id_for_insert {
         To::Id: Identifier,
     {
         type PreOp = ();
-        type PreOpError = ();
 
         type PreOpData = ();
 
@@ -960,7 +958,7 @@ mod impl_set_id_for_insert {
                 Self::PreOpToTake,
                 Self::PreOpToPostOp,
             ),
-            Self::PreOpError,
+            ConstraintViolation,
         > {
             Ok(((), (), ()))
         }
@@ -1009,12 +1007,12 @@ mod impl_set_id_for_insert {
             ColumnEqual<<To::Id as Identifier>::Identifier, <To::Id as CollectionId>::IdData>,
         >;
 
-        type PostOpError = ();
-        fn post_op_error(
+        type PostOpOutput = LinkedOutput<<To::Id as CollectionId>::IdData, To::Data, ()>;
+        fn post_op_output(
             &self,
-            _: &<Self::PostOp as OperationOutput>::Output,
-        ) -> Result<(), Self::PostOpError> {
-            Ok(())
+            poo: <Self::PostOp as OperationOutput>::Output,
+        ) -> Result<Self::PostOpOutput, ConstraintViolation> {
+            Ok(poo.expect("sql query should have failed by now"))
         }
 
         type PostOpData = ();
@@ -1042,11 +1040,11 @@ mod impl_set_id_for_insert {
 
         fn take(
             self,
-            pre_op: Option<LinkedOutput<<To::Id as CollectionId>::IdData, To::Data, ()>>,
+            pre_op: LinkedOutput<<To::Id as CollectionId>::IdData, To::Data, ()>,
             _: (),
             _: Self::PreOpToTake,
         ) -> Self::Output {
-            pre_op.expect("sql query should have failed by now").into()
+            pre_op.into()
         }
     }
 

@@ -33,7 +33,6 @@ pub struct InsertLinkData<PreOpData, InsertValueData, PostOpData> {
 pub trait InsertOneLink {
     type PreOp: OperationOutput;
     type PreOpData;
-    type PreOpError;
     fn pre_operation_init(&self, input: Self::PreOpData) -> Self::PreOp;
 
     fn pre_op_split(
@@ -45,7 +44,7 @@ pub trait InsertOneLink {
             Self::PreOpToTake,
             Self::PreOpToPostOp,
         ),
-        Self::PreOpError,
+        ConstraintViolation,
     >;
     type PreOpToInsertValue;
     type PreOpToTake;
@@ -71,7 +70,6 @@ pub trait InsertOneLink {
     type TakeInput;
     type PostOp: OperationOutput;
     type PostOpData;
-    type PostOpError;
     fn from_row_result(
         &self,
         from_data: Self::PostOpData,
@@ -79,15 +77,15 @@ pub trait InsertOneLink {
         pre_op_to_post_op: Self::PreOpToPostOp,
     ) -> (Self::PostOp, Self::TakeInput);
 
-    fn post_op_error(
-        &self,
-        error: &<Self::PostOp as OperationOutput>::Output,
-    ) -> Result<(), Self::PostOpError>;
+    type PostOpOutput;
+    fn post_op_output(&self,
+        poo: <Self::PostOp as OperationOutput>::Output,
+    ) -> Result<Self::PostOpOutput, ConstraintViolation> ;
 
     type Output;
     fn take(
         self,
-        pre_op: <Self::PostOp as OperationOutput>::Output,
+        post_op_output: Self::PostOpOutput,
         insert_items: Self::TakeInput,
         pre_op_to_post_op: Self::PreOpToTake,
     ) -> Self::Output;
@@ -120,7 +118,6 @@ impl InsertOneLink for () {
     type PreOp = ();
 
     type PreOpData = ();
-    type PreOpError = ();
 
     fn pre_operation_init(&self, _: Self::PreOpData) -> Self::PreOp {}
 
@@ -133,7 +130,7 @@ impl InsertOneLink for () {
             Self::PreOpToTake,
             Self::PreOpToPostOp,
         ),
-        Self::PreOpError,
+        ConstraintViolation,
     > {
         Ok(((), (), ()))
     }
@@ -180,12 +177,10 @@ impl InsertOneLink for () {
         ((), ())
     }
 
-    type PostOpError = ();
-
-    fn post_op_error(
-        &self,
-        _: &<Self::PostOp as OperationOutput>::Output,
-    ) -> Result<(), Self::PostOpError> {
+    type PostOpOutput = ();
+    fn post_op_output(&self
+    ,_: <Self::PostOp as OperationOutput>::Output,
+    ) -> Result<(Self::PostOpOutput), ConstraintViolation> {
         Ok(())
     }
 
@@ -193,7 +188,7 @@ impl InsertOneLink for () {
 
     fn take(
         self,
-        _: <Self::PostOp as OperationOutput>::Output,
+        _: Self::PostOpOutput,
         _: Self::TakeInput,
         _: Self::PreOpToTake,
     ) -> Self::Output {
@@ -239,10 +234,6 @@ where
     LinkPreSplit: Send + InsertLinkConsumeData<Link = Link>,
     Link: Send,
     Link: InsertOneLink,
-    ConstraintViolation: From<Link::PreOpError>,
-    ConstraintViolation: From<Link::PostOpError>,
-    Link::PreOpError: Send,
-    Link::PostOpError: Send,
     Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
     Base: Collection<Data: Send, Id: Send + CollectionId<IdData: Send>>,
     Base: Send,
@@ -319,11 +310,13 @@ where
             .await
             .map_err(|e| {
                 if let Some(e) = e.as_database_error() {
-                    return ConstraintViolation(e.constraint().map(|c| c.to_string()));
-                } else {
+                    if e.is_check_violation() || e.is_unique_violation() || e.is_foreign_key_violation() {
+                        return ConstraintViolation(e.constraint().map(|c| c.to_string()));
+                    }
+                    
+                } 
                     tracing::error!(sqlx_error = ?e, "bug: must clear all sqlx errors, hard to know where this error was originated!");
                     panic!()
-                }
             })?
             .unwrap();
 
@@ -335,7 +328,7 @@ where
                 let (post_op_input_2, from_row_take_input) =
                     link.from_row_result(link_data.post_op_data, ii, pre_op_to_post_op);
                 let po = post_op_input_2.exec_operation(&mut *pool).await;
-                link.post_op_error(&po)?;
+                let po = link.post_op_output(po)?;
                 link.take(po, from_row_take_input, pre_op_to_take)
             };
 
