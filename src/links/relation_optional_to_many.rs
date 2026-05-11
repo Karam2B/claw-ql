@@ -1124,6 +1124,7 @@ mod impl_set_id_for_insert {
         }
     }
 }
+
 mod impl_set_id_for_insert_v0 {
     use crate::{
         collections::{Collection, CollectionId},
@@ -1265,6 +1266,354 @@ mod impl_set_id_for_insert_v0 {
             Self::InsertItems: crate::from_row::FromRowData,
         {
             self.id
+        }
+    }
+}
+
+mod impl_set_id_for_update {
+    use std::marker::PhantomData;
+
+    use crate::{
+        collections::{Collection, CollectionId},
+        expressions::single_col_expressions::UpdatingCol,
+        links::{
+            relation_optional_to_many::{
+                OptionalToMany, find_place_for_this::OneColumn, fk_name::AsIdentifier,
+            },
+            set_id_mod::SetId,
+        },
+        operations::{
+            insert_one::ConstraintViolation,
+            update::{UpdateLink, UpdateLinkData, UpdateLinkSplit},
+        },
+        query_builder::Bind,
+        update_mod,
+    };
+
+    impl<Key, From, To> UpdateLinkSplit
+        for SetId<
+            OptionalToMany<Key, From, To>,
+            update_mod::Update<<To::Id as CollectionId>::IdData>,
+        >
+    where
+        To: Collection,
+        OptionalToMany<Key, From, To>: Clone,
+    {
+        type Link =
+            SetId<OptionalToMany<Key, From, To>, PhantomData<<To::Id as CollectionId>::IdData>>;
+
+        fn init_split(
+            self,
+        ) -> (
+            Self::Link,
+            UpdateLinkData<
+                <Self::Link as UpdateLink>::InitSplitForWheres,
+                <Self::Link as UpdateLink>::InitSplitForUpdateValues,
+                <Self::Link as UpdateLink>::InitSplitForPreOp,
+                <Self::Link as UpdateLink>::InitSplitPostOp,
+            >,
+        ) {
+            (
+                SetId {
+                    relation: self.relation,
+                    id: PhantomData,
+                },
+                UpdateLinkData {
+                    wheres: (),
+                    update_values: self.id,
+                    pre_op: (),
+                    post_op: (),
+                },
+            )
+        }
+    }
+
+    impl<Key, From, To> UpdateLink
+        for SetId<OptionalToMany<Key, From, To>, PhantomData<<To::Id as CollectionId>::IdData>>
+    where
+        To: Collection,
+        OptionalToMany<Key, From, To>: Clone,
+    {
+        type InitSplitForPreOp = ();
+
+        type PreOpSplitWheres = ();
+
+        type PreOpSplitValues = ();
+
+        type PreOpSplitPostOp = ();
+        type PreOpSplitTake = ();
+        type PreOp = ();
+        fn pre_op(&self, _: Self::InitSplitForPreOp) -> Self::PreOp {}
+
+        fn split_pre_op(
+            &self,
+            _: <Self::InitSplitForPreOp as crate::operations::OperationOutput>::Output,
+        ) -> Result<
+            (
+                Self::PreOpSplitWheres,
+                Self::PreOpSplitValues,
+                Self::PreOpSplitPostOp,
+                Self::PreOpSplitTake,
+            ),
+            ConstraintViolation,
+        > {
+            Ok(((), (), (), ()))
+        }
+
+        type InitSplitForWheres = ();
+
+        type UpdateWhere = ();
+
+        fn wheres(&self, _: Self::InitSplitForWheres) -> Self::UpdateWhere {}
+
+        type UpdateNames = AsIdentifier<OptionalToMany<Key, From, To>>;
+
+        fn update_names(&self) -> Self::UpdateNames {
+            AsIdentifier {
+                relation: self.relation.clone(),
+            }
+        }
+
+        type InitSplitForUpdateValues = update_mod::Update<<To::Id as CollectionId>::IdData>;
+
+        type UpdateValues = UpdatingCol<
+            AsIdentifier<OptionalToMany<Key, From, To>>,
+            <To::Id as CollectionId>::IdData,
+        >;
+
+        fn update_values(
+            &self,
+            values: Self::InitSplitForUpdateValues,
+            _: Self::PreOpSplitValues,
+        ) -> Self::UpdateValues {
+            UpdatingCol {
+                col: AsIdentifier {
+                    relation: self.relation.clone(),
+                },
+                set: values,
+            }
+        }
+
+        type FromRow = OneColumn<
+            AsIdentifier<OptionalToMany<Key, From, To>>,
+            <To::Id as CollectionId>::IdData,
+        >;
+
+        fn from_row(&self) -> Self::FromRow {
+            OneColumn {
+                as_name: AsIdentifier {
+                    relation: self.relation.clone(),
+                },
+                as_type: PhantomData,
+            }
+        }
+
+        type PostOp = ();
+
+        type InitSplitPostOp = ();
+
+        fn post_op(&self, _: Self::InitSplitPostOp, _: Self::PreOpSplitPostOp) -> Self::PostOp {}
+
+        fn from_row_result(
+            &self,
+            _: &<Self::FromRow as crate::from_row::FromRowData>::RData,
+            _: &mut Self::PostOp,
+        ) {
+        }
+
+        type Output = <To::Id as CollectionId>::IdData;
+
+        type PostOpOutput = ();
+
+        fn post_op_output(
+            &self,
+            _: <Self::PostOp as crate::operations::OperationOutput>::Output,
+        ) -> Result<Self::PostOpOutput, crate::operations::insert_one::ConstraintViolation>
+        {
+            Ok(())
+        }
+
+        fn take(
+            &self,
+            from_row: <To::Id as CollectionId>::IdData,
+            _: &mut Self::PostOpOutput,
+            _: &mut Self::PreOpSplitTake,
+        ) -> Self::Output {
+            from_row
+        }
+    }
+}
+
+mod impl_set_new_for_update {
+    use std::marker::PhantomData;
+
+    use crate::{
+        collections::{AutoGenerate, Collection, CollectionId},
+        expressions::single_col_expressions::UpdatingCol,
+        links::{
+            relation_optional_to_many::{
+                OptionalToMany, find_place_for_this::OneColumn, fk_name::AsIdentifier,
+            },
+            set_new_mod::SetNew,
+        },
+        operations::{
+            CollectionOutput, LinkedOutput,
+            insert_one::{ConstraintViolation, InsertOne},
+            update::{UpdateLink, UpdateLinkData, UpdateLinkSplit},
+        },
+        update_mod,
+    };
+
+    impl<Key, From, To> UpdateLinkSplit for SetNew<OptionalToMany<Key, From, To>, To::Data>
+    where
+        To: Clone + Collection,
+        OptionalToMany<Key, From, To>: Clone,
+        To::Data: Clone,
+    {
+        type Link = SetNew<OptionalToMany<Key, From, To>, PhantomData<To::Data>>;
+        fn init_split(self) -> (Self::Link, UpdateLinkData<(), (), To::Data, ()>) {
+            (
+                SetNew {
+                    relation: self.relation,
+                    data: PhantomData,
+                },
+                UpdateLinkData {
+                    wheres: (),
+                    update_values: (),
+                    pre_op: self.data,
+                    post_op: (),
+                },
+            )
+        }
+    }
+
+    impl<Key, From, To> UpdateLink for SetNew<OptionalToMany<Key, From, To>, PhantomData<To::Data>>
+    where
+        To: Clone + Collection,
+        To::Data: Clone,
+        OptionalToMany<Key, From, To>: Clone,
+    {
+        type InitSplitForPreOp = To::Data;
+        type PreOpSplitWheres = ();
+        type PreOpSplitValues = <To::Id as CollectionId>::IdData;
+        type PreOpSplitPostOp = ();
+        type PreOpSplitTake = To::Data;
+
+        type PreOp = InsertOne<AutoGenerate, To, To::Data, ()>;
+
+        fn pre_op(&self, init_split_for_pre_op: Self::InitSplitForPreOp) -> Self::PreOp {
+            InsertOne {
+                base: self.relation.to.clone(),
+                data: init_split_for_pre_op,
+                links: (),
+                id: AutoGenerate,
+            }
+        }
+
+        fn split_pre_op(
+            &self,
+            pre_op: Result<
+                LinkedOutput<<To::Id as CollectionId>::IdData, To::Data, ()>,
+                ConstraintViolation,
+            >,
+        ) -> Result<
+            (
+                Self::PreOpSplitWheres,
+                Self::PreOpSplitValues,
+                Self::PreOpSplitPostOp,
+                Self::PreOpSplitTake,
+            ),
+            ConstraintViolation,
+        > {
+            let out = pre_op?;
+            Ok(((), out.id, (), out.attributes))
+        }
+
+        type InitSplitForWheres = ();
+
+        type UpdateWhere = ();
+
+        fn wheres(&self, _: Self::InitSplitForWheres) -> Self::UpdateWhere {}
+
+        type UpdateNames = AsIdentifier<OptionalToMany<Key, From, To>>;
+
+        fn update_names(&self) -> Self::UpdateNames {
+            AsIdentifier {
+                relation: self.relation.clone(),
+            }
+        }
+
+        type InitSplitForUpdateValues = ();
+
+        type UpdateValues = UpdatingCol<
+            AsIdentifier<OptionalToMany<Key, From, To>>,
+            <To::Id as CollectionId>::IdData,
+        >;
+
+        fn update_values(
+            &self,
+            _: (),
+            pre_op_output: Self::PreOpSplitValues,
+        ) -> Self::UpdateValues {
+            UpdatingCol {
+                col: AsIdentifier {
+                    relation: self.relation.clone(),
+                },
+                set: update_mod::Update::Set(pre_op_output),
+            }
+        }
+
+        type FromRow = OneColumn<
+            AsIdentifier<OptionalToMany<Key, From, To>>,
+            <To::Id as CollectionId>::IdData,
+        >;
+
+        fn from_row(&self) -> Self::FromRow {
+            OneColumn {
+                as_name: AsIdentifier {
+                    relation: self.relation.clone(),
+                },
+                as_type: PhantomData,
+            }
+        }
+
+        type PostOp = ();
+
+        type InitSplitPostOp = ();
+
+        fn post_op(&self, _: Self::InitSplitPostOp, _: Self::PreOpSplitPostOp) -> Self::PostOp {
+            ()
+        }
+
+        fn from_row_result(
+            &self,
+            _: &<Self::FromRow as crate::from_row::FromRowData>::RData,
+            _: &mut Self::PostOp,
+        ) {
+        }
+
+        type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::Data>;
+
+        type PostOpOutput = ();
+
+        fn post_op_output(
+            &self,
+            _: <Self::PostOp as crate::operations::OperationOutput>::Output,
+        ) -> Result<Self::PostOpOutput, crate::operations::insert_one::ConstraintViolation>
+        {
+            Ok(())
+        }
+
+        fn take(
+            &self,
+            from_row: <Self::FromRow as crate::from_row::FromRowData>::RData,
+            _: &mut Self::PostOpOutput,
+            pre_op_split_take: &mut Self::PreOpSplitTake,
+        ) -> Self::Output {
+            CollectionOutput {
+                id: from_row,
+                attributes: pre_op_split_take.clone(),
+            }
         }
     }
 }

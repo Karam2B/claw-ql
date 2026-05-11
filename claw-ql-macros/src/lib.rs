@@ -95,3 +95,5 @@ pub fn async_is_send(attr: TokenStream, input: TokenStream) -> TokenStream {
         Err(err) => err.to_compile_error().into(),
     }
 }
+
+mod data_flow_mod;

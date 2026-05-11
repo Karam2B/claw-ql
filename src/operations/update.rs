@@ -30,7 +30,7 @@ pub trait UpdateLinkSplit {
         UpdateLinkData<
             <Self::Link as UpdateLink>::InitSplitForWheres,
             <Self::Link as UpdateLink>::InitSplitForUpdateValues,
-            <Self::Link as UpdateLink>::PreOp,
+            <Self::Link as UpdateLink>::InitSplitForPreOp,
             <Self::Link as UpdateLink>::InitSplitPostOp,
         >,
     );
@@ -44,15 +44,18 @@ pub struct UpdateLinkData<Wheres, UpdateValues, PreOp, PostOp> {
 }
 
 pub trait UpdateLink {
-    type PreOp: OperationOutput;
+    type InitSplitForPreOp;
 
-    type PreOpWheres;
-    type PreOpValues;
+    type PreOpSplitWheres;
+    type PreOpSplitValues;
     type PreOpSplitPostOp;
+    type PreOpSplitTake;
+    type PreOp: OperationOutput;
+    fn pre_op(&self, init_split_for_pre_op: Self::InitSplitForPreOp) -> Self::PreOp;
     fn split_pre_op(
         &self,
         pre_op: <Self::PreOp as OperationOutput>::Output,
-    ) -> Result<(Self::PreOpWheres, Self::PreOpValues, Self::PreOpSplitPostOp), ConstraintViolation>;
+    ) -> Result<(Self::PreOpSplitWheres, Self::PreOpSplitValues, Self::PreOpSplitPostOp, Self::PreOpSplitTake), ConstraintViolation>;
 
     type InitSplitForWheres;
 
@@ -64,7 +67,9 @@ pub trait UpdateLink {
 
     type InitSplitForUpdateValues;
     type UpdateValues;
-    fn update_values(&self, values: Self::InitSplitForUpdateValues) -> Self::UpdateValues;
+    fn update_values(&self, values: Self::InitSplitForUpdateValues,
+    pre_op_output: Self::PreOpSplitValues,
+    ) -> Self::UpdateValues;
 
     type FromRow: FromRowData;
     fn from_row(&self) -> Self::FromRow;
@@ -93,6 +98,7 @@ pub trait UpdateLink {
         &self,
         from_row: <Self::FromRow as FromRowData>::RData,
         post_op: &mut Self::PostOpOutput,
+        pre_op_split_take: &mut Self::PreOpSplitTake,
     ) -> Self::Output;
 }
 
@@ -114,17 +120,20 @@ impl UpdateLinkSplit for () {
 impl UpdateLink for () {
     type InitSplitForWheres = ();
     type UpdateWhere = ();
+    type PreOp = ();
+    fn pre_op(&self, _: Self::InitSplitForPreOp) -> Self::PreOp {}
     fn wheres(&self, _: Self::InitSplitForWheres) -> Self::UpdateWhere {}
 
-    type PreOp = ();
-    type PreOpWheres = ();
-    type PreOpValues = ();
+    type InitSplitForPreOp = ();
+    type PreOpSplitWheres = ();
+    type PreOpSplitValues = ();
     type PreOpSplitPostOp = ();
+    type PreOpSplitTake = ();
     fn split_pre_op(
         &self,
         _: (),
-    ) -> Result<(Self::PreOpWheres, Self::PreOpValues, Self::PreOpSplitPostOp), ConstraintViolation> {
-        Ok(((), (), ()))
+    ) -> Result<(Self::PreOpSplitWheres, Self::PreOpSplitValues, Self::PreOpSplitPostOp, Self::PreOpSplitTake), ConstraintViolation> {
+        Ok(((), (), (), ()))
     }
 
     type UpdateNames = ();
@@ -132,7 +141,7 @@ impl UpdateLink for () {
 
     type InitSplitForUpdateValues = ();
     type UpdateValues = ();
-    fn update_values(&self, _: Self::InitSplitForUpdateValues) -> Self::UpdateValues {}
+    fn update_values(&self, _: Self::InitSplitForUpdateValues, _: Self::PreOpSplitValues) -> Self::UpdateValues {}
 
     type FromRow = ();
     fn from_row(&self) -> Self::FromRow {}
@@ -154,6 +163,7 @@ impl UpdateLink for () {
         &self,
         _: <Self::FromRow as FromRowData>::RData,
         _: &mut <Self::PostOp as OperationOutput>::Output,
+        _: &mut Self::PreOpSplitTake,
     ) -> Self::Output {
     }
 }
@@ -198,11 +208,13 @@ where
     Links::UpdateNames: Send + for<'q> ManyExpressions<'q, S>,
     Links::FromRow: Send + for<'r> FromRowAlias<'r, S::Row, RData: Send>,
     Links::InitSplitPostOp: Send,
+    Links::InitSplitForPreOp: Send,
     Links::PreOp: Send + Operation<S>,
-    Links::PreOpWheres: Send + for<'q> ManyExpressions<'q, S>,
-    Links::PreOpValues: Send + for<'q> ManyExpressions<'q, S>,
+    Links::PreOpSplitWheres: Send + for<'q> ManyExpressions<'q, S>,
+    Links::PreOpSplitValues: Send + for<'q> ManyExpressions<'q, S>,
     Links::PostOp: Send + Operation<S>,
     Links::Output: Send,
+    Links::PreOpSplitTake: Send,
 {
     fn exec_operation(self, pool: &mut <S>::Connection) -> impl Future<Output = Self::Output> + Send
     where
@@ -213,15 +225,14 @@ where
             let (self_link, self_link_data) = self.links.init_split();
             let id = self.base.id();
 
-            let pre_op = self_link_data.pre_op.exec_operation(&mut *pool).await;
+            let pre_op = self_link.pre_op(self_link_data.pre_op).exec_operation(&mut *pool).await;
 
-            let (pre_op_wheres, pre_op_values, pre_op_split_for_post_op) =
+            let (pre_op_wheres, pre_op_values, pre_op_split_for_post_op, mut pre_op_split_take) =
                 self_link.split_pre_op(pre_op)?;
 
             let values = ManyFlat((
                 self.base.clone().on_update(self.partial),
-                self_link.update_names(),
-                pre_op_values,
+                self_link.update_values(self_link_data.update_values, pre_op_values),
             ));
 
             if values.is_op().not() {
@@ -296,7 +307,7 @@ where
                 .map(|(e, f)| LinkedOutput {
                     id: e.id,
                     attributes: e.attributes,
-                    links: self_link.take(f, &mut poo),
+                    links: self_link.take(f, &mut poo, &mut pre_op_split_take),
                 })
                 .collect())
         }
