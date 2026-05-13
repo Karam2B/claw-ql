@@ -3,7 +3,7 @@ use sqlx::{Sqlite, query};
 use claw_ql::{
     connect_in_memory::ConnectInMemory,
     extentions::common_expressions::V0OnInsert,
-    links::{Link, set_id_mod::SetId},
+    links::{Link, update_links::SetId},
     operations::{
         CollectionOutput, LinkedOutput, Operation,
         fetch_many::{FetchMany, ManyOutput},
@@ -14,6 +14,15 @@ use claw_ql::{
 
 #[tokio::test]
 async fn fetch_many() {
+    let g = tracing::dispatcher::set_global_default(
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_test_writer()
+            .finish()
+            .into(),
+    )
+    .unwrap();
+
     let mut conn = Sqlite::connect_in_memory_2().await;
 
     query(
@@ -97,6 +106,15 @@ async fn fetch_many() {
 
 #[tokio::test]
 async fn insert_ops() {
+    let g = tracing::dispatcher::set_global_default(
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_test_writer()
+            .finish()
+            .into(),
+    )
+    .unwrap();
+
     let mut conn = Sqlite::connect_in_memory_2().await;
 
     query(
@@ -149,6 +167,6 @@ async fn insert_ops() {
             links: 1
         }
     );
-
-    panic!("continue here")
+    drop(g);
+    panic!();
 }

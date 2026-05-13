@@ -127,15 +127,36 @@ pub mod single_col_expressions {
 
     pub struct UpdatingCol<C, T> {
         pub col: C,
-        pub set: Update<T>,
+        pub set: T,
     }
 
-    impl<C, T> IsOpExpression for UpdatingCol<C, T> {
+    impl<C, T> OpExpression for UpdatingCol<C, Option<T>> {}
+    impl<'a, C, T, S> Expression<'a, S> for UpdatingCol<C, Option<T>>
+    where
+        S: DatabaseExt,
+        T: sqlx::Type<S> + sqlx::Encode<'a, S> + 'a,
+        C: Expression<'a, S>,
+    {
+        fn expression(self, ctx: &mut StatementBuilder<'a, S>) {
+            self.col.expression(ctx);
+            ctx.syntax(&" = ");
+            match self.set {
+                Some(value) => {
+                    ctx.bind(value);
+                }
+                None => {
+                    ctx.syntax(&" NULL");
+                }
+            }
+        }
+    }
+
+    impl<C, T> IsOpExpression for UpdatingCol<C, Update<T>> {
         fn is_op(&self) -> bool {
             matches!(self.set, Update::Set(_))
         }
     }
-    impl<'a, C, T, S> PossibleExpression<'a, S> for UpdatingCol<C, T>
+    impl<'a, C, T, S> PossibleExpression<'a, S> for UpdatingCol<C, Update<T>>
     where
         S: DatabaseExt,
         T: sqlx::Type<S> + sqlx::Encode<'a, S> + 'a,

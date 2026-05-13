@@ -211,7 +211,7 @@ where
     Links::InitSplitForPreOp: Send,
     Links::PreOp: Send + Operation<S>,
     Links::PreOpSplitWheres: Send + for<'q> ManyExpressions<'q, S>,
-    Links::PreOpSplitValues: Send + for<'q> ManyExpressions<'q, S>,
+    // Links::PreOpSplitValues: Send + for<'q> ManyExpressions<'q, S>,
     Links::PostOp: Send + Operation<S>,
     Links::Output: Send,
     Links::PreOpSplitTake: Send,

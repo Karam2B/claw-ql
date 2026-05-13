@@ -39,7 +39,7 @@ async fn main() {
 
     use claw_ql::expressions::ColumnEqual;
     use claw_ql::links::relation_optional_to_many::OptionalToMany;
-    use claw_ql::links::set_new_mod::set_new;
+    use claw_ql::links::update_links::set_new;
     use claw_ql::prelude::sql::*;
     use claw_ql::test_module::{Category, Todo, category, todo, todo_members};
 

@@ -638,7 +638,7 @@ mod impl_set_new_for_insert {
         collections::{AutoGenerate, Collection, CollectionId},
         links::{
             relation_optional_to_many::{OptionalToMany, fk_name::AsIdentifier},
-            set_new_mod::SetNew,
+            update_links::SetNew,
         },
         operations::{
             CollectionOutput, OperationOutput,
@@ -790,7 +790,7 @@ mod impl_set_new_for_insert {
         use crate::{
             collections::AutoGenerate,
             connect_in_memory::ConnectInMemory,
-            links::{Link, set_new_mod::SetNew},
+            links::{Link, update_links::SetNew},
             operations::{CollectionOutput, LinkedOutput, Operation, insert_one::InsertOne},
             test_module::{self, Category, Todo, category},
         };
@@ -871,7 +871,7 @@ mod impl_set_id_for_insert {
             relation_optional_to_many::{
                 OptionalToMany, find_place_for_this::OneColumn, fk_name::AsIdentifier,
             },
-            set_id_mod::SetId,
+            update_links::SetId,
         },
         operations::{
             CollectionOutput, LinkedOutput, OperationOutput,
@@ -1055,7 +1055,7 @@ mod impl_set_id_for_insert {
         use crate::{
             collections::AutoGenerate,
             connect_in_memory::ConnectInMemory,
-            links::{Link, set_id_mod::SetId},
+            links::{Link, update_links::SetId},
             operations::{CollectionOutput, LinkedOutput, Operation, insert_one::InsertOne},
             test_module::{self, Category, Todo, category},
         };
@@ -1131,7 +1131,7 @@ mod impl_set_id_for_insert_v0 {
         database_extention::DatabaseExt,
         extentions::common_expressions::{Identifier, TableNameExpression, V0OnInsert},
         from_row::{FromRowAlias, FromRowData},
-        links::{relation_optional_to_many::OptionalToMany, set_id_mod::SetId},
+        links::{relation_optional_to_many::OptionalToMany, update_links::SetId},
         operations::v1_insert_one::InsertLink,
         query_builder::{Bind, Expression, OpExpression, StatementBuilder},
     };
@@ -1280,21 +1280,17 @@ mod impl_set_id_for_update {
             relation_optional_to_many::{
                 OptionalToMany, find_place_for_this::OneColumn, fk_name::AsIdentifier,
             },
-            set_id_mod::SetId,
+            update_links::SetId,
         },
         operations::{
             insert_one::ConstraintViolation,
             update::{UpdateLink, UpdateLinkData, UpdateLinkSplit},
         },
-        query_builder::Bind,
         update_mod,
     };
 
     impl<Key, From, To> UpdateLinkSplit
-        for SetId<
-            OptionalToMany<Key, From, To>,
-            update_mod::Update<<To::Id as CollectionId>::IdData>,
-        >
+        for SetId<OptionalToMany<Key, From, To>, Option<<To::Id as CollectionId>::IdData>>
     where
         To: Collection,
         OptionalToMany<Key, From, To>: Clone,
@@ -1374,11 +1370,11 @@ mod impl_set_id_for_update {
             }
         }
 
-        type InitSplitForUpdateValues = update_mod::Update<<To::Id as CollectionId>::IdData>;
+        type InitSplitForUpdateValues = Option<<To::Id as CollectionId>::IdData>;
 
         type UpdateValues = UpdatingCol<
             AsIdentifier<OptionalToMany<Key, From, To>>,
-            <To::Id as CollectionId>::IdData,
+            Option<<To::Id as CollectionId>::IdData>,
         >;
 
         fn update_values(
@@ -1442,6 +1438,367 @@ mod impl_set_id_for_update {
             from_row
         }
     }
+
+    #[cfg(test)]
+    mod test {
+        use sqlx::{Row, Sqlite};
+
+        use crate::{
+            collections::AutoGenerate,
+            connect_in_memory::ConnectInMemory,
+            expressions::ColumnEqual,
+            from_row::{FromRowAlias, RowPreAliased},
+            links::{
+                Link,
+                update_links::{SetId, SetNew},
+            },
+            operations::{
+                CollectionOutput, LinkedOutput, Operation, insert_one::InsertOne, update::Update,
+            },
+            test_module::{self, Category, Todo, category, todo_members},
+        };
+
+        #[tokio::test]
+        async fn set_for_update_link() {
+            let mut conn = Sqlite::connect_in_memory_2().await;
+
+            tracing::dispatcher::set_global_default(
+                tracing_subscriber::fmt()
+                    .with_max_level(tracing::Level::TRACE)
+                    .with_test_writer()
+                    .finish()
+                    .into(),
+            )
+            .unwrap();
+
+            sqlx::query(
+                "
+                CREATE TABLE Category (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL
+                );
+
+                CREATE TABLE Todo (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    done BOOLEAN NOT NULL,
+                    description TEXT,
+                    fk_category_def INTEGER,
+                    FOREIGN KEY (fk_category_def) REFERENCES Category(id)
+                );
+
+                INSERT INTO Category (title) VALUES ('category_1'), ('category_2');
+
+                INSERT INTO Todo (title, done, description, fk_category_def) VALUES 
+                    ('todo_1', true, 'description_1', 1),
+                    ('todo_2', false, 'description_2', NULL),
+                    ('todo_3', true, 'description_3', 1);
+                ",
+            )
+            .execute(&mut conn)
+            .await
+            .unwrap();
+
+            let s = Update {
+                base: test_module::todo,
+                partial: Default::default(),
+                wheres: ColumnEqual {
+                    col: todo_members::id,
+                    eq: 1,
+                },
+                links: SetId {
+                    relation: <category as Link<test_module::todo>>::spec(category),
+                    id: None,
+                },
+            };
+
+            Operation::<Sqlite>::exec_operation(s, &mut conn)
+                .await
+                .unwrap();
+
+            let row = sqlx::query(
+                "
+SELECT 
+    fk_category_def
+FROM Todo 
+WHERE id = 1;
+",
+            )
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+
+            let fk_category_def: Option<i64> = row.get("fk_category_def");
+
+            pretty_assertions::assert_eq!(fk_category_def, None);
+
+            let s = Update {
+                base: test_module::todo,
+                partial: Default::default(),
+                wheres: ColumnEqual {
+                    col: todo_members::id,
+                    eq: 2,
+                },
+                links: SetId {
+                    relation: <category as Link<test_module::todo>>::spec(category),
+                    id: Some(2),
+                },
+            };
+
+            Operation::<Sqlite>::exec_operation(s, &mut conn)
+                .await
+                .unwrap();
+
+            let row = sqlx::query(
+                "
+SELECT 
+    fk_category_def,
+    Category.title as title,
+    Category.id as id
+FROM Todo 
+LEFT JOIN Category ON Todo.fk_category_def = Category.id 
+WHERE Todo.id = 2;
+",
+            )
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+
+            let fk_category_def: Option<i64> = row.get("fk_category_def");
+
+            pretty_assertions::assert_eq!(fk_category_def, Some(2));
+
+            let c = category.no_alias(&row).unwrap();
+
+            pretty_assertions::assert_eq!(
+                c,
+                Category {
+                    title: "category_2".to_string(),
+                }
+            );
+
+            let s = Update {
+                base: test_module::todo,
+                partial: Default::default(),
+                wheres: ColumnEqual {
+                    col: todo_members::id,
+                    eq: 2,
+                },
+                links: SetNew {
+                    relation: <category as Link<test_module::todo>>::spec(category),
+                    data: Category {
+                        title: "category_3".to_string(),
+                    },
+                },
+            };
+
+            Operation::<Sqlite>::exec_operation(s, &mut conn)
+                .await
+                .unwrap();
+
+            let row = sqlx::query(
+                "
+SELECT 
+    fk_category_def,
+    Category.title as title,
+    Category.id as id
+FROM Todo 
+LEFT JOIN Category ON Todo.fk_category_def = Category.id 
+WHERE Todo.id = 2;
+",
+            )
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+
+            let fk_category_def: Option<i64> = row.get("fk_category_def");
+
+            pretty_assertions::assert_eq!(fk_category_def, Some(3));
+
+            let c = category.no_alias(&row).unwrap();
+
+            pretty_assertions::assert_eq!(
+                c,
+                Category {
+                    title: "category_3".to_string(),
+                }
+            );
+
+            let s = InsertOne {
+                id: AutoGenerate,
+                base: test_module::todo,
+                data: Todo {
+                    title: "todo_4".to_string(),
+                    done: false,
+                    description: None,
+                },
+                links: SetId {
+                    relation: <category as Link<test_module::todo>>::spec(category),
+                    id: 3,
+                },
+            };
+
+            let s = Operation::<Sqlite>::exec_operation(s, &mut conn)
+                .await
+                .unwrap();
+
+            pretty_assertions::assert_eq!(
+                s,
+                LinkedOutput {
+                    id: 4,
+                    attributes: Todo {
+                        title: "todo_4".to_string(),
+                        done: false,
+                        description: None,
+                    },
+                    links: CollectionOutput {
+                        id: 3,
+                        attributes: Category {
+                            title: "category_3".to_string(),
+                        },
+                    },
+                }
+            );
+
+            let s = InsertOne {
+                id: AutoGenerate,
+                base: test_module::todo,
+                data: Todo {
+                    title: "todo_5".to_string(),
+                    done: false,
+                    description: None,
+                },
+                links: SetNew {
+                    relation: <category as Link<test_module::todo>>::spec(category),
+                    data: Category {
+                        title: "category_4".to_string(),
+                    },
+                },
+            };
+
+            let s = Operation::<Sqlite>::exec_operation(s, &mut conn)
+                .await
+                .unwrap();
+
+            pretty_assertions::assert_eq!(
+                s,
+                LinkedOutput {
+                    id: 5,
+                    attributes: Todo {
+                        title: "todo_5".to_string(),
+                        done: false,
+                        description: None,
+                    },
+                    links: CollectionOutput {
+                        id: 4,
+                        attributes: Category {
+                            title: "category_4".to_string(),
+                        },
+                    },
+                }
+            );
+
+            let todos = sqlx::query(
+                "
+SELECT 
+    Todo.title as todo_title, Todo.done as todo_done, Todo.description as todo_description,
+    Category.title as category_title,
+    Todo.fk_category_def
+FROM Todo
+LEFT JOIN Category ON Todo.fk_category_def = Category.id;
+                ",
+            )
+            .fetch_all(&mut conn)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| {
+                let linked = e.get::<Option<i64>, _>("fk_category_def");
+                (
+                    test_module::todo
+                        .pre_alias(RowPreAliased::new(&e, "todo_"))
+                        .unwrap(),
+                    if let Some(linked) = linked {
+                        Some(CollectionOutput {
+                            id: linked,
+                            attributes: category
+                                .pre_alias(RowPreAliased::new(&e, "category_"))
+                                .unwrap(),
+                        })
+                    } else {
+                        None
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+
+            pretty_assertions::assert_eq!(
+                todos,
+                vec![
+                    (
+                        Todo {
+                            title: "todo_1".to_string(),
+                            done: true,
+                            description: Some("description_1".to_string()),
+                        },
+                        None,
+                    ),
+                    (
+                        Todo {
+                            title: "todo_2".to_string(),
+                            done: false,
+                            description: Some("description_2".to_string()),
+                        },
+                        Some(CollectionOutput {
+                            id: 3,
+                            attributes: Category {
+                                title: "category_3".to_string(),
+                            },
+                        }),
+                    ),
+                    (
+                        Todo {
+                            title: "todo_3".to_string(),
+                            done: true,
+                            description: Some("description_3".to_string()),
+                        },
+                        Some(CollectionOutput {
+                            id: 1,
+                            attributes: Category {
+                                title: "category_1".to_string(),
+                            },
+                        }),
+                    ),
+                    (
+                        Todo {
+                            title: "todo_4".to_string(),
+                            done: false,
+                            description: None,
+                        },
+                        Some(CollectionOutput {
+                            id: 3,
+                            attributes: Category {
+                                title: "category_3".to_string(),
+                            },
+                        }),
+                    ),
+                    (
+                        Todo {
+                            title: "todo_5".to_string(),
+                            done: false,
+                            description: None,
+                        },
+                        Some(CollectionOutput {
+                            id: 4,
+                            attributes: Category {
+                                title: "category_4".to_string(),
+                            },
+                        }),
+                    ),
+                ],
+            );
+        }
+    }
 }
 
 mod impl_set_new_for_update {
@@ -1454,14 +1811,13 @@ mod impl_set_new_for_update {
             relation_optional_to_many::{
                 OptionalToMany, find_place_for_this::OneColumn, fk_name::AsIdentifier,
             },
-            set_new_mod::SetNew,
+            update_links::SetNew,
         },
         operations::{
             CollectionOutput, LinkedOutput,
             insert_one::{ConstraintViolation, InsertOne},
             update::{UpdateLink, UpdateLinkData, UpdateLinkSplit},
         },
-        update_mod,
     };
 
     impl<Key, From, To> UpdateLinkSplit for SetNew<OptionalToMany<Key, From, To>, To::Data>
@@ -1547,7 +1903,7 @@ mod impl_set_new_for_update {
 
         type UpdateValues = UpdatingCol<
             AsIdentifier<OptionalToMany<Key, From, To>>,
-            <To::Id as CollectionId>::IdData,
+            Option<<To::Id as CollectionId>::IdData>,
         >;
 
         fn update_values(
@@ -1559,7 +1915,7 @@ mod impl_set_new_for_update {
                 col: AsIdentifier {
                     relation: self.relation.clone(),
                 },
-                set: update_mod::Update::Set(pre_op_output),
+                set: Some(pre_op_output),
             }
         }
 

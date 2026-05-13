@@ -2,15 +2,10 @@
 
 use std::collections::HashMap;
 
-pub mod timestamp;
-// pub mod group_by;
-// pub mod relation_many_to_many;
 pub mod relation_optional_to_many;
-pub mod set_id_mod;
-pub mod set_new_mod;
-// pub mod relation_optional_to_many_inverse;
-// pub mod set_id;
-// pub mod set_new;
+pub mod relation_optional_to_many_inverse;
+pub mod timestamp;
+pub mod update_links;
 
 pub trait Link<Base> {
     type Spec;
