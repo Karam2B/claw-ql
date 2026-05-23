@@ -492,13 +492,11 @@ pub mod add_collection {
 pub mod add_link {
     use std::sync::Arc;
 
-    use convert_case::pattern::toggle;
     use sqlx::Database;
 
     use crate::{
         database_extention::DatabaseExt,
         fix_executor::ExecutorTrait,
-        json_client::dynamic_collection::DynamicCollection,
         json_client_channel::{
             http_client_error::HttpClientError,
             json_client::{AddLinkInput, AddLinkOutput},
@@ -508,10 +506,8 @@ pub mod add_link {
             DefaultRelationKey, relation_optional_to_many::OptionalToMany, timestamp::Timestamp,
         },
         on_migrate::OnMigrate,
-        operations::LinkedOutput,
-        prelude::sql::{self, ManyPossible},
-        query_builder::{Expression, StatementBuilder, functional_expr::ManyImplExpression},
-        utils_some_is_err::SomeIsErr,
+        prelude::sql::ManyPossible,
+        query_builder::{StatementBuilder, functional_expr::ManyImplExpression},
     };
 
     pub(crate) fn add_link<S: Database>(
@@ -621,10 +617,7 @@ pub mod dynamic_order_by {
 
     use crate::{
         database_extention::DatabaseExt,
-        expressions::{
-            multi_col_expressions_stack_heavy::ScopedCols, single_col_expressions::ScopedCol,
-        },
-        extentions::common_expressions::{Identifier, Scoped},
+        extentions::common_expressions::Scoped,
         from_row::{FromRowAlias, FromRowData, FromRowError},
         json_client::sqlx_type_ident::SqlxTypeHandler,
         json_client_channel::json_client::OrderDirection,
@@ -959,7 +952,7 @@ pub mod fetch_many {
 
             let out = crate::operations::fetch_many::ManyOutput {
                 items: out.items,
-                next_item: out.next_item.map(|(id, mut next)| CollectionOutput {
+                next_item: out.next_item.map(|(id, next)| CollectionOutput {
                     id,
                     attributes: next,
                 }),
@@ -971,47 +964,6 @@ pub mod fetch_many {
 
             Ok(out)
         }
-    }
-}
-
-#[claw_ql_macros::skip]
-pub mod links_utils {
-    use std::{ops::Not, sync::Arc};
-
-    use crate::{
-        json_client::{dynamic_collection::DynamicCollection, json_client::JsonClient},
-        links::{DefaultRelationKey, relation_optional_to_many::OptionalToMany},
-    };
-    use sqlx::Database;
-    use tokio::sync::RwLockReadGuard as TrwLockReadGuard;
-
-    pub async fn get_optional_to_many<S: Database>(
-        base: &DynamicCollection<S>,
-        to: String,
-        jc: Arc<super::sqlx_executor::ClientData<S>>,
-        all_gaurds: &mut Vec<Arc<TrwLockReadGuard<'_, DynamicCollection<S>>>>,
-    ) -> Result<OptionalToMany<DefaultRelationKey, DynamicCollection<S>, DynamicCollection<S>>, ()>
-    {
-        if jc
-            .links
-            .optional_to_many
-            .contains_key(&(base.name_lower_case.clone(), to.to_string()))
-            .not()
-        {
-            panic!()
-        }
-
-        let to = if let Some(e) = jc.collections.get(to.as_str()) {
-            e.read().await.clone()
-        } else {
-            panic!();
-        };
-
-        Ok(OptionalToMany {
-            foriegn_key: DefaultRelationKey,
-            from: base.clone(),
-            to,
-        })
     }
 }
 

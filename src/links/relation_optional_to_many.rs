@@ -1973,3 +1973,174 @@ mod impl_set_new_for_update {
         }
     }
 }
+
+mod impl_for_delete {
+    use std::marker::PhantomData;
+
+    use super::OptionalToMany;
+    use crate::{
+        collections::{Collection, CollectionId},
+        links::relation_optional_to_many::{find_place_for_this::OneColumn, fk_name::AsIdentifier},
+        operations::{
+            CollectionOutput, LinkedOutput,
+            delete::{DeleteLink, DeleteLinkData, DeleteLinkPreOp, DeleteLinkSplit},
+            fetch_one::FetchOne,
+        },
+    };
+
+    impl<Key, From, To> DeleteLinkSplit for OptionalToMany<Key, From, To>
+    where
+        Self: Clone,
+        To: Collection,
+    {
+        type Link = OptionalToMany<Key, From, To>;
+        type InitSplitForPreOp = ();
+        fn init_split(self) -> (Self::Link, Self::InitSplitForPreOp, DeleteLinkData<()>) {
+            (self, (), DeleteLinkData { wheres: () })
+        }
+    }
+
+    impl<Wheres, Key, From, To> DeleteLinkPreOp<Wheres> for OptionalToMany<Key, From, To>
+    where
+        Self: Clone,
+        To: Collection,
+        Wheres: Clone,
+    {
+        type InitSplitForPreOp = ();
+
+        type PreOp = ();
+
+        fn pre_op(&self, _: Self::InitSplitForPreOp, _: &Wheres) -> Self::PreOp {}
+    }
+
+    impl<Key, From, To> DeleteLink for OptionalToMany<Key, From, To>
+    where
+        Self: Clone,
+        To: Collection,
+    {
+        type Output = Option<<To::Id as CollectionId>::IdData>;
+
+        type PreOpOutput = ();
+
+        type PreOpSplitWheres = ();
+
+        type PreOpSplitTake = ();
+
+        fn split_pre_op(
+            &self,
+            _: Self::PreOpOutput,
+        ) -> (Self::PreOpSplitWheres, Self::PreOpSplitTake) {
+            ((), ())
+        }
+
+        type InitSplitForWheres = ();
+
+        type Wheres = ();
+
+        fn wheres(&self, _: Self::InitSplitForWheres, _: Self::PreOpSplitWheres) -> Self::Wheres {}
+
+        type DeleteReturnExpression = AsIdentifier<OptionalToMany<Key, From, To>>;
+
+        fn delete_return_expression(&self) -> Self::DeleteReturnExpression {
+            AsIdentifier {
+                relation: self.clone(),
+            }
+        }
+
+        type DeleteReturnFromRow = OneColumn<
+            AsIdentifier<OptionalToMany<Key, From, To>>,
+            Option<<To::Id as CollectionId>::IdData>,
+        >;
+
+        fn from_row(&self) -> Self::DeleteReturnFromRow {
+            OneColumn {
+                as_name: AsIdentifier {
+                    relation: self.clone(),
+                },
+                as_type: PhantomData,
+            }
+        }
+
+        fn take_mut(
+            &self,
+            links: <Self::DeleteReturnFromRow as crate::from_row::FromRowData>::RData,
+            _: &mut Self::PreOpSplitTake,
+        ) -> Self::Output {
+            links
+        }
+
+        fn take_once(
+            &self,
+            links: <Self::DeleteReturnFromRow as crate::from_row::FromRowData>::RData,
+            _: Self::PreOpSplitTake,
+        ) -> Self::Output {
+            links
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use sqlx::Sqlite;
+
+        use crate::{
+            connect_in_memory::ConnectInMemory,
+            expressions::ColumnEqual,
+            links::Link,
+            operations::{LinkedOutput, Operation, delete::Delete},
+            test_module::{self, Todo, todo_members},
+        };
+
+        #[tokio::test]
+        async fn test_delete_link() {
+            let mut pool = Sqlite::connect_in_memory_2().await;
+
+            sqlx::query(
+                "
+                CREATE TABLE IF NOT EXISTS Category (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS Todo (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    done BOOLEAN NOT NULL,
+                    description TEXT,
+                    fk_category_def INTEGER,
+                    FOREIGN KEY (fk_category_def) REFERENCES Category(id)
+                );
+                INSERT INTO Category (title) VALUES ('category_1');
+                INSERT INTO Todo (title, done, description, fk_category_def) VALUES ('todo_1', true, 'description_1', 1);
+                ",
+            )
+            .execute(&mut pool)
+            .await
+            .unwrap();
+
+            let s = Delete {
+                base: test_module::todo,
+                wheres: ColumnEqual {
+                    col: todo_members::id,
+                    eq: 1,
+                },
+                links: <test_module::category as Link<test_module::todo>>::spec(
+                    test_module::category,
+                ),
+            };
+
+            let result = Operation::<Sqlite>::exec_operation(s, &mut pool).await;
+
+            pretty_assertions::assert_eq!(
+                result,
+                vec![LinkedOutput {
+                    id: 1,
+                    attributes: Todo {
+                        title: "todo_1".to_string(),
+                        done: true,
+                        description: Some("description_1".to_string()),
+                    },
+                    links: Some(1)
+                },]
+            );
+        }
+    }
+}
