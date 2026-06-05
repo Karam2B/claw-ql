@@ -1,4 +1,3 @@
-use serde::Serialize;
 use sqlx::Database;
 
 // pub mod delete_by_id;
@@ -78,7 +77,8 @@ pub trait SafeOperation {
     fn safety_check(self) -> Result<Self::Ok, Self::Error>;
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LinkedOutput<Id, C, L> {
     pub id: Id,
     pub attributes: C,
@@ -92,7 +92,8 @@ pub struct CollectionOutput<Id, C> {
     pub attributes: C,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct IdOutput<Id> {
     pub id: Id,
 }

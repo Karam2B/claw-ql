@@ -80,7 +80,7 @@ pub mod to_bind_trait {
         // S: DatabaseForJsonClient,
     {
         fn type_info() -> <S as Database>::TypeInfo {
-            todo!()
+            todo!("I don't think this is relavent if I'm not using sqlx::query macro")
             // S::type_info_default()
         }
     }
@@ -139,6 +139,8 @@ pub mod sqlx_type_ident {
     use crate::from_row::FromRowError;
     use crate::from_row::RowPreAliased;
     use crate::from_row::RowTwoAliased;
+    use crate::partial_serde::PartialDeserialize;
+    use crate::partial_serde::PartialSerialize;
     use crate::query_builder::StatementBuilder;
     use crate::query_builder::SyntaxAsType;
     use crate::query_builder::functional_expr::BoxedExpression;
@@ -163,12 +165,24 @@ pub mod sqlx_type_ident {
             &self,
             value: JsonValue,
         ) -> Result<Box<dyn ToBind<S> + Send>, DeserializeError>;
+        fn to_bind_partial<'q>(
+            &self,
+            value: PartialDeserialize,
+        ) -> Result<Box<dyn ToBind<S> + Send>, DeserializeError>;
         fn from_row_two_alias(
             &self,
             is_optional: bool,
             name: &str,
             row: RowTwoAliased<'_, S::Row>,
         ) -> Result<JsonValue, FromRowError>
+        where
+            S: Database;
+        fn from_row_two_alias_partial(
+            &self,
+            is_optional: bool,
+            name: &str,
+            row: RowTwoAliased<'_, S::Row>,
+        ) -> Result<PartialSerialize, FromRowError>
         where
             S: Database;
         fn from_row_pre_alias(
@@ -179,12 +193,29 @@ pub mod sqlx_type_ident {
         ) -> Result<JsonValue, FromRowError>
         where
             S: Database;
+        fn from_row_pre_alias_partial(
+            &self,
+            is_optional: bool,
+            name: &str,
+            row: RowPreAliased<'_, S::Row>,
+        ) -> Result<PartialSerialize, FromRowError>
+        where
+            S: Database;
         fn from_row_no_alias(
             &self,
             is_optional: bool,
             name: &str,
             row: &S::Row,
         ) -> Result<JsonValue, FromRowError>
+        where
+            S: Database;
+
+        fn from_row_no_alias_partial(
+            &self,
+            is_optional: bool,
+            name: &str,
+            row: &S::Row,
+        ) -> Result<PartialSerialize, FromRowError>
         where
             S: Database;
     }
@@ -211,12 +242,21 @@ pub mod sqlx_type_ident {
         T: DeserializeOwned + Serialize,
         T: 'static + for<'d> Decode<'d, S> + sqlx::Type<S>,
         for<'a> &'a str: ColumnIndex<S::Row>,
+        // for PartialSerialize
+        T: 'static + Clone + Serialize + fmt::Debug,
     {
         fn type_name(&self) -> &str {
             std::any::type_name::<T>()
         }
         fn to_bind(&self, value: JsonValue) -> Result<Box<dyn ToBind<S> + Send>, DeserializeError> {
             let s: T = from_value(value).expect("bug: claw_ql should clear out");
+            Ok(Box::new(s))
+        }
+        fn to_bind_partial(
+            &self,
+            value: PartialDeserialize,
+        ) -> Result<Box<dyn ToBind<S> + Send>, DeserializeError> {
+            let s: T = value.continue_deserialize()?;
             Ok(Box::new(s))
         }
         fn type_expression(&self) -> Box<dyn BoxedExpression<S> + Send> {
@@ -287,6 +327,69 @@ pub mod sqlx_type_ident {
             };
 
             Ok(to_value(s).expect("claw_ql_bug: when serialize ever fail?"))
+        }
+        fn from_row_pre_alias_partial(
+            &self,
+            is_optional: bool,
+            name: &str,
+            row: RowPreAliased<'_, S::Row>,
+        ) -> Result<PartialSerialize, FromRowError>
+        where
+            S: Database,
+        {
+            let s: Option<T> = row.try_get(name)?;
+
+            let s = match (s, is_optional) {
+                (None, true) => return Ok(PartialSerialize::new(())),
+                (None, false) => {
+                    panic!("claw_ql_bug: value is non-null and was assumed to be null")
+                }
+                (Some(e), _) => e,
+            };
+
+            Ok(PartialSerialize::new(s))
+        }
+        fn from_row_two_alias_partial(
+            &self,
+            is_optional: bool,
+            name: &str,
+            row: RowTwoAliased<'_, S::Row>,
+        ) -> Result<PartialSerialize, FromRowError>
+        where
+            S: Database,
+        {
+            let s: Option<T> = row.try_get(name)?;
+
+            let s = match (s, is_optional) {
+                (None, true) => return Ok(PartialSerialize::new(())),
+                (None, false) => {
+                    panic!("claw_ql_bug: value is non-null and was assumed to be null")
+                }
+                (Some(e), _) => e,
+            };
+
+            Ok(PartialSerialize::new(s))
+        }
+        fn from_row_no_alias_partial(
+            &self,
+            is_optional: bool,
+            name: &str,
+            row: &S::Row,
+        ) -> Result<PartialSerialize, FromRowError>
+        where
+            S: Database,
+        {
+            let s: Option<T> = sqlx::Row::try_get(row, name)?;
+
+            let s = match (s, is_optional) {
+                (None, true) => return Ok(PartialSerialize::new(())),
+                (None, false) => {
+                    panic!("claw_ql_bug: value is non-null and was assumed to be null")
+                }
+                (Some(e), _) => e,
+            };
+
+            Ok(PartialSerialize::new(s))
         }
     }
 }
@@ -678,7 +781,7 @@ pub mod dynamic_collection {
         }
     }
 
-    mod impl_on_migrate {
+    pub(crate) mod impl_on_migrate {
         use std::ops::Not;
 
         use super::DynamicCollection;
@@ -770,7 +873,7 @@ pub mod dynamic_collection {
         }
     }
 
-    mod str_aliased_impls {
+    pub(crate) mod str_aliased_impls {
         use std::ops::Not;
 
         use crate::{
@@ -867,10 +970,7 @@ pub mod dynamic_collection {
         use crate::{
             database_extention::DatabaseExt,
             from_row::{FromRowAlias, FromRowData},
-            json_client::{
-                database_for_json_client::DatabaseForJsonClient,
-                dynamic_collection::DynamicCollection,
-            },
+            json_client::dynamic_collection::DynamicCollection,
         };
         use serde_json::Value as JsonValue;
         use sqlx::ColumnIndex;
@@ -1229,14 +1329,6 @@ pub mod add_collection {
 
 pub mod add_link {
     use serde::Deserialize;
-    use sqlx::{Executor, IntoArguments};
-
-    use crate::{
-        json_client::{database_for_json_client::DatabaseForJsonClient, json_client::JsonClient},
-        links::{DefaultRelationKey, relation_optional_to_many::OptionalToMany},
-        on_migrate::OnMigrate,
-        query_builder::StatementBuilder,
-    };
 
     #[derive(Debug, Deserialize)]
     #[serde(tag = "ty")]
@@ -1325,7 +1417,6 @@ pub mod add_link {
 }
 
 pub mod fetch_many {
-    use std::sync::Arc;
 
     use serde::Deserialize;
     use sqlx::{ColumnIndex, Decode, Encode, Type};

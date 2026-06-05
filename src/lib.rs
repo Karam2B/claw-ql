@@ -860,6 +860,216 @@ pub mod utils_some_is_err {
     }
 }
 
+pub mod partial_serde {
+    use core::fmt;
+    use std::{
+        ops::{Deref, Range},
+        sync::Arc,
+    };
+
+    use serde::{
+        Deserialize, Deserializer, Serialize,
+        de::{DeserializeOwned, Visitor},
+    };
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub struct PartialSerialize(serde_json::Value);
+
+    impl PartialSerialize {
+        pub fn new<T: 'static + Clone + Serialize + fmt::Debug>(value: T) -> Self {
+            Self(serde_json::to_value(value).expect("claw_ql_bug: when serialize ever fail?"))
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct PartialDeserialize(String);
+
+    impl PartialDeserialize {
+        pub fn continue_deserialize<T>(self) -> Result<T, serde_json::Error>
+        where
+            T: DeserializeOwned,
+        {
+            let value = serde_json::from_str::<T>(&self.0)?;
+            Ok(value)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for PartialDeserialize {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let value = deserializer.deserialize_any(AnyVisitor)?;
+
+            Ok(PartialDeserialize(value))
+        }
+    }
+
+    pub struct AnyVisitor;
+
+    // this is not a complete set of supported types, but usually PartialDeserialize is used for maps so this is good enough
+    impl<'de> Visitor<'de> for AnyVisitor {
+        type Value = String;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("any value")
+        }
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(format!("\"{}\"", v))
+        }
+        fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(format!("\"{}\"", v))
+        }
+        fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(String::from(if v { "true" } else { "false" }))
+        }
+
+        // here I deserialize maps as if they are serde_json::Value
+        // there might be a better performant way to do this, but for now this is functional
+        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            static OPEN_BRACKET: char = '{';
+            static CLOSE_BRACKET: char = '}';
+            let mut ret = String::from(OPEN_BRACKET);
+
+            if let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
+                ret.push('"');
+                ret.push_str(&key);
+                ret.push_str("\": ");
+                ret.push_str(&value.to_string());
+            }
+
+            while let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
+                ret.push_str(", ");
+                ret.push('"');
+                ret.push_str(&key);
+                ret.push_str("\": ");
+                ret.push_str(&value.to_string());
+            }
+            ret.push(CLOSE_BRACKET);
+            Ok(ret)
+        }
+    }
+
+    pub struct ArcSubStr {
+        inner: Arc<str>,
+        range: Range<usize>,
+    }
+
+    impl ArcSubStr {
+        pub fn from_arc(arc: &Arc<str>, range: Range<usize>) -> Self {
+            Self {
+                inner: arc.clone(),
+                range,
+            }
+        }
+        pub fn as_str(&self) -> &str {
+            &self.inner[self.range.clone()]
+        }
+    }
+
+    impl Deref for ArcSubStr {
+        type Target = str;
+        fn deref(&self) -> &Self::Target {
+            &self.inner[self.range.clone()]
+        }
+    }
+
+    impl AsRef<str> for ArcSubStr {
+        fn as_ref(&self) -> &str {
+            &self.inner[self.range.clone()]
+        }
+    }
+
+    impl AsRef<[u8]> for ArcSubStr {
+        fn as_ref(&self) -> &[u8] {
+            self.inner[self.range.clone()].as_bytes()
+        }
+    }
+
+    #[allow(unused)]
+    #[cfg(test)]
+    mod test {
+        use std::ops::{Deref, Range};
+
+        use serde::Deserialize;
+
+        use crate::{
+            operations::LinkedOutput,
+            partial_serde::{ArcSubStr, PartialDeserialize},
+        };
+
+        #[derive(Debug, Deserialize)]
+        struct Input<T> {
+            base: String,
+            data: T,
+        }
+
+        #[test]
+        fn test_partial_serde() {
+            let input = "
+{
+    'base': 'todo',
+    'data': {
+        'title': 'new_todo',
+        'done': false,
+        'description': 'description',
+        'extra': {
+            'extra_title': 'extra_title'
+        }
+    }
+}
+"
+            .replace("'", "\"");
+
+            let s = serde_json::from_str::<Input<PartialDeserialize>>(&input).unwrap();
+
+            pretty_assertions::assert_eq!(s.base, String::from("todo"));
+            pretty_assertions::assert_eq!(
+                &s.data.0,
+                "{\"title\": \"new_todo\", \"done\": false, \"description\": \"description\", \"extra\": {\"extra_title\":\"extra_title\"}}"
+            );
+
+            let input = "
+[
+    'first_value', 'second_value'
+]
+"
+            .replace("'", "\"");
+
+            let s = serde_json::from_str::<(String, PartialDeserialize)>(&input).unwrap();
+
+            pretty_assertions::assert_eq!(s.0, String::from("first_value"));
+            pretty_assertions::assert_eq!(&s.1.0, "\"second_value\"");
+        }
+
+        #[test]
+        fn arc_str() {
+            use std::sync::Arc;
+
+            let input: Arc<str> = Arc::from("hello world");
+
+            let clone_of_first_alloc: Arc<str> = input.clone();
+            let slice_of_first_alloc: ArcSubStr = ArcSubStr::from_arc(&input, 0..5);
+
+            assert_eq!(slice_of_first_alloc.as_str(), "hello");
+
+            assert_eq!(Arc::strong_count(&input), 3);
+        }
+    }
+}
+
 // usefull old utils, they all in utils
 // folder, I don't want to delete
 // because I might come back for them!

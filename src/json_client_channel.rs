@@ -1,4 +1,4 @@
-pub use crate::json_client::dynamic_collection;
+// pub use crate::json_client::dynamic_collection;
 pub use crate::json_client::sqlx_type_ident;
 pub use crate::json_client::to_bind_trait;
 
@@ -48,19 +48,263 @@ pub mod http_client_error {
     }
 }
 
+pub mod dynamic_collection {
+    use core::fmt;
+
+    use crate::{
+        database_extention::DatabaseExt,
+        json_client::{dynamic_collection::DynamicField, sqlx_type_ident::SqlxTypeHandler},
+    };
+
+    pub struct DynamicCollection<S> {
+        pub name: String,
+        pub name_lower_case: String,
+        pub fields: Vec<DynamicField<Box<dyn SqlxTypeHandler<S> + Send + Sync>>>,
+    }
+
+    impl<S> fmt::Debug for DynamicCollection<S>
+    where
+        S: DatabaseExt,
+    {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                f,
+                "DynamicCollection {{ name: {}, fields: {:?}, db: {} }}",
+                self.name,
+                self.fields,
+                S::NAME
+            )
+        }
+    }
+    impl<S> Clone for DynamicCollection<S>
+    where
+        S: DatabaseExt,
+    {
+        fn clone(&self) -> Self {
+            Self {
+                name: self.name.clone(),
+                name_lower_case: self.name_lower_case.clone(),
+                fields: self
+                    .fields
+                    .iter()
+                    .map(|e| DynamicField {
+                        name: e.name.clone(),
+                        is_optional: e.is_optional,
+                        type_info: e.type_info.clone_self(),
+                    })
+                    .collect(),
+            }
+        }
+    }
+
+    mod impl_on_migrate {
+        use super::*;
+        use crate::{
+            json_client::dynamic_collection as og_dynamic_collection, on_migrate::OnMigrate,
+        };
+
+        impl<S> OnMigrate for DynamicCollection<S>
+        where
+            S: DatabaseExt,
+        {
+            type Statements = og_dynamic_collection::impl_on_migrate::MigrateDynamicCollection<S>;
+            fn statments(&self) -> Self::Statements {
+                og_dynamic_collection::impl_on_migrate::MigrateDynamicCollection {
+                    name: self.name.clone(),
+                    fields: self
+                        .fields
+                        .iter()
+                        .map(|e| DynamicField {
+                            name: e.name.clone(),
+                            is_optional: e.is_optional,
+                            type_info: e.type_info.type_expression(),
+                        })
+                        .collect(),
+                }
+            }
+        }
+    }
+
+    mod collection_impls {
+        use crate::{
+            collections::{Collection, SingleIncremintalInt},
+            partial_serde::PartialSerialize,
+        };
+
+        use super::*;
+
+        impl<S> Collection for DynamicCollection<S>
+        where
+            S: DatabaseExt,
+        {
+            fn table_name(&self) -> &str {
+                &self.name
+            }
+
+            fn table_name_lower_case(&self) -> &str {
+                &self.name_lower_case
+            }
+
+            type Data = PartialSerialize;
+
+            type Id = SingleIncremintalInt<String>;
+
+            fn id(&self) -> Self::Id {
+                SingleIncremintalInt(self.name.clone())
+            }
+        }
+    }
+
+    mod impl_aliased {
+        use crate::{
+            database_extention::DatabaseExt, extentions::common_expressions::Aliased,
+            json_client::dynamic_collection::str_aliased_impls::DynamicAliasedCols,
+            json_client_channel::dynamic_collection::DynamicCollection,
+        };
+
+        impl<S> Aliased for DynamicCollection<S>
+        where
+            S: DatabaseExt,
+        {
+            type Aliased = DynamicAliasedCols;
+            fn aliased(&self, alias: &'static str) -> Self::Aliased {
+                DynamicAliasedCols {
+                    table: self.name.clone(),
+                    cols: self.fields.iter().map(|e| e.name.clone()).collect(),
+                    num: None,
+                    alias,
+                }
+            }
+
+            type NumAliased = DynamicAliasedCols;
+
+            fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+                DynamicAliasedCols {
+                    table: self.name.clone(),
+                    cols: self.fields.iter().map(|e| e.name.clone()).collect(),
+                    num: Some(num),
+                    alias,
+                }
+            }
+        }
+    }
+
+    mod expression_table_name {
+        use crate::{
+            extentions::common_expressions::TableNameExpression,
+            json_client_channel::dynamic_collection::DynamicCollection,
+        };
+
+        impl<S> TableNameExpression for DynamicCollection<S> {
+            type TableNameExpression = String;
+            fn table_name_expression(&self) -> Self::TableNameExpression {
+                self.name.clone()
+            }
+            type LowerCaseTableNameExpression = String;
+            fn lower_case_table_name_expression(&self) -> Self::LowerCaseTableNameExpression {
+                self.name_lower_case.clone()
+            }
+        }
+    }
+
+    mod from_row_impls {
+        use std::collections::BTreeMap;
+
+        use crate::{
+            from_row::{FromRowAlias, FromRowData},
+            partial_serde::PartialSerialize,
+        };
+
+        use super::*;
+
+        impl<S> FromRowData for DynamicCollection<S> {
+            type RData = PartialSerialize;
+        }
+
+        impl<'r, S> FromRowAlias<'r, S::Row> for DynamicCollection<S>
+        where
+            S: DatabaseExt,
+        {
+            fn no_alias(
+                &self,
+                row: &'r S::Row,
+            ) -> Result<Self::RData, crate::from_row::FromRowError> {
+                let mut oj = BTreeMap::new();
+                for field in self.fields.iter() {
+                    let s =
+                        field
+                            .type_info
+                            .from_row_no_alias(field.is_optional, &field.name, row)?;
+                    oj.insert(field.name.to_string(), s);
+                }
+                Ok(PartialSerialize::new(oj))
+            }
+
+            fn pre_alias(
+                &self,
+                row: crate::from_row::RowPreAliased<'r, S::Row>,
+            ) -> Result<Self::RData, crate::from_row::FromRowError>
+            where
+                S::Row: sqlx::Row,
+            {
+                let mut oj = BTreeMap::new();
+                for field in self.fields.iter() {
+                    let s = field.type_info.from_row_pre_alias(
+                        field.is_optional,
+                        &field.name,
+                        row.clone(),
+                    )?;
+                    oj.insert(field.name.to_string(), s);
+                }
+                Ok(PartialSerialize::new(oj))
+            }
+
+            fn post_alias(
+                &self,
+                _: crate::from_row::RowPostAliased<'r, S::Row>,
+            ) -> Result<Self::RData, crate::from_row::FromRowError>
+            where
+                S::Row: sqlx::Row,
+            {
+                panic!("in the process of deprecating this method");
+            }
+
+            fn two_alias(
+                &self,
+                row: crate::from_row::RowTwoAliased<'r, S::Row>,
+            ) -> Result<Self::RData, crate::from_row::FromRowError>
+            where
+                S::Row: sqlx::Row,
+            {
+                let mut oj = serde_json::Map::new();
+                for field in self.fields.iter() {
+                    let s = field.type_info.from_row_two_alias(
+                        field.is_optional,
+                        &field.name,
+                        row.clone(),
+                    )?;
+                    oj.insert(field.name.to_string(), s);
+                }
+                Ok(PartialSerialize::new(oj))
+            }
+        }
+    }
+}
+
 pub mod sqlx_executor {
     use super::json_client::JsonClientSetting;
     use super::json_client::Operation;
     use super::json_client::OperationOutput;
     use crate::database_extention::DatabaseExt;
     use crate::fix_executor::ExecutorTrait;
-    use crate::json_client::dynamic_collection::DynamicCollection;
+    use crate::json_client_channel::dynamic_collection::DynamicCollection;
 
     use crate::json_client::fetch_many::extending_link_trait::JsonLinkFetchMany;
     use crate::json_client_channel::add_collection::add_collection;
     use crate::json_client_channel::add_link::add_link;
     use crate::json_client_channel::fetch_many::fetch_many;
     use crate::json_client_channel::http_client_error::HttpClientError;
+    use crate::json_client_channel::insert_one::insert_one;
     use crate::json_client_channel::json_client::JsonClient;
     use crate::links::DefaultRelationKey;
     use crate::links::relation_optional_to_many::OptionalToMany;
@@ -196,6 +440,7 @@ pub mod sqlx_executor {
                         [AddCollection, add_collection]
                         [AddLink, add_link]
                         [FetchMany, fetch_many]
+                        [InsertOne, insert_one]
                         [DropCollection, drop_collection]
                     );
                 }
@@ -206,18 +451,19 @@ pub mod sqlx_executor {
 
 pub mod json_client {
     use serde::{Deserialize, Serialize};
+    use std::collections::BTreeMap;
     use std::convert::Infallible;
     use tokio::sync::mpsc as tokio_mpsc;
 
     use crate::json_client as old_mod;
     use crate::json_client::fetch_many::SupportedLinkFetchMany;
-    use crate::json_client::supported_filter::SupportedFilter;
     use crate::json_client_channel::{
         add_collection::{AddCollectionInput, AddCollectionOutput},
         http_client_error::HttpClientError,
     };
     use crate::operations::fetch_many::ManyOutput;
     use crate::operations::{CollectionOutput, LinkedOutput};
+    use crate::partial_serde::{PartialDeserialize, PartialSerialize};
 
     pub type AddLinkInput = old_mod::add_link::AddLinkInput;
     pub type AddLinkOutput = old_mod::add_link::AddLinkOutput;
@@ -226,15 +472,25 @@ pub mod json_client {
     #[serde(deny_unknown_fields)]
     pub struct FetchManyInput {
         pub base: String,
-        pub filters: Vec<SupportedFilter>,
+        pub filters: Vec<crate::json_client_channel::supported_filter::SupportedFilter>,
         pub links: Vec<SupportedLinkFetchMany>,
         pub pagination: Pagination,
     }
 
     #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct InsertOneInput {
+        pub base: String,
+        pub data: PartialDeserialize,
+        pub links: Vec<PartialDeserialize>,
+    }
+
+    pub type InsertOneOutput = LinkedOutput<i64, PartialSerialize, Vec<PartialSerialize>>;
+
+    #[derive(Debug, Deserialize)]
     pub struct Pagination {
         pub limit: i64,
-        pub first_item: Option<CollectionOutput<i64, serde_json::Map<String, serde_json::Value>>>,
+        pub first_item: Option<CollectionOutput<i64, BTreeMap<String, PartialDeserialize>>>,
         pub order_by: Vec<PagniationOrderBy>,
     }
 
@@ -277,8 +533,8 @@ pub mod json_client {
     }
 
     pub type FetchManyOutput = ManyOutput<
-        LinkedOutput<i64, serde_json::Value, Vec<serde_json::Value>>,
-        CollectionOutput<i64, serde_json::Map<String, serde_json::Value>>,
+        LinkedOutput<i64, PartialSerialize, Vec<PartialSerialize>>,
+        CollectionOutput<i64, BTreeMap<String, PartialSerialize>>,
     >;
 
     #[derive(Debug, Deserialize)]
@@ -287,6 +543,7 @@ pub mod json_client {
         AddCollection(AddCollectionInput),
         AddLink(AddLinkInput),
         FetchMany(FetchManyInput),
+        InsertOne(InsertOneInput),
         DropCollection(&'static str),
     }
 
@@ -296,6 +553,7 @@ pub mod json_client {
         AddCollection(AddCollectionOutput),
         AddLink(AddLinkOutput),
         FetchMany(FetchManyOutput),
+        InsertOne(InsertOneOutput),
         DropCollection(&'static str),
     }
 
@@ -336,6 +594,7 @@ pub mod json_client {
     }
 
     ops!(
+        [insert_one, InsertOne, InsertOneInput, InsertOneOutput]
         [add_collection, AddCollection, AddCollectionInput, AddCollectionOutput]
         [add_link, AddLink, AddLinkInput, AddLinkOutput]
         [fetch_many, FetchMany, FetchManyInput, FetchManyOutput]
@@ -383,13 +642,13 @@ pub mod add_collection {
     use crate::{
         database_extention::DatabaseExt,
         fix_executor::ExecutorTrait,
-        json_client::{dynamic_collection::DynamicCollection, sqlx_type_ident::SqlxTypeHandler},
+        json_client::{dynamic_collection::DynamicField, sqlx_type_ident::SqlxTypeHandler},
+        json_client_channel::dynamic_collection::DynamicCollection,
         json_client_channel::{http_client_error::HttpClientError, sqlx_executor::ClientData},
         on_migrate::OnMigrate,
         query_builder::{Expression, StatementBuilder},
     };
 
-    use super::dynamic_collection::DynamicField;
     use convert_case::{Case, Casing};
     use serde::{Deserialize, Serialize};
     use sqlx::{Database, IntoArguments};
@@ -613,6 +872,8 @@ pub mod add_link {
 }
 
 pub mod dynamic_order_by {
+    use std::collections::BTreeMap;
+
     use sqlx::Database;
 
     use crate::{
@@ -621,6 +882,7 @@ pub mod dynamic_order_by {
         from_row::{FromRowAlias, FromRowData, FromRowError},
         json_client::sqlx_type_ident::SqlxTypeHandler,
         json_client_channel::json_client::OrderDirection,
+        partial_serde::PartialSerialize,
         query_builder::{Expression, OpExpression, StatementBuilder},
     };
 
@@ -675,14 +937,14 @@ pub mod dynamic_order_by {
     }
 
     impl<S> FromRowData for DynamicOrderBy<S> {
-        type RData = (String, serde_json::Value);
+        type RData = (String, PartialSerialize);
     }
 
     impl<'r, S: Database> FromRowAlias<'r, S::Row> for DynamicOrderBy<S> {
         fn no_alias(&self, row: &'r S::Row) -> Result<Self::RData, FromRowError> {
             let ret = self.sqlx_ident.from_row_no_alias(false, &self.col, row)?;
 
-            Ok((self.col.clone(), ret))
+            Ok((self.col.clone(), PartialSerialize::new(ret)))
         }
 
         fn pre_alias(
@@ -692,7 +954,9 @@ pub mod dynamic_order_by {
         where
             S::Row: sqlx::Row,
         {
-            let ret = self.sqlx_ident.from_row_pre_alias(false, &self.col, row)?;
+            let ret = self
+                .sqlx_ident
+                .from_row_pre_alias_partial(false, &self.col, row)?;
 
             Ok((self.col.clone(), ret))
         }
@@ -715,14 +979,16 @@ pub mod dynamic_order_by {
         where
             S::Row: sqlx::Row,
         {
-            let ret = self.sqlx_ident.from_row_two_alias(false, &self.col, row)?;
+            let ret = self
+                .sqlx_ident
+                .from_row_two_alias_partial(false, &self.col, row)?;
 
             Ok((self.col.clone(), ret))
         }
     }
 
     impl<S> FromRowData for Vec<DynamicOrderBy<S>> {
-        type RData = serde_json::Map<String, serde_json::Value>;
+        type RData = BTreeMap<String, PartialSerialize>;
     }
 
     impl<'r, S> FromRowAlias<'r, S::Row> for Vec<DynamicOrderBy<S>>
@@ -730,11 +996,12 @@ pub mod dynamic_order_by {
         S: Database,
     {
         fn no_alias(&self, row: &'r S::Row) -> Result<Self::RData, FromRowError> {
-            let mut ret = serde_json::Map::new();
+            let mut ret = BTreeMap::new();
             for each in self.iter() {
                 ret.insert(
                     each.col.clone(),
-                    each.sqlx_ident.from_row_no_alias(false, &each.col, row)?,
+                    each.sqlx_ident
+                        .from_row_no_alias_partial(false, &each.col, row)?,
                 );
             }
 
@@ -748,12 +1015,12 @@ pub mod dynamic_order_by {
         where
             S::Row: sqlx::Row,
         {
-            let mut ret = serde_json::Map::new();
+            let mut ret = BTreeMap::new();
             for each in self.iter() {
                 ret.insert(
                     each.col.clone(),
                     each.sqlx_ident
-                        .from_row_pre_alias(false, &each.col, row.clone())?,
+                        .from_row_pre_alias_partial(false, &each.col, row.clone())?,
                 );
             }
 
@@ -778,12 +1045,12 @@ pub mod dynamic_order_by {
         where
             S::Row: sqlx::Row,
         {
-            let mut ret = serde_json::Map::new();
+            let mut ret = BTreeMap::new();
             for each in self.iter() {
                 ret.insert(
                     each.col.clone(),
                     each.sqlx_ident
-                        .from_row_two_alias(false, &each.col, row.clone())?,
+                        .from_row_two_alias_partial(false, &each.col, row.clone())?,
                 );
             }
 
@@ -792,16 +1059,63 @@ pub mod dynamic_order_by {
     }
 }
 
+pub mod supported_filter {
+    use crate::expressions::ColumnEqual;
+    use crate::json_client_channel::dynamic_collection::DynamicCollection;
+    use crate::query_builder::functional_expr::BoxedExpression;
+    use crate::{database_extention::DatabaseExt, partial_serde::PartialDeserialize};
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Deserialize, Clone, Debug)]
+    #[non_exhaustive]
+    pub enum SupportedFilter {
+        ColEq(ColumnEqual<String, PartialDeserialize>),
+    }
+
+    #[derive(Debug, Serialize)]
+    pub enum InvalidFilter {
+        FieldNotFound(String),
+        TypeMismatch(String),
+    }
+
+    pub fn parse_supported_filter<'q, S>(
+        input: Vec<SupportedFilter>,
+        base: &DynamicCollection<S>,
+    ) -> Result<Vec<Box<dyn BoxedExpression<S> + Send>>, InvalidFilter>
+    where
+        S: DatabaseExt,
+    {
+        let mut ret: Vec<Box<dyn BoxedExpression<S> + Send>> = vec![];
+        for each in input {
+            match each {
+                SupportedFilter::ColEq(ColumnEqual { col, eq }) => {
+                    if let Some(o) = base.fields.iter().find(|f| f.name == col) {
+                        if let Ok(s) = o.type_info.to_bind_partial(eq) {
+                            ret.push(Box::new(ColumnEqual { col, eq: s }));
+                        } else {
+                            return Err(InvalidFilter::TypeMismatch(col));
+                        }
+                    } else {
+                        return Err(InvalidFilter::FieldNotFound(col));
+                    };
+                }
+            }
+        }
+
+        Ok(ret)
+    }
+}
+
 pub mod fetch_many {
     use crate::{
         database_extention::DatabaseExt,
         extentions::named_bind::NamedBind,
         fix_executor::ExecutorTrait,
-        json_client::{
-            dynamic_collection::DynamicCollection,
-            fetch_many::{SupportedLinkFetchMany, extending_link_trait::JsonLinkFetchMany},
-            supported_filter::parse_supported_filter,
+        json_client::fetch_many::{
+            SupportedLinkFetchMany, extending_link_trait::JsonLinkFetchMany,
         },
+        json_client_channel::dynamic_collection::DynamicCollection,
+        json_client_channel::supported_filter::parse_supported_filter,
         json_client_channel::{
             dynamic_order_by::DynamicOrderBy,
             http_client_error::HttpClientError,
@@ -816,6 +1130,271 @@ pub mod fetch_many {
     use sqlx::Database;
     use std::{ops::Not, sync::Arc};
 
+    pub mod extending_link_trait {
+        use serde::Serialize;
+        use sqlx::Database;
+        use tracing::warn;
+
+        use crate::from_row::{FromRowAlias, FromRowData};
+        use crate::operations::OperationOutput;
+        use crate::operations::boxed_operation::BoxedOperation;
+        use crate::operations::fetch_many::LinkFetch;
+        use crate::partial_serde::PartialSerialize;
+        use crate::query_builder::ManyBoxedExpressions;
+        use crate::select_items_trait_object::SelectItemsTraitObject;
+        use crate::select_items_trait_object::ToImplSelectItems;
+        use crate::{database_extention::DatabaseExt, extentions::common_expressions::Aliased};
+        use core::fmt;
+        use std::any::Any;
+        use std::ops::{Deref, DerefMut};
+
+        pub trait JsonLinkFetchMany<S> {
+            fn select_items_expr(&self) -> Box<dyn SelectItemsTraitObject<S, ()>>;
+            fn post_select_each_2(&self, item: &Box<dyn Any + Send>, poi: &mut Box<dyn Any + Send>);
+            fn post_operation_input_init_2(&self) -> Box<dyn Any + Send>;
+            fn post_select_2(
+                &self,
+                input: Box<dyn Any + Send>,
+            ) -> Box<dyn BoxedOperation<S> + Send>;
+            fn take_2(
+                &self,
+                item: Box<dyn Any + Send>,
+                op: &mut Box<dyn Any + Send>,
+            ) -> PartialSerialize;
+            fn join_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send>;
+            fn wheres_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send>;
+        }
+
+        impl<S, T> JsonLinkFetchMany<S> for T
+        where
+            T: Clone + Send + 'static,
+            T::SelectItems: Send,
+            T::SelectItems: FromRowData,
+            S: DatabaseExt,
+            T: LinkFetch,
+            T::SelectItems: Send
+                + Aliased<
+                    NumAliased: 'static + Send + ManyBoxedExpressions<S>,
+                    Aliased: 'static + Send + ManyBoxedExpressions<S>,
+                >,
+            T::OpInput: 'static + Send,
+            T::Op: Send + 'static + BoxedOperation<S>,
+            T::Op: OperationOutput,
+            T::Output: Serialize,
+            T::SelectItems: FromRowData<RData: Send + 'static>,
+            T::SelectItems: for<'r> FromRowAlias<'r, S::Row>,
+            T::Join: Send + 'static + ManyBoxedExpressions<S>,
+            T::Wheres: Send + 'static + ManyBoxedExpressions<S>,
+            // for PartialSerialize
+            T::Output: Clone + fmt::Debug,
+        {
+            fn join_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send> {
+                Box::new(self.non_duplicating_join_expressions())
+            }
+            fn wheres_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send> {
+                Box::new(self.where_expressions())
+            }
+            fn take_2(
+                &self,
+                item: Box<dyn Any + Send>,
+                op: &mut Box<dyn Any + Send>,
+            ) -> PartialSerialize {
+                let s = self.take_many(
+                    *item
+                        .downcast::<<T::SelectItems as FromRowData>::RData>()
+                        .unwrap(),
+                    op.downcast_mut::<<T::Op as OperationOutput>::Output>()
+                        .unwrap(),
+                );
+
+                PartialSerialize::new(s)
+            }
+            fn select_items_expr(&self) -> Box<dyn SelectItemsTraitObject<S, ()>> {
+                Box::new(ToImplSelectItems {
+                    select_items: self.non_aggregating_select_items(),
+                    cast_from_row_result: (),
+                })
+            }
+            fn post_select_each_2(
+                &self,
+                item: &Box<dyn Any + Send>,
+                mut poi: &mut Box<dyn Any + Send>,
+            ) {
+                let ite_down = item
+                    .deref()
+                    .downcast_ref::<<T::SelectItems as FromRowData>::RData>();
+
+                let poi_down = poi.deref_mut().downcast_mut::<T::OpInput>();
+
+                self.operation_fix_on_many(ite_down.unwrap(), poi_down.unwrap())
+            }
+
+            fn post_operation_input_init_2(&self) -> Box<dyn Any + Send> {
+                let ret = self.operation_initialize_input();
+
+                Box::new(ret)
+            }
+            fn post_select_2(
+                &self,
+                input: Box<dyn Any + Send>,
+            ) -> Box<dyn BoxedOperation<S> + Send> {
+                Box::new(self.operation_construct(*input.downcast::<T::OpInput>().unwrap()))
+            }
+        }
+
+        impl<'r, S> LinkFetch for Box<dyn JsonLinkFetchMany<S> + Send + 'r>
+        where
+            Box<dyn SelectItemsTraitObject<S, ()>>: FromRowData<RData = Box<dyn Any + Send>>,
+            Box<dyn BoxedOperation<S> + Send>: OperationOutput<Output = Box<dyn Any + Send>>,
+        {
+            type SelectItems = Box<dyn SelectItemsTraitObject<S, ()>>;
+
+            fn non_aggregating_select_items(&self) -> Self::SelectItems {
+                self.select_items_expr()
+            }
+
+            fn operation_fix_on_many(&self, item: &Box<dyn Any + Send>, poi: &mut Self::OpInput)
+            where
+                Self::SelectItems: FromRowData,
+            {
+                self.post_select_each_2(item, poi)
+            }
+
+            fn take_many(
+                &self,
+                item: <Self::SelectItems as FromRowData>::RData,
+                op: &mut <Self::Op as OperationOutput>::Output,
+            ) -> Self::Output
+            where
+                Self::SelectItems: FromRowData,
+                Self::Op: OperationOutput,
+            {
+                self.take_2(item, op)
+            }
+
+            type Join = Box<dyn ManyBoxedExpressions<S> + Send>;
+
+            fn non_duplicating_join_expressions(&self) -> Self::Join {
+                self.join_expr()
+            }
+
+            type Wheres = Box<dyn ManyBoxedExpressions<S> + Send>;
+
+            fn where_expressions(&self) -> Self::Wheres {
+                self.wheres_expr()
+            }
+
+            type Output = PartialSerialize;
+
+            type OpInput = Box<dyn Any + Send>;
+
+            fn operation_initialize_input(&self) -> Self::OpInput {
+                let ret = self.post_operation_input_init_2();
+
+                ret
+            }
+
+            type Op = Box<dyn BoxedOperation<S> + Send>;
+
+            fn operation_construct(&self, input: Self::OpInput) -> Self::Op
+            where
+                Self::SelectItems: FromRowData,
+            {
+                self.post_select_2(input)
+            }
+        }
+
+        impl<'r, S> LinkFetch for Vec<Box<dyn JsonLinkFetchMany<S> + Send + 'r>>
+        where
+            S: Database,
+            Vec<Box<dyn SelectItemsTraitObject<S, ()>>>:
+                FromRowData<RData = Vec<Box<dyn Any + Send>>>,
+            Vec<Box<dyn BoxedOperation<S> + Send>>:
+                OperationOutput<Output = Vec<Box<dyn Any + Send>>>,
+        {
+            type SelectItems = Vec<Box<dyn SelectItemsTraitObject<S, ()>>>;
+
+            fn non_aggregating_select_items(&self) -> Self::SelectItems {
+                let s = self
+                    .iter()
+                    .map(|each| each.select_items_expr())
+                    .collect::<Vec<_>>();
+
+                s
+            }
+
+            fn operation_fix_on_many(
+                &self,
+                item: &Vec<Box<dyn Any + Send>>,
+                poi: &mut Vec<Box<dyn Any + Send>>,
+            ) where
+                Self::SelectItems: FromRowData,
+            {
+                for (i, each) in self.iter().enumerate() {
+                    let corresponding_poi = poi.get_mut(i).unwrap();
+                    let corresponding_item = item.get(i).unwrap();
+                    each.post_select_each_2(corresponding_item, corresponding_poi);
+                }
+            }
+
+            fn take_many(
+                &self,
+                item: Vec<Box<dyn Any + Send>>,
+                op: &mut Vec<Box<dyn Any + Send>>,
+            ) -> Self::Output
+            where
+                Self::SelectItems: FromRowData,
+                Self::Op: OperationOutput,
+            {
+                let mut ret = vec![];
+                for (i, (each, item)) in self.iter().zip(item.into_iter()).enumerate() {
+                    let corresponding_op = op.get_mut(i).unwrap();
+                    ret.push(each.take_many(item, corresponding_op));
+                }
+
+                ret
+            }
+
+            type Join = Box<dyn ManyBoxedExpressions<S> + Send>;
+
+            fn non_duplicating_join_expressions(&self) -> Self::Join {
+                let first = self.iter().next().unwrap();
+                warn!("multiple links");
+                Box::new(first.join_expr())
+            }
+
+            type Wheres = ();
+
+            fn where_expressions(&self) -> Self::Wheres {}
+
+            type Output = Vec<PartialSerialize>;
+
+            type OpInput = Vec<Box<dyn Any + Send>>;
+
+            fn operation_initialize_input(&self) -> Self::OpInput {
+                let ret = self
+                    .iter()
+                    .map(|each| each.post_operation_input_init_2())
+                    .collect::<Vec<_>>();
+                ret
+            }
+
+            type Op = Vec<Box<dyn BoxedOperation<S> + Send>>;
+
+            fn operation_construct(&self, input: Self::OpInput) -> Self::Op
+            where
+                Self::SelectItems: FromRowData,
+            {
+                let mut ret = vec![];
+                for (each, input) in self.iter().zip(input.into_iter()) {
+                    let res = each.operation_construct(input);
+                    ret.push(res);
+                }
+                ret
+            }
+        }
+    }
+
     pub(crate) fn fetch_many<S: Database>(
         this: Arc<ClientData<S>>,
         input: FetchManyInput,
@@ -826,6 +1405,7 @@ pub mod fetch_many {
             JsonLinkFetchMany<S>,
         Timestamp<DynamicCollection<S>>: JsonLinkFetchMany<S>,
         for<'q> &'q str: sqlx::ColumnIndex<<S as sqlx::Database>::Row>,
+        String: for<'q> sqlx::Encode<'q, S> + for<'q> sqlx::Decode<'q, S> + sqlx::Type<S>,
         i64: for<'q> sqlx::Encode<'q, S> + for<'q> sqlx::Decode<'q, S> + sqlx::Type<S>,
     {
         async move {
@@ -844,7 +1424,8 @@ pub mod fetch_many {
             let wheres = parse_supported_filter(input.filters, &base)?;
 
             let links = {
-                let mut links = Vec::<Box<dyn JsonLinkFetchMany<S> + Send>>::new();
+                let mut links =
+                    Vec::<Box<dyn extending_link_trait::JsonLinkFetchMany<S> + Send>>::new();
                 for each in input.links {
                     match each {
                         SupportedLinkFetchMany::OptionalToMany { to } => {
@@ -920,7 +1501,7 @@ pub mod fetch_many {
                     if let Some(found) = found {
                         let bind = found
                             .type_info
-                            .to_bind(value)
+                            .to_bind_partial(value)
                             .map_err(|_| "faile to parse")?;
                         named_binds.push(NamedBind {
                             table: base.name.clone(),
@@ -958,12 +1539,41 @@ pub mod fetch_many {
                 }),
             };
 
+            // let why: &serde_json::Map<String, serde_json::Value> =
+            //     &out.next_item.as_ref().unwrap().attributes;
+
             drop(rel_gaurd);
             drop(all_gaurds);
             drop(cols_gaurd);
 
             Ok(out)
         }
+    }
+}
+
+pub mod insert_one {
+    use std::sync::Arc;
+
+    use sqlx::Database;
+
+    use crate::{
+        database_extention::DatabaseExt,
+        fix_executor::ExecutorTrait,
+        json_client_channel::{
+            http_client_error::HttpClientError,
+            json_client::{InsertOneInput, InsertOneOutput},
+            sqlx_executor::ClientData,
+        },
+    };
+
+    pub(crate) fn insert_one<S: Database>(
+        this: Arc<ClientData<S>>,
+        input: InsertOneInput,
+    ) -> impl Future<Output = Result<InsertOneOutput, HttpClientError>> + 'static + Send + use<S>
+    where
+        S: DatabaseExt + ExecutorTrait,
+    {
+        async move { todo!() }
     }
 }
 

@@ -143,6 +143,28 @@ async fn test_json_client() {
         .await
         .unwrap();
 
+    let s2 = jc
+        .fetch_many(
+            from_value(json!({
+                "base": "todo",
+                "filters": [],
+                "links": [
+                    { "ty": "optional_to_many", "to": "category", },
+                    { "ty": "timestamp" },
+                ],
+                "pagination": {
+                    "limit": 3,
+                    "first_item": s.next_item.clone(),
+                    "order_by": [
+                        { "col": "title", "direction": "asc" }
+                    ],
+                },
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
     pretty_assertions::assert_eq!(
         serde_json::to_value(s).unwrap(),
         json!({
@@ -188,5 +210,56 @@ async fn test_json_client() {
         })
     );
 
-    panic!("continue here")
+    pretty_assertions::assert_eq!(
+        serde_json::to_value(s2).unwrap(),
+        json!({
+            "next_item": null,
+            "items": [
+                {
+                    "id": 2,
+                    "attributes": {
+                        "title": "second_todo",
+                        "done": false,
+                        "description": "description_2",
+                    },
+                    "links": [
+                        null,
+                        { "created_at": "test", "updated_at": "test", }
+                    ]
+                },
+                {
+                    "id": 3,
+                    "attributes": {
+                        "title": "third_todo",
+                        "done": true,
+                        "description": "description_3",
+                    },
+                    "links": [
+                        { "id": 1, "attributes": { "title": "category_1", } },
+                        { "created_at": "test", "updated_at": "test", }
+                    ]
+                },
+            ]
+        })
+    );
+
+    let delete = jc
+        .insert_one(
+            from_value(json!({
+                "base": "todo",
+                "data": {
+                    "title": "new_todo",
+                    "done": false,
+                    "description": "description_6",
+                },
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    pretty_assertions::assert_eq!(
+        serde_json::to_value(delete).unwrap(),
+        json!({ "id": 6, "attributes": { "title": "new_todo", "done": false, "description": "description_6", } })
+    );
 }
