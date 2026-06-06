@@ -1070,6 +1070,8 @@ pub mod partial_serde {
     }
 }
 
+mod gen_serde;
+
 // usefull old utils, they all in utils
 // folder, I don't want to delete
 // because I might come back for them!
