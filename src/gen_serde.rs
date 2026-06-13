@@ -7,30 +7,54 @@ pub trait FromSerialized<'de, Format> {
     fn terminate(
         bar: Self::Deserializer,
     ) -> Result<(), <Self::Deserializer as Deserializer<'de>>::Err>;
+
+    /// Deserialize using the default handler [`()`]. Only available when [`DeserializeSpec::Handler`] is [`()`].
     fn deserialize_and_terminate<T>(
         self,
     ) -> Result<T, <Self::Deserializer as Deserializer<'de>>::Err>
     where
         Self: Sized,
-        T: Deserialize<'de, Self::Deserializer>,
+        T: Deserialize<'de, Self::Deserializer, Handler = ()>,
     {
         let mut s = self.start();
-        let t = T::deserialize(&mut s)?;
+        let t = T::deserialize((), &mut s)?;
         Self::terminate(s)?;
         Ok(t)
     }
 
+    /// Same as [`deserialize_and_terminate`] when `T::Handler` is [`()`] (ignores `format` / `into`).
     #[inline]
     fn deserialize_and_terminate_with<T>(
         self,
-        format: Format,
+        _format: Format,
+        into: PhantomData<T>,
+    ) -> Result<T, <Self::Deserializer as Deserializer<'de>>::Err>
+    where
+        Self: Sized,
+        T: Deserialize<'de, Self::Deserializer, Handler = ()>,
+    {
+        let _: PhantomData<T> = into;
+        self.deserialize_and_terminate::<T>()
+    }
+
+    /// Deserialize `T` using an explicit **handler** (configuration). Use when [`DeserializeSpec::Handler`]
+    /// is not [`()`], e.g. runtime-controlled field shapes.
+    #[inline]
+    fn deserialize_and_terminate_with_handler<T>(
+        self,
+        _format: Format,
+        handler: T::Handler,
         into: PhantomData<T>,
     ) -> Result<T, <Self::Deserializer as Deserializer<'de>>::Err>
     where
         Self: Sized,
         T: Deserialize<'de, Self::Deserializer>,
     {
-        self.deserialize_and_terminate::<T>()
+        let _: PhantomData<T> = into;
+        let mut s = self.start();
+        let t = T::deserialize(handler, &mut s)?;
+        Self::terminate(s)?;
+        Ok(t)
     }
 }
 
@@ -39,8 +63,16 @@ pub trait Deserializer<'de>: Sized {
     type Format;
 }
 
-pub trait Deserialize<'de, S: Deserializer<'de>>: Sized {
-    fn deserialize(serialized: &mut S) -> Result<Self, S::Err>;
+/// Declares **how** a type is deserialized *before* choosing a [`Deserializer`]: the [`Handler`]
+/// type is chosen only by this trait’s impl author (the type owner). [`Deserialize`] for a concrete
+/// `S` never introduces alternative handlers per format.
+pub trait DeserializeSpec: Sized {
+    type Handler;
+}
+
+/// Deserialize from `S` using a [`DeserializeSpec::Handler`] value.
+pub trait Deserialize<'de, S: Deserializer<'de>>: DeserializeSpec + Sized {
+    fn deserialize(handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err>;
 }
 
 /// Associated “lookup view” of a key, possibly borrowing from `Key` (see [`KnownKey::info`]).
@@ -65,20 +97,23 @@ pub trait DeserializeMap<'de>: Deserializer<'de> {
     fn deserialize_pair_unknown_key<Key, Value>(
         &mut self,
         map: &mut Self::MapAccess,
+        key_handler: Key::Handler,
+        value_handler: Value::Handler,
     ) -> Result<(Key, Value), Self::Err>
     where
-        Key: UnknownKey<Self> + Deserialize<'de, Self>,
-        Value: Deserialize<'de, Self>;
+        Key: UnknownKey<Self> + DeserializeSpec + Deserialize<'de, Self>,
+        Value: DeserializeSpec + Deserialize<'de, Self>;
 
     /// deserialize pairs with known key value -- the deserialize impl known the value of the key
     fn deserialize_pair_known_key<Key, Value>(
         &mut self,
         map: &mut Self::MapAccess,
         key: Key,
+        value_handler: Value::Handler,
     ) -> Result<Value, Self::Err>
     where
         Self: KnownKey<Key>,
-        Value: Deserialize<'de, Self>;
+        Value: DeserializeSpec + Deserialize<'de, Self>;
 
     fn finish(&mut self, map: Self::MapAccess) -> Result<(), Self::Err>;
 }
@@ -86,9 +121,13 @@ pub trait DeserializeMap<'de>: Deserializer<'de> {
 pub trait DeserializeSeq<'de>: Deserializer<'de> {
     type SeqAccess;
     fn start_seq(&mut self) -> Result<Self::SeqAccess, Self::Err>;
-    fn deserialize_value<T>(&mut self, seq: &mut Self::SeqAccess) -> Result<T, Self::Err>
+    fn deserialize_value<T>(
+        &mut self,
+        seq: &mut Self::SeqAccess,
+        handler: T::Handler,
+    ) -> Result<T, Self::Err>
     where
-        T: Deserialize<'de, Self>;
+        T: DeserializeSpec + Deserialize<'de, Self>;
     fn finish(&mut self, seq: Self::SeqAccess) -> Result<(), Self::Err>;
 }
 
@@ -105,38 +144,163 @@ pub trait DeserializeMapOrSeq<'de>: DeserializeMap<'de> {
     fn deserialize_pair_unknown_key<Key, Value>(
         &mut self,
         map: &mut Self::MapAccess,
+        key_handler: Key::Handler,
+        value_handler: Value::Handler,
     ) -> Result<(Key, Value), Self::Err>
     where
-        Key: UnknownKey<Self> + Deserialize<'de, Self>,
-        Value: Deserialize<'de, Self>,
+        Key: UnknownKey<Self> + DeserializeSpec + Deserialize<'de, Self>,
+        Value: DeserializeSpec + Deserialize<'de, Self>,
     {
-        DeserializeMap::deserialize_pair_unknown_key(self, map)
+        DeserializeMap::deserialize_pair_unknown_key(self, map, key_handler, value_handler)
     }
 
     fn deserialize_pair_known_key<Key, Value>(
         &mut self,
         map: &mut Self::MapAccess,
         key: Key,
+        value_handler: Value::Handler,
     ) -> Result<Value, Self::Err>
     where
         Self: KnownKey<Key>,
-        Value: Deserialize<'de, Self>,
+        Value: DeserializeSpec + Deserialize<'de, Self>,
     {
-        DeserializeMap::deserialize_pair_known_key(self, map, key)
+        DeserializeMap::deserialize_pair_known_key(self, map, key, value_handler)
     }
 
-    fn deserialize_value<T>(&mut self, seq: &mut Self::SeqAccess) -> Result<T, Self::Err>
+    fn deserialize_value<T>(
+        &mut self,
+        seq: &mut Self::SeqAccess,
+        handler: T::Handler,
+    ) -> Result<T, Self::Err>
     where
-        T: Deserialize<'de, Self>;
+        T: DeserializeSpec + Deserialize<'de, Self>;
     fn finish_map(&mut self, map: Self::MapAccess) -> Result<(), Self::Err>;
     fn finish_seq(&mut self, seq: Self::SeqAccess) -> Result<(), Self::Err>;
 }
 
 #[cfg(test)]
+mod dynamic_client_side {
+    use std::{marker::PhantomData, sync::Arc};
+
+    use crate::gen_serde::{
+        Deserialize, DeserializeMap, DeserializeMapOrSeq, DeserializeSpec, Deserializer,
+        FromSerialized, KnownKey, MapOrSeq, json_format_side::JsonFormat,
+    };
+
+    #[derive(Debug, PartialEq, Eq)]
+    pub enum StringOrInt {
+        String(String),
+        Int(i64),
+    }
+
+    /// Runtime configuration for [`DynamicExample`]: which JSON shape to expect for `another_field`.
+    #[derive(Clone, Copy)]
+    pub struct DynamicExampleHandler {
+        pub another_field_is_string: bool,
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    pub struct DynamicExample {
+        pub title: String,
+        pub another_field: StringOrInt,
+    }
+
+    impl DeserializeSpec for DynamicExample {
+        type Handler = DynamicExampleHandler;
+    }
+
+    impl<'de, S> Deserialize<'de, S> for DynamicExample
+    where
+        S: Deserializer<'de>,
+        S: DeserializeMapOrSeq<'de>,
+        String: Deserialize<'de, S>,
+        i64: Deserialize<'de, S>,
+        S: KnownKey<&'static str>,
+        S::Err: From<&'static str>,
+    {
+        fn deserialize(handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err> {
+            match serialized.start_map_or_seq()? {
+                MapOrSeq::Map(mut map) => {
+                    let title = DeserializeMap::deserialize_pair_known_key(
+                        serialized,
+                        &mut map,
+                        "title",
+                        (),
+                    )?;
+                    let another_field = if handler.another_field_is_string {
+                        StringOrInt::String(DeserializeMap::deserialize_pair_known_key(
+                            serialized,
+                            &mut map,
+                            "another_field",
+                            (),
+                        )?)
+                    } else {
+                        StringOrInt::Int(DeserializeMap::deserialize_pair_known_key(
+                            serialized,
+                            &mut map,
+                            "another_field",
+                            (),
+                        )?)
+                    };
+                    DeserializeMapOrSeq::finish_map(serialized, map)?;
+                    Ok(DynamicExample {
+                        title,
+                        another_field,
+                    })
+                }
+                MapOrSeq::Seq(_) => Err(S::Err::from("expected JSON object for DynamicExample")),
+            }
+        }
+    }
+
+    #[test]
+    fn te_dynamic_example_string_branch() {
+        let s: Arc<str> = Arc::from(r#"{"title":"hi","another_field":"from_json"}"#.to_string());
+        let got: DynamicExample = s
+            .deserialize_and_terminate_with_handler(
+                JsonFormat,
+                DynamicExampleHandler {
+                    another_field_is_string: true,
+                },
+                PhantomData::<DynamicExample>,
+            )
+            .unwrap();
+        assert_eq!(
+            got,
+            DynamicExample {
+                title: "hi".into(),
+                another_field: StringOrInt::String("from_json".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn te_dynamic_example_int_branch() {
+        let s: Arc<str> = Arc::from(r#"{"title":"hi","another_field":42}"#.to_string());
+        let got: DynamicExample = s
+            .deserialize_and_terminate_with_handler(
+                JsonFormat,
+                DynamicExampleHandler {
+                    another_field_is_string: false,
+                },
+                PhantomData::<DynamicExample>,
+            )
+            .unwrap();
+        assert_eq!(
+            got,
+            DynamicExample {
+                title: "hi".into(),
+                another_field: StringOrInt::Int(42),
+            }
+        );
+    }
+}
+
+#[cfg(test)]
 mod client_side {
     use crate::gen_serde::{
-        Deserialize, DeserializeMap, DeserializeMapOrSeq, Deserializer, FromSerialized, KnownKey,
-        MapOrSeq,
+        Deserialize, DeserializeMap, DeserializeMapOrSeq, DeserializeSpec, Deserializer,
+        FromSerialized, KnownKey, MapOrSeq,
         json_format_side::{JsonFormat, PartialDeserialize, StringArcRef},
     };
     use std::{marker::PhantomData, sync::Arc};
@@ -146,6 +310,10 @@ mod client_side {
         pub title: String,
     }
 
+    impl DeserializeSpec for BasicObject {
+        type Handler = ();
+    }
+
     impl<'de, S> Deserialize<'de, S> for BasicObject
     where
         S: Deserializer<'de>,
@@ -153,16 +321,20 @@ mod client_side {
         String: Deserialize<'de, S>,
         S: KnownKey<&'static str>,
     {
-        fn deserialize(serialized: &mut S) -> Result<Self, S::Err> {
+        fn deserialize(_handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err> {
             match serialized.start_map_or_seq()? {
                 MapOrSeq::Map(mut map) => {
-                    let title =
-                        DeserializeMap::deserialize_pair_known_key(serialized, &mut map, "title")?;
+                    let title = DeserializeMap::deserialize_pair_known_key(
+                        serialized,
+                        &mut map,
+                        "title",
+                        (),
+                    )?;
                     DeserializeMapOrSeq::finish_map(serialized, map)?;
                     Ok(Self { title })
                 }
                 MapOrSeq::Seq(mut seq) => {
-                    let title = serialized.deserialize_value::<String>(&mut seq)?;
+                    let title = serialized.deserialize_value::<String>(&mut seq, ())?;
                     DeserializeMapOrSeq::finish_seq(serialized, seq)?;
                     Ok(Self { title })
                 }
@@ -272,6 +444,10 @@ mod client_side {
         pub data: PartialDeserialize,
     }
 
+    impl DeserializeSpec for Collection {
+        type Handler = ();
+    }
+
     impl<'de, S> Deserialize<'de, S> for Collection
     where
         S: Deserializer<'de>,
@@ -281,16 +457,21 @@ mod client_side {
         S: KnownKey<&'static str>,
         S::Err: From<&'static str>,
     {
-        fn deserialize(serialized: &mut S) -> Result<Self, S::Err> {
+        fn deserialize(_handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err> {
             match serialized.start_map_or_seq()? {
                 MapOrSeq::Map(mut map) => {
                     let identifier = DeserializeMap::deserialize_pair_known_key(
                         serialized,
                         &mut map,
                         "identifier",
+                        (),
                     )?;
-                    let data =
-                        DeserializeMap::deserialize_pair_known_key(serialized, &mut map, "data")?;
+                    let data = DeserializeMap::deserialize_pair_known_key(
+                        serialized,
+                        &mut map,
+                        "data",
+                        (),
+                    )?;
                     DeserializeMapOrSeq::finish_map(serialized, map)?;
                     Ok(Collection { identifier, data })
                 }
@@ -325,6 +506,10 @@ mod client_side {
         pub title: String,
     }
 
+    impl DeserializeSpec for DeTodoStringKey {
+        type Handler = ();
+    }
+
     impl<'de, S> Deserialize<'de, S> for DeTodoStringKey
     where
         S: Deserializer<'de>,
@@ -332,19 +517,20 @@ mod client_side {
         String: Deserialize<'de, S>,
         S: KnownKey<String>,
     {
-        fn deserialize(serialized: &mut S) -> Result<Self, S::Err> {
+        fn deserialize(_handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err> {
             match serialized.start_map_or_seq()? {
                 MapOrSeq::Map(mut map) => {
                     let title = DeserializeMap::deserialize_pair_known_key(
                         serialized,
                         &mut map,
                         String::from("title"),
+                        (),
                     )?;
                     DeserializeMapOrSeq::finish_map(serialized, map)?;
                     Ok(Self { title })
                 }
                 MapOrSeq::Seq(mut seq) => {
-                    let title = serialized.deserialize_value::<String>(&mut seq)?;
+                    let title = serialized.deserialize_value::<String>(&mut seq, ())?;
                     DeserializeMapOrSeq::finish_seq(serialized, seq)?;
                     Ok(Self { title })
                 }
@@ -373,8 +559,8 @@ mod json_format_side {
     use std::sync::Arc;
 
     use crate::gen_serde::{
-        Deserialize, DeserializeMap, DeserializeMapOrSeq, DeserializeSeq, Deserializer,
-        FromSerialized, KnownKey, KnownKeyInfo, MapOrSeq, UnknownKey,
+        Deserialize, DeserializeMap, DeserializeMapOrSeq, DeserializeSeq, DeserializeSpec,
+        Deserializer, FromSerialized, KnownKey, KnownKeyInfo, MapOrSeq, UnknownKey,
     };
 
     pub struct JsonAsArcCursor {
@@ -415,8 +601,13 @@ mod json_format_side {
         type Format = JsonFormat;
     }
 
+    impl DeserializeSpec for String {
+        type Handler = ();
+    }
+
     impl<'de> Deserialize<'de, JsonAsArcCursor> for String {
         fn deserialize(
+            _handler: Self::Handler,
             serialized: &mut JsonAsArcCursor,
         ) -> Result<Self, <JsonAsArcCursor as Deserializer<'de>>::Err> {
             let mut chars = serialized.inner[serialized.start..].chars().into_iter();
@@ -464,8 +655,13 @@ mod json_format_side {
         }
     }
 
+    impl DeserializeSpec for bool {
+        type Handler = ();
+    }
+
     impl<'de> Deserialize<'de, JsonAsArcCursor> for bool {
         fn deserialize(
+            _handler: Self::Handler,
             serialized: &mut JsonAsArcCursor,
         ) -> Result<Self, <JsonAsArcCursor as Deserializer<'de>>::Err> {
             let mut chars = serialized.inner[serialized.start..].chars().into_iter();
@@ -515,8 +711,13 @@ mod json_format_side {
 
     macro_rules! impl_deserialize_json_int_for {
         ($($t:ty),* $(,)?) => {$(
+            impl DeserializeSpec for $t {
+                type Handler = ();
+            }
+
             impl<'de> Deserialize<'de, JsonAsArcCursor> for $t {
                 fn deserialize(
+                    _handler: Self::Handler,
                     serialized: &mut JsonAsArcCursor,
                 ) -> Result<Self, <JsonAsArcCursor as Deserializer<'de>>::Err> {
                     deserialize_json_number_str(serialized)?
@@ -529,8 +730,13 @@ mod json_format_side {
 
     macro_rules! impl_deserialize_json_float_for {
         ($($t:ty),* $(,)?) => {$(
+            impl DeserializeSpec for $t {
+                type Handler = ();
+            }
+
             impl<'de> Deserialize<'de, JsonAsArcCursor> for $t {
                 fn deserialize(
+                    _handler: Self::Handler,
                     serialized: &mut JsonAsArcCursor,
                 ) -> Result<Self, <JsonAsArcCursor as Deserializer<'de>>::Err> {
                     deserialize_json_number_str(serialized)?
@@ -546,8 +752,13 @@ mod json_format_side {
     );
     impl_deserialize_json_float_for!(f32, f64);
 
+    impl DeserializeSpec for () {
+        type Handler = ();
+    }
+
     impl<'de> Deserialize<'de, JsonAsArcCursor> for () {
         fn deserialize(
+            _handler: Self::Handler,
             serialized: &mut JsonAsArcCursor,
         ) -> Result<Self, <JsonAsArcCursor as Deserializer<'de>>::Err> {
             let s = serialized.inner.as_ref();
@@ -563,11 +774,16 @@ mod json_format_side {
         }
     }
 
+    impl<T: DeserializeSpec> DeserializeSpec for Option<T> {
+        type Handler = T::Handler;
+    }
+
     impl<'de, T> Deserialize<'de, JsonAsArcCursor> for Option<T>
     where
-        T: Deserialize<'de, JsonAsArcCursor>,
+        T: DeserializeSpec + Deserialize<'de, JsonAsArcCursor>,
     {
         fn deserialize(
+            handler: Self::Handler,
             serialized: &mut JsonAsArcCursor,
         ) -> Result<Self, <JsonAsArcCursor as Deserializer<'de>>::Err> {
             let s = serialized.inner.as_ref();
@@ -576,7 +792,7 @@ mod json_format_side {
                 serialized.start = i + 4;
                 return Ok(None);
             }
-            Ok(Some(T::deserialize(serialized)?))
+            Ok(Some(T::deserialize(handler, serialized)?))
         }
     }
 
@@ -595,7 +811,7 @@ mod json_format_side {
         /// Parse the captured slice as `T` using the same [`JsonFormat`] rules as the outer cursor.
         pub fn continue_deserialize<T>(&self) -> Result<T, String>
         where
-            T: for<'de> Deserialize<'de, JsonAsArcCursor>,
+            T: for<'de> Deserialize<'de, JsonAsArcCursor, Handler = ()>,
         {
             let slice: Arc<str> = Arc::from(self.fragment());
             FromSerialized::deserialize_and_terminate_with(slice, JsonFormat, PhantomData::<T>)
@@ -603,8 +819,13 @@ mod json_format_side {
     }
 
     /// Captures one complete JSON value as a [`Range`] in `inner`, advances the cursor past it.
+    impl DeserializeSpec for PartialDeserialize {
+        type Handler = ();
+    }
+
     impl<'de> Deserialize<'de, JsonAsArcCursor> for PartialDeserialize {
         fn deserialize(
+            _handler: Self::Handler,
             serialized: &mut JsonAsArcCursor,
         ) -> Result<Self, <JsonAsArcCursor as Deserializer<'de>>::Err> {
             let s = serialized.inner.as_ref();
@@ -643,8 +864,13 @@ mod json_format_side {
         }
     }
 
+    impl DeserializeSpec for StringArcRef {
+        type Handler = ();
+    }
+
     impl<'de> Deserialize<'de, JsonAsArcCursor> for StringArcRef {
         fn deserialize(
+            _handler: Self::Handler,
             serialized: &mut JsonAsArcCursor,
         ) -> Result<Self, <JsonAsArcCursor as Deserializer<'de>>::Err> {
             let (parsed, end) = parse_json_string_arc_ref(&serialized.inner, serialized.start)?;
@@ -965,17 +1191,19 @@ mod json_format_side {
         fn deserialize_pair_unknown_key<Key, Value>(
             &mut self,
             map: &mut Self::MapAccess,
+            key_handler: Key::Handler,
+            value_handler: Value::Handler,
         ) -> Result<(Key, Value), Self::Err>
         where
-            Key: UnknownKey<Self> + Deserialize<'de, Self>,
-            Value: Deserialize<'de, Self>,
+            Key: UnknownKey<Self> + DeserializeSpec + Deserialize<'de, Self>,
+            Value: DeserializeSpec + Deserialize<'de, Self>,
         {
             if map.entries.is_empty() {
                 return Err("no object entries left to deserialize".into());
             }
             let (_k_arc, key_range, value_range) = map.entries.swap_remove(0);
             self.start = key_range.start;
-            let key = Key::deserialize(self)?;
+            let key = Key::deserialize(key_handler, self)?;
             if self.start != key_range.end {
                 return Err(format!(
                     "key JSON did not parse to expected span (got {}, expected {})",
@@ -983,7 +1211,7 @@ mod json_format_side {
                 ));
             }
             self.start = value_range.start;
-            let value = Value::deserialize(self)?;
+            let value = Value::deserialize(value_handler, self)?;
             if self.start != value_range.end {
                 return Err(format!(
                     "value JSON did not parse to expected span (got {}, expected {})",
@@ -997,10 +1225,11 @@ mod json_format_side {
             &mut self,
             map: &mut Self::MapAccess,
             key: Key,
+            value_handler: Value::Handler,
         ) -> Result<Value, Self::Err>
         where
             Self: KnownKey<Key>,
-            Value: Deserialize<'de, Self>,
+            Value: DeserializeSpec + Deserialize<'de, Self>,
         {
             let needle = <Self as KnownKey<Key>>::info(&key);
             let idx = map
@@ -1010,7 +1239,7 @@ mod json_format_side {
                 .ok_or_else(|| format!("missing key {:?}", needle))?;
             let (_k_arc, _key_range, value_range) = map.entries.swap_remove(idx);
             self.start = value_range.start;
-            let value = Value::deserialize(self)?;
+            let value = Value::deserialize(value_handler, self)?;
             if self.start != value_range.end {
                 return Err(format!(
                     "value for key {:?} did not parse to expected span (got end {}, expected {})",
@@ -1058,11 +1287,15 @@ mod json_format_side {
             }
         }
 
-        fn deserialize_value<T>(&mut self, seq: &mut Self::SeqAccess) -> Result<T, Self::Err>
+        fn deserialize_value<T>(
+            &mut self,
+            seq: &mut Self::SeqAccess,
+            handler: T::Handler,
+        ) -> Result<T, Self::Err>
         where
-            T: Deserialize<'de, Self>,
+            T: DeserializeSpec + Deserialize<'de, Self>,
         {
-            DeserializeSeq::deserialize_value(self, seq)
+            DeserializeSeq::deserialize_value(self, seq, handler)
         }
 
         fn finish_map(&mut self, map: Self::MapAccess) -> Result<(), Self::Err> {
@@ -1100,9 +1333,13 @@ mod json_format_side {
             Ok(())
         }
 
-        fn deserialize_value<T>(&mut self, _: &mut Self::SeqAccess) -> Result<T, Self::Err>
+        fn deserialize_value<T>(
+            &mut self,
+            _: &mut Self::SeqAccess,
+            handler: T::Handler,
+        ) -> Result<T, Self::Err>
         where
-            T: Deserialize<'de, Self>,
+            T: DeserializeSpec + Deserialize<'de, Self>,
         {
             let mut chars = self.inner[self.start..].chars().into_iter();
 
@@ -1113,7 +1350,7 @@ mod json_format_side {
                 // self.start += 1;
             }
 
-            let value = T::deserialize(self)?;
+            let value = T::deserialize(handler, self)?;
             // check for comma
 
             let mut chars = self.inner[self.start..].chars().into_iter();

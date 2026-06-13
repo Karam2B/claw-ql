@@ -284,7 +284,7 @@ mod test {
         connect_in_memory::ConnectInMemory,
         extentions::common_expressions::V0OnInsert,
         operations::{
-            LinkedOutput, Operation, SafeOperation,
+            LinkedOutput, Operation,
             fetch_many::{FetchMany, ManyOutput},
         },
         test_module::{self, Todo, todo_members},

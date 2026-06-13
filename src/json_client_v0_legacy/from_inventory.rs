@@ -1,4 +1,4 @@
-use crate::json_client::JsonCollection;
+use crate::json_client_v0::old_code::json_collection_trait::JsonCollection;
 use sqlx::Any as SqlxAny;
 use std::{any::Any, sync::Arc};
 

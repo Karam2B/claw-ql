@@ -33,7 +33,8 @@ pub mod extend_sqlite;
 pub mod extentions;
 pub mod from_row;
 pub mod json_client;
-pub mod json_client_channel;
+pub mod json_client_v0;
+pub mod json_client_v1;
 pub mod json_value_cmp;
 #[cfg(test)]
 pub mod lifetime_guide;
@@ -246,7 +247,7 @@ pub mod select_items_trait_object {
 
         use crate::{
             connect_in_memory::ConnectInMemory,
-            json_client::{
+            json_client_v0::{
                 dynamic_collection::{DynamicCollection, DynamicField},
                 fetch_many::extending_link_trait::JsonLinkFetchMany,
             },

@@ -5,7 +5,7 @@ use crate::{
     extentions::common_expressions::{Identifier, TableNameExpression},
     fix_executor::ExecutorTrait,
     from_row::{FromRowAlias, FromRowData},
-    operations::{LinkedOutput, Operation, OperationOutput, insert_one::ConstraintViolation},
+    operations::{LinkedOutput, Operation, OperationOutput},
     query_builder::{Expression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat},
     statements::delete_statement::DeleteStatement,
 };

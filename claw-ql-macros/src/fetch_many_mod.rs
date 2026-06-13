@@ -22,5 +22,6 @@ impl Parse for MainStatement {
 }
 
 pub fn main_statement_to_token(stmt: MainStatement) -> TokenStream2 {
+    let _ = stmt;
     quote! {}
 }

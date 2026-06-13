@@ -8,7 +8,10 @@ use sqlx::Sqlite;
 
 use crate::{
     collections::CollectionHandler,
-    json_client::{JsonCollection, JsonError, axum_router_mod::HttpError},
+    json_client_v0::{
+        http_error_trait::HttpError,
+        old_code::json_collection_trait::JsonCollection,
+    },
     links::{Change, Link, LiqLink},
     migration::OnMigrate,
     operations::select_one_op::{SelectOne, SelectOneFragment},
@@ -121,9 +124,11 @@ impl LiqLink<sqlx::Sqlite> for date_liq<Sqlite> {
         &mut self,
         collections: &std::collections::HashMap<
             String,
-            Box<dyn crate::json_client::JsonCollection<sqlx::Sqlite>>,
+            Box<dyn crate::json_client_v0::old_code::json_collection_trait::JsonCollection<sqlx::Sqlite>>,
         >,
-        base: &dyn crate::json_client::JsonCollection<sqlx::Sqlite>,
+        base: &dyn crate::json_client_v0::old_code::json_collection_trait::JsonCollection<
+            sqlx::Sqlite,
+        >,
         input: Self::CreateLinkInput,
     ) -> Result<(Self::CreateLinkOk, Self::This), Self::CreateLinkError> {
         let base_name = base.table_name_js();
@@ -148,7 +153,9 @@ impl LiqLink<sqlx::Sqlite> for date_liq<Sqlite> {
     type OnRequestError = CollectionIsNotDated;
     fn on_request(
         &self,
-        base: &dyn crate::json_client::JsonCollection<sqlx::Sqlite>,
+        base: &dyn crate::json_client_v0::old_code::json_collection_trait::JsonCollection<
+            sqlx::Sqlite,
+        >,
         input: Self::OnRequestInput,
     ) -> Result<Self::This, Self::OnRequestError> {
         self.collections

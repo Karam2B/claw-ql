@@ -8,8 +8,8 @@ use claw_ql::{
     connect_in_memory::ConnectInMemory,
     execute::Executable,
     fix_executor::ExecutorTrait,
-    json_client::dynamic_collection::DynamicField,
-    json_client_channel::{
+    json_client_v0::dynamic_collection::DynamicField,
+    json_client_v1::{
         add_collection::{AddCollectionInput, TypeSpec},
         json_client::{JsonClient, JsonClientSetting},
     },

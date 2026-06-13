@@ -1,6 +1,6 @@
-// pub use crate::json_client::dynamic_collection;
-pub use crate::json_client::sqlx_type_ident;
-pub use crate::json_client::to_bind_trait;
+// pub use crate::json_client_v0::dynamic_collection;
+pub use crate::json_client_v0::sqlx_type_ident;
+pub use crate::json_client_v0::to_bind_trait;
 
 pub mod http_client_error {
     use serde::Serialize;
@@ -53,7 +53,7 @@ pub mod dynamic_collection {
 
     use crate::{
         database_extention::DatabaseExt,
-        json_client::{dynamic_collection::DynamicField, sqlx_type_ident::SqlxTypeHandler},
+        json_client_v0::{dynamic_collection::DynamicField, sqlx_type_ident::SqlxTypeHandler},
     };
 
     pub struct DynamicCollection<S> {
@@ -100,7 +100,7 @@ pub mod dynamic_collection {
     mod impl_on_migrate {
         use super::*;
         use crate::{
-            json_client::dynamic_collection as og_dynamic_collection, on_migrate::OnMigrate,
+            json_client_v0::dynamic_collection as og_dynamic_collection, on_migrate::OnMigrate,
         };
 
         impl<S> OnMigrate for DynamicCollection<S>
@@ -158,8 +158,8 @@ pub mod dynamic_collection {
     mod impl_aliased {
         use crate::{
             database_extention::DatabaseExt, extentions::common_expressions::Aliased,
-            json_client::dynamic_collection::str_aliased_impls::DynamicAliasedCols,
-            json_client_channel::dynamic_collection::DynamicCollection,
+            json_client_v0::dynamic_collection::str_aliased_impls::DynamicAliasedCols,
+            json_client_v1::dynamic_collection::DynamicCollection,
         };
 
         impl<S> Aliased for DynamicCollection<S>
@@ -192,7 +192,7 @@ pub mod dynamic_collection {
     mod expression_table_name {
         use crate::{
             extentions::common_expressions::TableNameExpression,
-            json_client_channel::dynamic_collection::DynamicCollection,
+            json_client_v1::dynamic_collection::DynamicCollection,
         };
 
         impl<S> TableNameExpression for DynamicCollection<S> {
@@ -297,15 +297,15 @@ pub mod sqlx_executor {
     use super::json_client::OperationOutput;
     use crate::database_extention::DatabaseExt;
     use crate::fix_executor::ExecutorTrait;
-    use crate::json_client_channel::dynamic_collection::DynamicCollection;
+    use crate::json_client_v1::dynamic_collection::DynamicCollection;
 
-    use crate::json_client::fetch_many::extending_link_trait::JsonLinkFetchMany;
-    use crate::json_client_channel::add_collection::add_collection;
-    use crate::json_client_channel::add_link::add_link;
-    use crate::json_client_channel::fetch_many::fetch_many;
-    use crate::json_client_channel::http_client_error::HttpClientError;
-    use crate::json_client_channel::insert_one::insert_one;
-    use crate::json_client_channel::json_client::JsonClient;
+    use crate::json_client_v0::fetch_many::extending_link_trait::JsonLinkFetchMany;
+    use crate::json_client_v1::add_collection::add_collection;
+    use crate::json_client_v1::add_link::add_link;
+    use crate::json_client_v1::fetch_many::fetch_many;
+    use crate::json_client_v1::http_client_error::HttpClientError;
+    use crate::json_client_v1::insert_one::insert_one;
+    use crate::json_client_v1::json_client::JsonClient;
     use crate::links::DefaultRelationKey;
     use crate::links::relation_optional_to_many::OptionalToMany;
     use crate::on_migrate::OnMigrate;
@@ -321,12 +321,13 @@ pub mod sqlx_executor {
     use tokio::sync::RwLock as Trw;
     use tokio::sync::mpsc as tokio_mpsc;
 
-    pub type LinkInformations = crate::json_client::json_client::LinkInformations;
+    pub type LinkInformations = crate::json_client_v0::json_client::LinkInformations;
 
     pub struct ClientData<S: Database> {
         pub(crate) collections: Trw<HashMap<String, Trw<DynamicCollection<S>>>>,
         pub(crate) migration: Trw<Vec<String>>,
         pub(crate) link_info: Trw<LinkInformations>,
+        #[allow(dead_code)]
         pub(crate) setting: JsonClientSetting,
         pub(crate) pool: Pool<S>,
     }
@@ -455,9 +456,9 @@ pub mod json_client {
     use std::convert::Infallible;
     use tokio::sync::mpsc as tokio_mpsc;
 
-    use crate::json_client as old_mod;
-    use crate::json_client::fetch_many::SupportedLinkFetchMany;
-    use crate::json_client_channel::{
+    use crate::json_client_v0 as old_mod;
+    use crate::json_client_v0::fetch_many::SupportedLinkFetchMany;
+    use crate::json_client_v1::{
         add_collection::{AddCollectionInput, AddCollectionOutput},
         http_client_error::HttpClientError,
     };
@@ -472,7 +473,7 @@ pub mod json_client {
     #[serde(deny_unknown_fields)]
     pub struct FetchManyInput {
         pub base: String,
-        pub filters: Vec<crate::json_client_channel::supported_filter::SupportedFilter>,
+        pub filters: Vec<crate::json_client_v1::supported_filter::SupportedFilter>,
         pub links: Vec<SupportedLinkFetchMany>,
         pub pagination: Pagination,
     }
@@ -642,9 +643,9 @@ pub mod add_collection {
     use crate::{
         database_extention::DatabaseExt,
         fix_executor::ExecutorTrait,
-        json_client::{dynamic_collection::DynamicField, sqlx_type_ident::SqlxTypeHandler},
-        json_client_channel::dynamic_collection::DynamicCollection,
-        json_client_channel::{http_client_error::HttpClientError, sqlx_executor::ClientData},
+        json_client_v0::{dynamic_collection::DynamicField, sqlx_type_ident::SqlxTypeHandler},
+        json_client_v1::dynamic_collection::DynamicCollection,
+        json_client_v1::{http_client_error::HttpClientError, sqlx_executor::ClientData},
         on_migrate::OnMigrate,
         query_builder::{Expression, StatementBuilder},
     };
@@ -756,7 +757,7 @@ pub mod add_link {
     use crate::{
         database_extention::DatabaseExt,
         fix_executor::ExecutorTrait,
-        json_client_channel::{
+        json_client_v1::{
             http_client_error::HttpClientError,
             json_client::{AddLinkInput, AddLinkOutput},
             sqlx_executor::ClientData,
@@ -778,7 +779,7 @@ pub mod add_link {
     {
         async move {
             match input {
-                crate::json_client::add_link::AddLinkInput::OptionalToMany { from, to } => {
+                crate::json_client_v0::add_link::AddLinkInput::OptionalToMany { from, to } => {
                     let mut linfo_gaurd = this.link_info.write().await;
 
                     if linfo_gaurd
@@ -880,8 +881,8 @@ pub mod dynamic_order_by {
         database_extention::DatabaseExt,
         extentions::common_expressions::Scoped,
         from_row::{FromRowAlias, FromRowData, FromRowError},
-        json_client::sqlx_type_ident::SqlxTypeHandler,
-        json_client_channel::json_client::OrderDirection,
+        json_client_v0::sqlx_type_ident::SqlxTypeHandler,
+        json_client_v1::json_client::OrderDirection,
         partial_serde::PartialSerialize,
         query_builder::{Expression, OpExpression, StatementBuilder},
     };
@@ -1061,7 +1062,7 @@ pub mod dynamic_order_by {
 
 pub mod supported_filter {
     use crate::expressions::ColumnEqual;
-    use crate::json_client_channel::dynamic_collection::DynamicCollection;
+    use crate::json_client_v1::dynamic_collection::DynamicCollection;
     use crate::query_builder::functional_expr::BoxedExpression;
     use crate::{database_extention::DatabaseExt, partial_serde::PartialDeserialize};
     use serde::{Deserialize, Serialize};
@@ -1111,12 +1112,12 @@ pub mod fetch_many {
         database_extention::DatabaseExt,
         extentions::named_bind::NamedBind,
         fix_executor::ExecutorTrait,
-        json_client::fetch_many::{
+        json_client_v0::fetch_many::{
             SupportedLinkFetchMany, extending_link_trait::JsonLinkFetchMany,
         },
-        json_client_channel::dynamic_collection::DynamicCollection,
-        json_client_channel::supported_filter::parse_supported_filter,
-        json_client_channel::{
+        json_client_v1::dynamic_collection::DynamicCollection,
+        json_client_v1::supported_filter::parse_supported_filter,
+        json_client_v1::{
             dynamic_order_by::DynamicOrderBy,
             http_client_error::HttpClientError,
             json_client::{FetchManyInput, FetchManyOutput},
@@ -1218,7 +1219,7 @@ pub mod fetch_many {
             fn post_select_each_2(
                 &self,
                 item: &Box<dyn Any + Send>,
-                mut poi: &mut Box<dyn Any + Send>,
+                poi: &mut Box<dyn Any + Send>,
             ) {
                 let ite_down = item
                     .deref()
@@ -1559,7 +1560,7 @@ pub mod insert_one {
     use crate::{
         database_extention::DatabaseExt,
         fix_executor::ExecutorTrait,
-        json_client_channel::{
+        json_client_v1::{
             http_client_error::HttpClientError,
             json_client::{InsertOneInput, InsertOneOutput},
             sqlx_executor::ClientData,
@@ -1573,6 +1574,7 @@ pub mod insert_one {
     where
         S: DatabaseExt + ExecutorTrait,
     {
+        let _ = (this, input);
         async move { todo!() }
     }
 }

@@ -1,7 +1,7 @@
 use crate::collections::SingleIncremintalInt;
 use crate::database_extention::DatabaseExt;
-use crate::json_client::database_for_json_client::DatabaseForJsonClient;
-use crate::json_client::type_t_trait::TypeT;
+use crate::json_client_v0::database_for_json_client::DatabaseForJsonClient;
+use crate::json_client_v0::sqlx_type_ident::SqlxTypeHandler as TypeT;
 use crate::query_builder::Expression;
 use crate::query_builder::QueryBuilder;
 use crate::query_builder::functional_expr::ManyFlat;
@@ -60,7 +60,7 @@ mod dynamic_field_impl {
 mod sqlx_extention_impls {
     use std::marker::PhantomData;
 
-    use crate::json_client::to_bind_trait::ToBind;
+    use crate::json_client_v0::to_bind_trait::ToBind;
 
     use super::DatabaseForJsonClient;
     use sqlx::Sqlite;
@@ -93,7 +93,7 @@ pub mod dynamic_collection_impl {
     use crate::{
         collections::{Collection, ValidateCollection},
         expressions::is_null::IsNull,
-        json_client::to_bind_trait::ToBind,
+        json_client_v0::to_bind_trait::ToBind,
         query_builder::{
             IsOpExpression, ManyExpressions, OpExpression, SqlSyntax,
             functional_expr::ManyBoxedExpressions,

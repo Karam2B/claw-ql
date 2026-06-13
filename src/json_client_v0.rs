@@ -448,7 +448,7 @@ pub mod database_for_json_client {
 }
 
 pub mod json_client {
-    use crate::json_client::dynamic_collection::DynamicCollection;
+    use crate::json_client_v0::dynamic_collection::DynamicCollection;
     use sqlx::{Database, Pool};
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
@@ -507,7 +507,7 @@ pub mod json_client {
 pub mod supported_filter {
     use crate::database_extention::DatabaseExt;
     use crate::expressions::ColumnEqual;
-    use crate::json_client::dynamic_collection::DynamicCollection;
+    use crate::json_client_v0::dynamic_collection::DynamicCollection;
     use crate::query_builder::functional_expr::BoxedExpression;
     use serde::{Deserialize, Serialize};
     use serde_json::Value as JsonValue;
@@ -558,7 +558,7 @@ pub mod links_utils {
     use sqlx::Database;
 
     use crate::{
-        json_client::{dynamic_collection::DynamicCollection, json_client::JsonClient},
+        json_client_v0::{dynamic_collection::DynamicCollection, json_client::JsonClient},
         links::{DefaultRelationKey, relation_optional_to_many::OptionalToMany},
     };
 
@@ -596,7 +596,7 @@ pub mod dynamic_collection {
 
     use serde::Deserialize;
 
-    use crate::{database_extention::DatabaseExt, json_client::sqlx_type_ident::SqlxTypeHandler};
+    use crate::{database_extention::DatabaseExt, json_client_v0::sqlx_type_ident::SqlxTypeHandler};
 
     pub struct DynamicCollection<S> {
         pub name: String,
@@ -647,7 +647,7 @@ pub mod dynamic_collection {
     mod expression {
         use crate::{
             database_extention::DatabaseExt,
-            json_client::{dynamic_collection::DynamicField, sqlx_type_ident::SqlxTypeHandler},
+            json_client_v0::{dynamic_collection::DynamicField, sqlx_type_ident::SqlxTypeHandler},
             query_builder::{Expression, OpExpression, StatementBuilder},
         };
 
@@ -673,7 +673,7 @@ pub mod dynamic_collection {
         use crate::from_row::RowPostAliased;
         use crate::from_row::RowPreAliased;
         use crate::from_row::RowTwoAliased;
-        use crate::json_client::sqlx_type_ident::SqlxTypeHandler;
+        use crate::json_client_v0::sqlx_type_ident::SqlxTypeHandler;
 
         impl<'bx, S> FromRowData for Vec<DynamicField<Box<dyn SqlxTypeHandler<S> + Send + Sync + 'bx>>> {
             type RData = serde_json::Map<String, serde_json::Value>;
@@ -786,7 +786,7 @@ pub mod dynamic_collection {
 
         use super::DynamicCollection;
         use crate::{
-            json_client::{
+            json_client_v0::{
                 database_for_json_client::DatabaseForJsonClient, dynamic_collection::DynamicField,
             },
             on_migrate::OnMigrate,
@@ -852,7 +852,7 @@ pub mod dynamic_collection {
     mod collection_impls {
         use crate::{
             collections::{Collection, SingleIncremintalInt},
-            json_client::dynamic_collection::DynamicCollection,
+            json_client_v0::dynamic_collection::DynamicCollection,
         };
 
         impl<S> Collection for DynamicCollection<S> {
@@ -970,7 +970,7 @@ pub mod dynamic_collection {
         use crate::{
             database_extention::DatabaseExt,
             from_row::{FromRowAlias, FromRowData},
-            json_client::dynamic_collection::DynamicCollection,
+            json_client_v0::dynamic_collection::DynamicCollection,
         };
         use serde_json::Value as JsonValue;
         use sqlx::ColumnIndex;
@@ -1060,7 +1060,7 @@ pub mod dynamic_collection {
         use super::*;
         use crate::database_extention::DatabaseExt;
         use crate::extentions::common_expressions::V0OnUpdate;
-        use crate::json_client::to_bind_trait::ToBind;
+        use crate::json_client_v0::to_bind_trait::ToBind;
         use crate::query_builder::IsOpExpression;
         use crate::query_builder::ManyExpressions;
         use crate::query_builder::StatementBuilder;
@@ -1146,7 +1146,7 @@ pub mod dynamic_collection {
         use std::ops::Not;
 
         use crate::database_extention::DatabaseExt;
-        use crate::json_client::to_bind_trait::ToBind;
+        use crate::json_client_v0::to_bind_trait::ToBind;
         use crate::query_builder::IsOpExpression;
         use crate::query_builder::ManyExpressions;
         use crate::query_builder::StatementBuilder;
@@ -1226,10 +1226,10 @@ pub mod add_collection {
     use std::ops::Not;
     use std::sync::Arc;
 
-    use crate::json_client::database_for_json_client::DatabaseForJsonClient;
-    use crate::json_client::dynamic_collection::{DynamicCollection, DynamicField};
-    use crate::json_client::json_client::JsonClient;
-    use crate::json_client::sqlx_type_ident::SqlxTypeHandler;
+    use crate::json_client_v0::database_for_json_client::DatabaseForJsonClient;
+    use crate::json_client_v0::dynamic_collection::{DynamicCollection, DynamicField};
+    use crate::json_client_v0::json_client::JsonClient;
+    use crate::json_client_v0::sqlx_type_ident::SqlxTypeHandler;
     use crate::on_migrate::OnMigrate;
     use crate::query_builder::StatementBuilder;
     use convert_case::{Case, Casing};
@@ -1423,7 +1423,7 @@ pub mod fetch_many {
     use tokio::sync::RwLockReadGuard;
 
     use crate::{
-        json_client::{
+        json_client_v0::{
             database_for_json_client::DatabaseForJsonClient,
             fetch_many::extending_link_trait::JsonLinkFetchMany,
             json_client::JsonClient,
@@ -1613,7 +1613,7 @@ pub mod fetch_many {
             fn post_select_each_2(
                 &self,
                 item: &Box<dyn Any + Send>,
-                mut poi: &mut Box<dyn Any + Send>,
+                poi: &mut Box<dyn Any + Send>,
             ) {
                 let ite_down = item
                     .deref()
@@ -1795,8 +1795,8 @@ pub mod fetch_many {
 pub mod fetch_one {
     use super::database_for_json_client::DatabaseForJsonClient;
     use super::json_client::JsonClient;
-    use crate::json_client::supported_filter::InvalidFilter;
-    use crate::json_client::supported_filter::SupportedFilter;
+    use crate::json_client_v0::supported_filter::InvalidFilter;
+    use crate::json_client_v0::supported_filter::SupportedFilter;
     use crate::operations::LinkedOutput;
     use crate::operations::Operation;
     use crate::operations::fetch_one::FetchOne;
@@ -2017,9 +2017,9 @@ pub mod json_link_fetch_one_extention {
 #[claw_ql_macros::skip]
 // to be refactored
 pub mod update_one {
-    use crate::json_client::database_for_json_client::DatabaseForJsonClient;
-    use crate::json_client::json_client::JsonClient;
-    use crate::json_client::supported_filters::{InvalidFilter, SupportedFilter};
+    use crate::json_client_v0::database_for_json_client::DatabaseForJsonClient;
+    use crate::json_client_v0::json_client::JsonClient;
+    use crate::json_client_v0::supported_filters::{InvalidFilter, SupportedFilter};
     use crate::operations::{self, SafeOperation};
     use crate::operations::{LinkedOutput, Operation, v0_update_one::UpdateOne};
     use serde::Deserialize;
@@ -2126,11 +2126,11 @@ pub mod supported_links_on_fetch_one {
     use std::collections::HashSet;
     use std::ops::Not;
 
-    use crate::json_client::OnlyDefaultLinks;
-    use crate::json_client::json_client::JsonClient;
-    use crate::json_client::json_link_fetch_one_extention::JsonLinkFetchOne;
+    use crate::json_client_v0::OnlyDefaultLinks;
+    use crate::json_client_v0::json_client::JsonClient;
+    use crate::json_client_v0::json_link_fetch_one_extention::JsonLinkFetchOne;
     use crate::{
-        json_client::{
+        json_client_v0::{
             database_for_json_client::DatabaseForJsonClient, dynamic_collection::DynamicCollection,
         },
         links::{Link, relation_optional_to_many::OptionalToMany},
@@ -2324,9 +2324,9 @@ pub mod insert_one {
 #[claw_ql_macros::skip]
 // to be refactored
 pub mod delete_one {
-    use crate::json_client::database_for_json_client::DatabaseForJsonClient;
-    use crate::json_client::json_client::JsonClient;
-    use crate::json_client::supported_filters::{InvalidFilter, SupportedFilter};
+    use crate::json_client_v0::database_for_json_client::DatabaseForJsonClient;
+    use crate::json_client_v0::json_client::JsonClient;
+    use crate::json_client_v0::supported_filters::{InvalidFilter, SupportedFilter};
     use crate::operations::delete_one::DeleteOne;
     use crate::operations::{self, SafeOperation};
     use crate::operations::{LinkedOutput, Operation};
@@ -2423,7 +2423,7 @@ pub mod delete_one {
 mod as_router {
     use super::database_for_json_client::DatabaseForJsonClient;
     use super::json_client::JsonClient;
-    use crate::json_client::fetch_one::FetchOneInput;
+    use crate::json_client_v0::fetch_one::FetchOneInput;
     use axum::{Json, Router, extract::State, response::IntoResponse, routing::get};
     use sqlx::{ColumnIndex, Decode, Encode, prelude::Type};
     use std::sync::Arc;
@@ -2454,6 +2454,8 @@ mod as_router {
 }
 
 // maybe usefull for ExtendableJsonClient in the future
+// Split/out-of-tree sources previously under `src/json_client/` live in `src/json_client_v0_legacy/`
+// alongside this module (not wired into compilation).
 #[claw_ql_macros::skip]
 mod old_code {
     mod old_fetch_one {
@@ -2490,7 +2492,7 @@ mod old_code {
 
     mod router_testing {
         use crate::connect_in_memory::ConnectInMemory;
-        use crate::json_client::JsonClient;
+        use crate::json_client_v0::JsonClient;
         use axum::Router;
         use axum::body::Body;
         use axum::extract::Request;
@@ -2873,10 +2875,11 @@ mod old_code {
         use crate::{BindItem, Buildable, ColumPositionConstraint};
         use crate::{
             QueryBuilder,
-            json_client::{JsonClient, JsonCollection, axum_router_mod::HttpError},
+            json_client_v0::{http_error_trait::HttpError, json_client::JsonClient},
             migration::OnMigrate,
             prelude::stmt::SelectSt,
         };
+        use super::json_collection_trait::JsonCollection;
 
         #[derive(Debug, Serialize, Deserialize)]
         pub struct AddCollectionBody {
@@ -3774,5 +3777,30 @@ mod old_code {
                 self.post_select_each_2(item, poi);
             }
         }
+    }
+}
+
+pub mod http_error_trait {
+    use hyper::StatusCode;
+
+    pub trait HttpError {
+        fn status_code(&self) -> StatusCode;
+        fn sub_code(&self) -> Option<&'static str> {
+            None
+        }
+        fn sub_message(&self) -> Option<String> {
+            None
+        }
+    }
+
+    pub struct ErrorId(pub i64);
+
+    pub trait ErrorReporter {
+        fn report(&self, input: serde_json::Value) -> ErrorId;
+    }
+
+    pub enum JsonError {
+        ParseError(String),
+        String(String),
     }
 }

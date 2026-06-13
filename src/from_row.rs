@@ -169,8 +169,7 @@ pub mod from_row_v2 {
     use crate::from_row::{
         FromRowData, FromRowError, RowPostAliased, RowPreAliased, RowTwoAliased,
     };
-    use sqlx::{ColumnIndex, Database, Decode, Row, Sqlite, Type, sqlite::SqliteRow};
-    use std::any::Any;
+    use sqlx::{ColumnIndex, Database, Decode, Row, Type};
 
     pub trait RowAliased: Clone + Sized {
         type SqlxRow: Row;

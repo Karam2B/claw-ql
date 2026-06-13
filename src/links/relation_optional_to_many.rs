@@ -1286,7 +1286,6 @@ mod impl_set_id_for_update {
             insert_one::ConstraintViolation,
             update::{UpdateLink, UpdateLinkData, UpdateLinkSplit},
         },
-        update_mod,
     };
 
     impl<Key, From, To> UpdateLinkSplit
@@ -1982,9 +1981,7 @@ mod impl_for_delete {
         collections::{Collection, CollectionId},
         links::relation_optional_to_many::{find_place_for_this::OneColumn, fk_name::AsIdentifier},
         operations::{
-            CollectionOutput, LinkedOutput,
             delete::{DeleteLink, DeleteLinkData, DeleteLinkPreOp, DeleteLinkSplit},
-            fetch_one::FetchOne,
         },
     };
 

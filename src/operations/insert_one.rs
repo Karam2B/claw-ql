@@ -180,7 +180,7 @@ impl InsertOneLink for () {
     type PostOpOutput = ();
     fn post_op_output(&self
     ,_: <Self::PostOp as OperationOutput>::Output,
-    ) -> Result<(Self::PostOpOutput), ConstraintViolation> {
+    ) -> Result<Self::PostOpOutput, ConstraintViolation> {
         Ok(())
     }
 

@@ -14,7 +14,7 @@ use claw_ql::{
 
 #[tokio::test]
 async fn fetch_many() {
-    let g = tracing::dispatcher::set_global_default(
+    tracing::dispatcher::set_global_default(
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::TRACE)
             .with_test_writer()
@@ -106,7 +106,7 @@ async fn fetch_many() {
 
 #[tokio::test]
 async fn insert_ops() {
-    let g = tracing::dispatcher::set_global_default(
+    tracing::dispatcher::set_global_default(
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::TRACE)
             .with_test_writer()
@@ -167,6 +167,5 @@ async fn insert_ops() {
             links: 1
         }
     );
-    drop(g);
     panic!();
 }
