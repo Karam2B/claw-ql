@@ -139,8 +139,8 @@ where
     Wheres: Send,
     S: Database,
     // from row
-    Handler: for<'r> FromRowAlias<'r, S::Row, FromRowData = Handler::Data>,
-    Handler: Collection<Data: Send, Id = SingleIncremintalInt> + 'static,
+    Handler: for<'r> FromRowAlias<'r, S::Row, FromRowData = Handler::OutputData>,
+    Handler: Collection<OutputData: Send, Id = SingleIncremintalInt> + 'static,
     Handler: OnUpdate<UpdateExpression: Send + ManyExpressions<'static, S>>,
     Links: Send
         + IsOpExpression
@@ -161,7 +161,7 @@ where
     Handler: Members,
 {
     type Output = Option<
-        LinkedOutput<i64, <Handler as Collection>::Data, <Links as LinkUpdateOne<S>>::Output>,
+        LinkedOutput<i64, <Handler as Collection>::OutputData, <Links as LinkUpdateOne<S>>::Output>,
     >;
     async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output {
         let pre_op = self.0.links.pre_op().exec_operation(&mut *pool).await;

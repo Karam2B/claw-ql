@@ -1,7 +1,12 @@
 pub trait Collection {
     fn table_name(&self) -> &str;
     fn table_name_lower_case(&self) -> &str;
-    type Data;
+    /// Wire or expression input for insert-style operations.
+    type InputData;
+    /// Patch input for update-style operations.
+    type UpdateData;
+    /// Row shape after SELECT / RETURNING.
+    type OutputData;
     type Id: CollectionId;
     fn id(&self) -> Self::Id;
 }

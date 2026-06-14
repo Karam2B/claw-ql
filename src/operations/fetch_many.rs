@@ -141,7 +141,7 @@ where
     O: FromRowData,
 {
     type Output = ManyOutput<
-        LinkedOutput<<B::Id as CollectionId>::IdData, B::Data, L::Output>,
+        LinkedOutput<<B::Id as CollectionId>::IdData, B::OutputData, L::Output>,
         (<B::Id as CollectionId>::IdData, O::RData),
     >;
 }
@@ -163,9 +163,9 @@ where
     Links::Join: for<'q> ManyExpressions<'q, S>,
     Links::Op: Operation<S>,
     Links::OpInput: Send,
-    Base: Collection<Data: Send, Id: Send>,
+    Base: Collection<OutputData: Send, Id: Send>,
     Base: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
-    Base: FromRowData<RData = Base::Data>,
+    Base: FromRowData<RData = Base::OutputData>,
     Base: for<'r> FromRowAlias<'r, S::Row>,
     Base::Id: FromRowData<RData = <Base::Id as CollectionId>::IdData>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row>,

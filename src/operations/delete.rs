@@ -137,7 +137,7 @@ where
     Links: DeleteLink,
 {
     type Output = Vec<
-        LinkedOutput<<Base::Id as CollectionId>::IdData, <Base as Collection>::Data, Links::Output>,
+        LinkedOutput<<Base::Id as CollectionId>::IdData, <Base as Collection>::OutputData, Links::Output>,
     >;
 }
 
@@ -151,8 +151,8 @@ where
     Base: Collection,
     Base: Identifier<Identifier: for<'q> ManyExpressions<'q, S>>,
     Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
-    Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::Data>,
-    Base::Data: Send,
+    Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::OutputData>,
+    Base::OutputData: Send,
     Base::Id: Send + CollectionId<IdData: Send>,
     Base::Id: Identifier<Identifier: for<'q> ManyExpressions<'q, S>>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row, RData = <Base::Id as CollectionId>::IdData>,

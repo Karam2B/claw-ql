@@ -141,17 +141,9 @@ pub mod dynamic_collection_impl {
         }
         // type PartialInput = JsonValue;
         // type PartialValidationError = DeserializeError;
-        type Partial = JsonPartial<S>;
-        // fn validate_partial(
-        //     &self,
-        //     input: Self::PartialInput,
-        // ) -> Result<Self::Partial, Self::PartialValidationError> {
-
-        // }
-
-        // type DataInput = JsonValue;
-        // type DataValidationError = DeserializeError;
-        type Data = JsonData<S>;
+        type InputData = JsonData<S>;
+        type UpdateData = JsonPartial<S>;
+        type OutputData = JsonData<S>;
         // fn validate_data(
         //     &self,
         //     input: Self::DataInput,

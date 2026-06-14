@@ -65,8 +65,8 @@ where
     Links: Send,
     S: Database,
     Handler: Send,
-    Handler: Collection<Data: Send>
-        + for<'q> FromRowAlias<'q, S::Row, FromRowData = <Handler as Collection>::Data>,
+    Handler: Collection<OutputData: Send>
+        + for<'q> FromRowAlias<'q, S::Row, FromRowData = <Handler as Collection>::OutputData>,
     Handler: Members,
     Links: Link<Handler>,
     Links::Spec: Send
@@ -84,7 +84,7 @@ where
     type Output = Option<
         LinkedOutput<
             i64,
-            <Handler as Collection>::Data,
+            <Handler as Collection>::OutputData,
             <Links::Spec as LinkDeleteById<S>>::DeleteReturn,
         >,
     >;

@@ -861,212 +861,131 @@ pub mod utils_some_is_err {
     }
 }
 
-pub mod partial_serde {
-    use core::fmt;
-    use std::{
-        ops::{Deref, Range},
-        sync::Arc,
-    };
+pub mod sub_arc {
+    use std::ops::{Deref, Range};
+    use std::sync::Arc;
 
-    use serde::{
-        Deserialize, Deserializer, Serialize,
-        de::{DeserializeOwned, Visitor},
-    };
+    pub type ArcSubStr = SubArc<str>;
 
-    #[derive(Clone, Debug, Serialize, Deserialize)]
-    pub struct PartialSerialize(serde_json::Value);
-
-    impl PartialSerialize {
-        pub fn new<T: 'static + Clone + Serialize + fmt::Debug>(value: T) -> Self {
-            Self(serde_json::to_value(value).expect("claw_ql_bug: when serialize ever fail?"))
-        }
-    }
-
-    #[derive(Debug, Clone)]
-    pub struct PartialDeserialize(String);
-
-    impl PartialDeserialize {
-        pub fn continue_deserialize<T>(self) -> Result<T, serde_json::Error>
-        where
-            T: DeserializeOwned,
-        {
-            let value = serde_json::from_str::<T>(&self.0)?;
-            Ok(value)
-        }
-    }
-
-    impl<'de> Deserialize<'de> for PartialDeserialize {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let value = deserializer.deserialize_any(AnyVisitor)?;
-
-            Ok(PartialDeserialize(value))
-        }
-    }
-
-    pub struct AnyVisitor;
-
-    // this is not a complete set of supported types, but usually PartialDeserialize is used for maps so this is good enough
-    impl<'de> Visitor<'de> for AnyVisitor {
-        type Value = String;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("any value")
-        }
-        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error,
-        {
-            Ok(format!("\"{}\"", v))
-        }
-        fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error,
-        {
-            Ok(format!("\"{}\"", v))
-        }
-        fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error,
-        {
-            Ok(String::from(if v { "true" } else { "false" }))
-        }
-
-        // here I deserialize maps as if they are serde_json::Value
-        // there might be a better performant way to do this, but for now this is functional
-        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-        where
-            A: serde::de::MapAccess<'de>,
-        {
-            static OPEN_BRACKET: char = '{';
-            static CLOSE_BRACKET: char = '}';
-            let mut ret = String::from(OPEN_BRACKET);
-
-            if let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
-                ret.push('"');
-                ret.push_str(&key);
-                ret.push_str("\": ");
-                ret.push_str(&value.to_string());
-            }
-
-            while let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
-                ret.push_str(", ");
-                ret.push('"');
-                ret.push_str(&key);
-                ret.push_str("\": ");
-                ret.push_str(&value.to_string());
-            }
-            ret.push(CLOSE_BRACKET);
-            Ok(ret)
-        }
-    }
-
-    pub struct ArcSubStr {
-        inner: Arc<str>,
+    #[derive(Debug, PartialEq, Eq, Hash)]
+    pub struct SubArc<T: ?Sized> {
+        arc: Arc<T>,
         range: Range<usize>,
     }
 
-    impl ArcSubStr {
-        pub fn from_arc(arc: &Arc<str>, range: Range<usize>) -> Self {
-            Self {
-                inner: arc.clone(),
-                range,
-            }
-        }
-        pub fn as_str(&self) -> &str {
-            &self.inner[self.range.clone()]
+    impl SubArc<str> {
+        pub fn new(arc: Arc<str>, range: Range<usize>) -> Self {
+            Self { arc, range }
         }
     }
 
-    impl Deref for ArcSubStr {
+    impl Clone for SubArc<str> {
+        fn clone(&self) -> Self {
+            Self::new(Arc::clone(&self.arc), self.range.clone())
+        }
+    }
+
+    impl Deref for SubArc<str> {
         type Target = str;
         fn deref(&self) -> &Self::Target {
-            &self.inner[self.range.clone()]
+            &self.arc[self.range.clone()]
         }
     }
 
-    impl AsRef<str> for ArcSubStr {
+    impl AsRef<str> for SubArc<str> {
         fn as_ref(&self) -> &str {
-            &self.inner[self.range.clone()]
+            self.deref()
         }
     }
 
-    impl AsRef<[u8]> for ArcSubStr {
-        fn as_ref(&self) -> &[u8] {
-            self.inner[self.range.clone()].as_bytes()
+    impl SubArc<str> {
+        pub fn as_str(&self) -> &str {
+            self.deref()
         }
     }
 
-    #[allow(unused)]
     #[cfg(test)]
     mod test {
-        use std::ops::{Deref, Range};
-
-        use serde::Deserialize;
-
-        use crate::{
-            operations::LinkedOutput,
-            partial_serde::{ArcSubStr, PartialDeserialize},
-        };
-
-        #[derive(Debug, Deserialize)]
-        struct Input<T> {
-            base: String,
-            data: T,
-        }
+        use super::*;
 
         #[test]
-        fn test_partial_serde() {
-            let input = "
-{
-    'base': 'todo',
-    'data': {
-        'title': 'new_todo',
-        'done': false,
-        'description': 'description',
-        'extra': {
-            'extra_title': 'extra_title'
+        fn main() {
+            let arc: Arc<str> = Arc::from("hello world");
+            let sub_arc = SubArc { arc, range: 0..5 };
+
+            assert_eq!(&*sub_arc, "hello");
         }
     }
-}
-"
-            .replace("'", "\"");
 
-            let s = serde_json::from_str::<Input<PartialDeserialize>>(&input).unwrap();
+    #[cfg(test)]
+    #[allow(unused)]
+    mod alternaive_idea {
+        /// this specification is more flexible and general,
+        /// but it require one more generic to be infered.
+        /// I'm not sure if this is worth it.
+        use std::{
+            marker::PhantomData,
+            ops::{Deref, Range},
+            sync::Arc,
+        };
 
-            pretty_assertions::assert_eq!(s.base, String::from("todo"));
-            pretty_assertions::assert_eq!(
-                &s.data.0,
-                "{\"title\": \"new_todo\", \"done\": false, \"description\": \"description\", \"extra\": {\"extra_title\":\"extra_title\"}}"
-            );
+        pub struct SubArc<T: ?Sized, FS: FromSource<T>> {
+            arc: Arc<FS::Source>,
+            from_source: FS,
+            _pd: PhantomData<T>,
+        }
 
-            let input = "
-[
-    'first_value', 'second_value'
-]
-"
-            .replace("'", "\"");
+        impl<T: ?Sized, FS: FromSource<T>> Deref for SubArc<T, FS> {
+            type Target = T;
+            fn deref(&self) -> &Self::Target {
+                self.from_source.clone().deref(&self.arc)
+            }
+        }
 
-            let s = serde_json::from_str::<(String, PartialDeserialize)>(&input).unwrap();
+        impl<T: ?Sized, S> SubArc<T, fn(&S) -> &T> {
+            fn new_using_fn(arc: Arc<S>, from_source: fn(&S) -> &T) -> Self {
+                Self {
+                    arc,
+                    from_source,
+                    _pd: PhantomData,
+                }
+            }
+        }
 
-            pretty_assertions::assert_eq!(s.0, String::from("first_value"));
-            pretty_assertions::assert_eq!(&s.1.0, "\"second_value\"");
+        pub trait FromSource<T: ?Sized>: Clone {
+            type Source: ?Sized;
+            fn deref(self, s: &Self::Source) -> &T;
+        }
+
+        impl FromSource<str> for Range<usize> {
+            type Source = str;
+            fn deref(self, s: &str) -> &str {
+                &s[self.clone()]
+            }
+        }
+
+        impl<Source: ?Sized, T: ?Sized> FromSource<T> for fn(&Source) -> &T {
+            type Source = Source;
+            fn deref(self, s: &Self::Source) -> &T {
+                self(s)
+            }
+        }
+
+        pub struct Dictionary {
+            f0: String,
+            f1: usize,
         }
 
         #[test]
-        fn arc_str() {
-            use std::sync::Arc;
+        fn main() {
+            let arc: Arc<Dictionary> = Arc::new(Dictionary {
+                f0: "hello".to_string(),
+                f1: 1,
+            });
 
-            let input: Arc<str> = Arc::from("hello world");
+            let sub_arc = SubArc::new_using_fn(arc.clone(), |d: &Dictionary| d.f0.as_str());
 
-            let clone_of_first_alloc: Arc<str> = input.clone();
-            let slice_of_first_alloc: ArcSubStr = ArcSubStr::from_arc(&input, 0..5);
-
-            assert_eq!(slice_of_first_alloc.as_str(), "hello");
-
-            assert_eq!(Arc::strong_count(&input), 3);
+            assert_eq!(&*sub_arc, "hello");
         }
     }
 }

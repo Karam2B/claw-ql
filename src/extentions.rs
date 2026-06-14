@@ -11,11 +11,11 @@ pub trait Members {
 impl<T> Members for T
 where
     T: crate::collections::Collection,
-    T::Data: crate::tuple_trait::AsTuple,
+    T::InputData: crate::tuple_trait::AsTuple,
     // T: crate::struct_as_tuple::AsTuple,
 {
     fn members_names(&self) -> Vec<String> {
-        <T::Data as crate::tuple_trait::AsTuple>::NAMES
+        <T::InputData as crate::tuple_trait::AsTuple>::NAMES
             .iter()
             .map(|name| name.to_string())
             .collect()

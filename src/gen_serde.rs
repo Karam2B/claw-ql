@@ -1,66 +1,35 @@
 #![allow(unused)]
-use std::marker::PhantomData;
-
 pub trait FromSerialized<'de, Format> {
     type Deserializer: Deserializer<'de>;
     fn start(self) -> Self::Deserializer;
     fn terminate(
         bar: Self::Deserializer,
     ) -> Result<(), <Self::Deserializer as Deserializer<'de>>::Err>;
+}
 
-    /// Deserialize using the default handler [`()`]. Only available when [`DeserializeSpec::Handler`] is [`()`].
-    fn deserialize_and_terminate<T>(
-        self,
-    ) -> Result<T, <Self::Deserializer as Deserializer<'de>>::Err>
-    where
-        Self: Sized,
-        T: Deserialize<'de, Self::Deserializer, Handler = ()>,
-    {
-        let mut s = self.start();
-        let t = T::deserialize((), &mut s)?;
-        Self::terminate(s)?;
-        Ok(t)
-    }
-
-    /// Same as [`deserialize_and_terminate`] when `T::Handler` is [`()`] (ignores `format` / `into`).
-    #[inline]
-    fn deserialize_and_terminate_with<T>(
-        self,
-        _format: Format,
-        into: PhantomData<T>,
-    ) -> Result<T, <Self::Deserializer as Deserializer<'de>>::Err>
-    where
-        Self: Sized,
-        T: Deserialize<'de, Self::Deserializer, Handler = ()>,
-    {
-        let _: PhantomData<T> = into;
-        self.deserialize_and_terminate::<T>()
-    }
-
-    /// Deserialize `T` using an explicit **handler** (configuration). Use when [`DeserializeSpec::Handler`]
-    /// is not [`()`], e.g. runtime-controlled field shapes.
-    #[inline]
-    fn deserialize_and_terminate_with_handler<T>(
-        self,
-        _format: Format,
-        handler: T::Handler,
-        into: PhantomData<T>,
-    ) -> Result<T, <Self::Deserializer as Deserializer<'de>>::Err>
-    where
-        Self: Sized,
-        T: Deserialize<'de, Self::Deserializer>,
-    {
-        let _: PhantomData<T> = into;
-        let mut s = self.start();
-        let t = T::deserialize(handler, &mut s)?;
-        Self::terminate(s)?;
-        Ok(t)
-    }
+pub trait Serialize<Format> {
+    fn serialize(&self, ctx: &mut Format);
 }
 
 pub trait Deserializer<'de>: Sized {
     type Err;
     type Format;
+}
+
+pub trait ObjectEncoding {
+    type Object;
+    fn serialize_start(&mut self) -> Self::Object;
+    fn serialize_pair<K, V>(
+        &mut self,
+        object: &mut <Self as ObjectEncoding>::Object,
+        key: &K,
+        value: &V,
+    ) where
+        Self: Sized,
+        K: Serialize<Self> + ?Sized,
+        V: Serialize<Self> + ?Sized;
+    fn join(&mut self, object: &mut Self::Object);
+    fn serialize_end(&mut self, object: Self::Object);
 }
 
 /// Declares **how** a type is deserialized *before* choosing a [`Deserializer`]: the [`Handler`]
@@ -71,7 +40,11 @@ pub trait DeserializeSpec: Sized {
 }
 
 /// Deserialize from `S` using a [`DeserializeSpec::Handler`] value.
-pub trait Deserialize<'de, S: Deserializer<'de>>: DeserializeSpec + Sized {
+pub trait Deserialize<'de, S>
+where
+    S: Deserializer<'de>,
+    Self: DeserializeSpec + Sized,
+{
     fn deserialize(handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err>;
 }
 
@@ -82,11 +55,12 @@ pub trait KnownKeyInfo {
         Self: 'a;
 }
 
-/// Map field lookup by a compile-time or runtime key type `Key`.
+/// Lookup for a key known by value
 pub trait KnownKey<Key>: KnownKeyInfo {
     fn info<'k>(key: &'k Key) -> Self::Info<'k>;
 }
 
+/// Lookup for a key unknown by only type
 pub trait UnknownKey<S> {}
 
 pub trait DeserializeMap<'de>: Deserializer<'de> {
@@ -128,7 +102,35 @@ pub trait DeserializeSeq<'de>: Deserializer<'de> {
     ) -> Result<T, Self::Err>
     where
         T: DeserializeSpec + Deserialize<'de, Self>;
+    /// Returns `false` when the next non-whitespace token is the sequence closing delimiter.
+    fn seq_has_next(&mut self, seq: &mut Self::SeqAccess) -> Result<bool, Self::Err>;
     fn finish(&mut self, seq: Self::SeqAccess) -> Result<(), Self::Err>;
+}
+
+impl<T: DeserializeSpec> DeserializeSpec for Vec<T> {
+    type Handler = T::Handler;
+}
+
+impl<'de, S, T> Deserialize<'de, S> for Vec<T>
+where
+    S: DeserializeSeq<'de>,
+    T: DeserializeSpec + Deserialize<'de, S>,
+    T::Handler: Clone,
+    S::Err: From<&'static str>,
+{
+    fn deserialize(handler: T::Handler, serialized: &mut S) -> Result<Self, S::Err> {
+        let mut seq = DeserializeSeq::start_seq(serialized)?;
+        let mut out = Vec::new();
+        while DeserializeSeq::seq_has_next(serialized, &mut seq)? {
+            out.push(DeserializeSeq::deserialize_value(
+                serialized,
+                &mut seq,
+                handler.clone(),
+            )?);
+        }
+        DeserializeSeq::finish(serialized, seq)?;
+        Ok(out)
+    }
 }
 
 pub enum MapOrSeq<Map, Seq> {
@@ -184,7 +186,7 @@ mod dynamic_client_side {
 
     use crate::gen_serde::{
         Deserialize, DeserializeMap, DeserializeMapOrSeq, DeserializeSpec, Deserializer,
-        FromSerialized, KnownKey, MapOrSeq, json_format_side::JsonFormat,
+        FromSerialized, FromSerializedExt, KnownKey, MapOrSeq, json_format_side::JsonFormat,
     };
 
     #[derive(Debug, PartialEq, Eq)]
@@ -298,10 +300,14 @@ mod dynamic_client_side {
 
 #[cfg(test)]
 mod client_side {
+    use axum::Json;
+
     use crate::gen_serde::{
         Deserialize, DeserializeMap, DeserializeMapOrSeq, DeserializeSpec, Deserializer,
-        FromSerialized, KnownKey, MapOrSeq,
+        FromSerialized, FromSerializedExt, IntoSerializedString, KnownKey, MapOrSeq,
+        ObjectEncoding, Serialize,
         json_format_side::{JsonFormat, PartialDeserialize, StringArcRef},
+        json_serialize_side::JsonAsString,
     };
     use std::{marker::PhantomData, sync::Arc};
 
@@ -372,6 +378,36 @@ mod client_side {
                 title: String::from("first_title")
             }
         );
+    }
+
+    impl<Format> Serialize<Format> for BasicObject
+    where
+        String: Serialize<Format>,
+        str: Serialize<Format>,
+        Format: ObjectEncoding,
+    {
+        fn serialize(&self, fmt: &mut Format) {
+            let mut object = Format::serialize_start(fmt);
+
+            Format::serialize_pair(fmt, &mut object, "title", &self.title);
+
+            Format::serialize_end(fmt, object);
+        }
+    }
+
+    const _: () = {
+        struct Format;
+        fn _check_if_trait_o() -> Box<dyn Serialize<Format>> {
+            todo!()
+        }
+    };
+
+    fn te_serialize_basic_object() {
+        let s = BasicObject {
+            title: String::from("first_title"),
+        };
+        let v = IntoSerializedString::<JsonAsString>::serialize_to_string(&s);
+        assert_eq!(v, r#"{"title":"first_title"}"#);
     }
 
     #[test]
@@ -490,7 +526,7 @@ mod client_side {
             .unwrap();
 
         assert_eq!(got.identifier, "todo");
-        assert_eq!(got.data.fragment(), r#"{"title": "from_string_key"}"#);
+        assert_eq!(got.data.0.as_str(), r#"{"title": "from_string_key"}"#);
         let data: BasicObject = got.data.continue_deserialize().unwrap();
         assert_eq!(
             data,
@@ -553,20 +589,94 @@ mod client_side {
     }
 }
 
-mod json_format_side {
+mod json_serialize_side {
+
+    use crate::gen_serde::{ObjectEncoding, Serialize};
+
+    use super::json_format_side::JsonFormat;
+
+    #[derive(Default)]
+    pub struct JsonAsBuffer(pub Vec<u8>);
+    #[derive(Default)]
+    pub struct JsonAsString(pub String);
+
+    impl Into<Vec<u8>> for JsonAsBuffer {
+        fn into(self) -> Vec<u8> {
+            self.0
+        }
+    }
+
+    impl Into<String> for JsonAsString {
+        fn into(self) -> String {
+            self.0
+        }
+    }
+
+    impl Into<Vec<u8>> for JsonAsString {
+        fn into(self) -> Vec<u8> {
+            self.0.into()
+        }
+    }
+
+    impl Serialize<JsonAsString> for str {
+        fn serialize(&self, ctx: &mut JsonAsString) {
+            todo!()
+        }
+    }
+
+    impl Serialize<JsonAsString> for String {
+        fn serialize(&self, ctx: &mut JsonAsString) {
+            todo!()
+        }
+    }
+
+    impl ObjectEncoding for JsonAsString {
+        type Object = ();
+
+        fn serialize_start(&mut self) -> Self::Object {
+            todo!()
+        }
+
+        fn serialize_pair<K, V>(
+            &mut self,
+            object: &mut <Self as ObjectEncoding>::Object,
+            key: &K,
+            value: &V,
+        ) where
+            Self: Sized,
+            K: Serialize<Self> + ?Sized,
+            V: Serialize<Self> + ?Sized,
+        {
+            todo!()
+        }
+
+        fn join(&mut self, object: &mut Self::Object) {
+            todo!()
+        }
+
+        fn serialize_end(&mut self, object: Self::Object) {
+            todo!()
+        }
+    }
+}
+
+pub(crate) mod json_format_side {
     use std::marker::PhantomData;
     use std::ops::Range;
     use std::sync::Arc;
 
     use crate::gen_serde::{
         Deserialize, DeserializeMap, DeserializeMapOrSeq, DeserializeSeq, DeserializeSpec,
-        Deserializer, FromSerialized, KnownKey, KnownKeyInfo, MapOrSeq, UnknownKey,
+        Deserializer, FromSerialized, FromSerializedExt, KnownKey, KnownKeyInfo, MapOrSeq,
+        UnknownKey,
     };
+    use crate::sub_arc::ArcSubStr;
 
     pub struct JsonAsArcCursor {
         pub inner: Arc<str>,
         pub start: usize,
     }
+
     pub struct JsonFormat;
 
     impl<'de> FromSerialized<'de, JsonFormat> for Arc<str> {
@@ -664,48 +774,20 @@ mod json_format_side {
             _handler: Self::Handler,
             serialized: &mut JsonAsArcCursor,
         ) -> Result<Self, <JsonAsArcCursor as Deserializer<'de>>::Err> {
-            let mut chars = serialized.inner[serialized.start..].chars().into_iter();
-
-            while let Some(next) = chars.next() {
-                serialized.start += 1;
-                if !next.is_whitespace() {
-                    break;
-                }
+            let s = serialized.inner.as_ref();
+            let i = skip_ws_json(s, serialized.start);
+            if s.get(i..i + 4) == Some("true") {
+                serialized.start = i + 4;
+                return Ok(true);
             }
-
-            match chars.next() {
-                Some('t') => {
-                    if chars.next() != Some('r') {
-                        return Err("invalid char")?;
-                    }
-                    if chars.next() != Some('u') {
-                        return Err("invalid char")?;
-                    }
-                    if chars.next() != Some('e') {
-                        return Err("invalid char")?;
-                    }
-
-                    serialized.start += 4;
-                    return Ok(true);
-                }
-                Some('f') => {
-                    if chars.next() != Some('a') {
-                        return Err("invalid char")?;
-                    }
-                    if chars.next() != Some('l') {
-                        return Err("invalid char")?;
-                    }
-                    if chars.next() != Some('s') {
-                        return Err("invalid char")?;
-                    }
-                    if chars.next() != Some('e') {
-                        return Err("invalid char")?;
-                    }
-                    serialized.start += 5;
-                    return Ok(false);
-                }
-                _ => return Err(format!("expected bool found: {:?}", chars.next())),
+            if s.get(i..i + 5) == Some("false") {
+                serialized.start = i + 5;
+                return Ok(false);
             }
+            Err(format!(
+                "expected bool, found {:?}",
+                s.get(i..s.len().min(i + 8))
+            ))
         }
     }
 
@@ -796,25 +878,24 @@ mod json_format_side {
         }
     }
 
-    /// Holds the full JSON buffer plus the byte range of one value that was not parsed yet.
+    /// Holds one complete JSON value as a subslice of the original buffer (not parsed to `T` yet).
     #[derive(Clone, PartialEq, Eq, Debug)]
-    pub struct PartialDeserialize(pub Arc<str>, pub Range<usize>);
+    pub struct PartialDeserialize(pub ArcSubStr);
 
     impl PartialDeserialize {
-        /// The raw JSON substring for this deferred value.
-        pub fn fragment(&self) -> &str {
-            self.0
-                .get(self.1.clone())
-                .expect("claw_ql_bug: partial range must stay in bounds")
-        }
-
         /// Parse the captured slice as `T` using the same [`JsonFormat`] rules as the outer cursor.
         pub fn continue_deserialize<T>(&self) -> Result<T, String>
         where
             T: for<'de> Deserialize<'de, JsonAsArcCursor, Handler = ()>,
         {
-            let slice: Arc<str> = Arc::from(self.fragment());
-            FromSerialized::deserialize_and_terminate_with(slice, JsonFormat, PhantomData::<T>)
+            let slice: Arc<str> = Arc::from(self.0.as_str());
+            FromSerializedExt::deserialize_and_terminate_with(slice, JsonFormat, PhantomData::<T>)
+        }
+        pub fn continue_deserialize_with<T>(&self, handler: T::Handler) -> Result<T, String>
+        where
+            T: for<'de> Deserialize<'de, JsonAsArcCursor>,
+        {
+            todo!()
         }
     }
 
@@ -833,7 +914,10 @@ mod json_format_side {
             let end = end_of_json_value(s, start)?;
             let range = start..end;
             serialized.start = end;
-            Ok(PartialDeserialize(Arc::clone(&serialized.inner), range))
+            Ok(PartialDeserialize(ArcSubStr::new(
+                Arc::clone(&serialized.inner),
+                range,
+            )))
         }
     }
 
@@ -1143,6 +1227,16 @@ mod json_format_side {
                 Some(b',') => {
                     i += 1;
                     i = skip_ws_json(s, i);
+                    if b.get(i) == Some(&CLOSE_BRACE_BYTE) {
+                        let after_object = i + 1;
+                        return Ok((
+                            JsonMapAccess {
+                                entries,
+                                after_object,
+                            },
+                            after_object,
+                        ));
+                    }
                 }
                 Some(&CLOSE_BRACE_BYTE) => {
                     let after_object = i + 1;
@@ -1370,6 +1464,12 @@ mod json_format_side {
             Ok(value)
         }
 
+        fn seq_has_next(&mut self, _: &mut Self::SeqAccess) -> Result<bool, Self::Err> {
+            let s = self.inner.as_ref();
+            let i = skip_ws_json(s, self.start);
+            Ok(s.as_bytes().get(i) != Some(&CLOSE_BRACKET_BYTE))
+        }
+
         fn finish(&mut self, _: Self::SeqAccess) -> Result<(), Self::Err> {
             loop {
                 let mut chars = self.inner[self.start..].chars();
@@ -1387,5 +1487,96 @@ mod json_format_side {
                 return Err(format!("expected {} found {:?}", CLOSE_BRACKET, next));
             }
         }
+    }
+
+    const CLOSE_BRACKET_BYTE: u8 = CLOSE_BRACKET as u8;
+}
+
+pub trait FromSerializedExt<'de, Format>: FromSerialized<'de, Format> {
+    /// Deserialize using the default handler [`()`]. Only available when [`DeserializeSpec::Handler`] is [`()`].
+    fn deserialize_and_terminate<T>(
+        self,
+    ) -> Result<T, <Self::Deserializer as Deserializer<'de>>::Err>
+    where
+        Self: Sized,
+        T: Deserialize<'de, Self::Deserializer, Handler = ()>,
+    {
+        let mut s = self.start();
+        let t = T::deserialize((), &mut s)?;
+        Self::terminate(s)?;
+        Ok(t)
+    }
+
+    /// Same as [`deserialize_and_terminate`] when `T::Handler` is [`()`] (ignores `format` / `into`).
+    #[inline]
+    fn deserialize_and_terminate_with<T>(
+        self,
+        _format: Format,
+        into: std::marker::PhantomData<T>,
+    ) -> Result<T, <Self::Deserializer as Deserializer<'de>>::Err>
+    where
+        Self: Sized,
+        T: Deserialize<'de, Self::Deserializer, Handler = ()>,
+    {
+        let _: std::marker::PhantomData<T> = into;
+        self.deserialize_and_terminate::<T>()
+    }
+
+    /// Deserialize `T` using an explicit **handler** (configuration). Use when [`DeserializeSpec::Handler`]
+    /// is not [`()`], e.g. runtime-controlled field shapes.
+    #[inline]
+    fn deserialize_and_terminate_with_handler<T>(
+        self,
+        _format: Format,
+        handler: T::Handler,
+        into: std::marker::PhantomData<T>,
+    ) -> Result<T, <Self::Deserializer as Deserializer<'de>>::Err>
+    where
+        Self: Sized,
+        T: Deserialize<'de, Self::Deserializer>,
+    {
+        let _: std::marker::PhantomData<T> = into;
+        let mut s = self.start();
+        let t = T::deserialize(handler, &mut s)?;
+        Self::terminate(s)?;
+        Ok(t)
+    }
+}
+
+impl<'de, Format, T> FromSerializedExt<'de, Format> for T where T: FromSerialized<'de, Format> {}
+
+pub trait IntoSerializedString<Format> {
+    fn serialize_to_string(&self) -> String;
+}
+
+pub trait IntoSerializedBuffer<Forma> {
+    fn serialize_to_buffer(&self) -> Vec<u8>;
+}
+
+impl<F, T> IntoSerializedString<F> for T
+where
+    T: Serialize<F>,
+    F: Default + Into<String>,
+{
+    fn serialize_to_string(&self) -> String {
+        let mut string = F::default();
+
+        self.serialize(&mut string);
+
+        string.into()
+    }
+}
+
+impl<F, T> IntoSerializedBuffer<F> for T
+where
+    T: Serialize<F>,
+    F: Default + Into<Vec<u8>>,
+{
+    fn serialize_to_buffer(&self) -> Vec<u8> {
+        let mut buffer = F::default();
+
+        self.serialize(&mut buffer);
+
+        buffer.into()
     }
 }

@@ -80,8 +80,13 @@ pub mod to_bind_trait {
         // S: DatabaseForJsonClient,
     {
         fn type_info() -> <S as Database>::TypeInfo {
-            todo!("I don't think this is relavent if I'm not using sqlx::query macro")
-            // S::type_info_default()
+            panic!(
+                "
+                sqlx is not built around my style of coding, 
+                if I don't have access to self, there is no way to get the type info.
+                Also, I don't think this is relavent if I'm not using sqlx::query macro
+            "
+            )
         }
     }
 
@@ -139,8 +144,8 @@ pub mod sqlx_type_ident {
     use crate::from_row::FromRowError;
     use crate::from_row::RowPreAliased;
     use crate::from_row::RowTwoAliased;
-    use crate::partial_serde::PartialDeserialize;
-    use crate::partial_serde::PartialSerialize;
+    use crate::json_client_v1::partial_serde::PartialDeserializeV1;
+    use crate::json_client_v1::partial_serde::PartialSerializeV1;
     use crate::query_builder::StatementBuilder;
     use crate::query_builder::SyntaxAsType;
     use crate::query_builder::functional_expr::BoxedExpression;
@@ -167,7 +172,7 @@ pub mod sqlx_type_ident {
         ) -> Result<Box<dyn ToBind<S> + Send>, DeserializeError>;
         fn to_bind_partial<'q>(
             &self,
-            value: PartialDeserialize,
+            value: PartialDeserializeV1,
         ) -> Result<Box<dyn ToBind<S> + Send>, DeserializeError>;
         fn from_row_two_alias(
             &self,
@@ -182,7 +187,7 @@ pub mod sqlx_type_ident {
             is_optional: bool,
             name: &str,
             row: RowTwoAliased<'_, S::Row>,
-        ) -> Result<PartialSerialize, FromRowError>
+        ) -> Result<PartialSerializeV1, FromRowError>
         where
             S: Database;
         fn from_row_pre_alias(
@@ -198,7 +203,7 @@ pub mod sqlx_type_ident {
             is_optional: bool,
             name: &str,
             row: RowPreAliased<'_, S::Row>,
-        ) -> Result<PartialSerialize, FromRowError>
+        ) -> Result<PartialSerializeV1, FromRowError>
         where
             S: Database;
         fn from_row_no_alias(
@@ -215,7 +220,7 @@ pub mod sqlx_type_ident {
             is_optional: bool,
             name: &str,
             row: &S::Row,
-        ) -> Result<PartialSerialize, FromRowError>
+        ) -> Result<PartialSerializeV1, FromRowError>
         where
             S: Database;
     }
@@ -254,7 +259,7 @@ pub mod sqlx_type_ident {
         }
         fn to_bind_partial(
             &self,
-            value: PartialDeserialize,
+            value: PartialDeserializeV1,
         ) -> Result<Box<dyn ToBind<S> + Send>, DeserializeError> {
             let s: T = value.continue_deserialize()?;
             Ok(Box::new(s))
@@ -333,63 +338,63 @@ pub mod sqlx_type_ident {
             is_optional: bool,
             name: &str,
             row: RowPreAliased<'_, S::Row>,
-        ) -> Result<PartialSerialize, FromRowError>
+        ) -> Result<PartialSerializeV1, FromRowError>
         where
             S: Database,
         {
             let s: Option<T> = row.try_get(name)?;
 
             let s = match (s, is_optional) {
-                (None, true) => return Ok(PartialSerialize::new(())),
+                (None, true) => return Ok(PartialSerializeV1::new(())),
                 (None, false) => {
                     panic!("claw_ql_bug: value is non-null and was assumed to be null")
                 }
                 (Some(e), _) => e,
             };
 
-            Ok(PartialSerialize::new(s))
+            Ok(PartialSerializeV1::new(s))
         }
         fn from_row_two_alias_partial(
             &self,
             is_optional: bool,
             name: &str,
             row: RowTwoAliased<'_, S::Row>,
-        ) -> Result<PartialSerialize, FromRowError>
+        ) -> Result<PartialSerializeV1, FromRowError>
         where
             S: Database,
         {
             let s: Option<T> = row.try_get(name)?;
 
             let s = match (s, is_optional) {
-                (None, true) => return Ok(PartialSerialize::new(())),
+                (None, true) => return Ok(PartialSerializeV1::new(())),
                 (None, false) => {
                     panic!("claw_ql_bug: value is non-null and was assumed to be null")
                 }
                 (Some(e), _) => e,
             };
 
-            Ok(PartialSerialize::new(s))
+            Ok(PartialSerializeV1::new(s))
         }
         fn from_row_no_alias_partial(
             &self,
             is_optional: bool,
             name: &str,
             row: &S::Row,
-        ) -> Result<PartialSerialize, FromRowError>
+        ) -> Result<PartialSerializeV1, FromRowError>
         where
             S: Database,
         {
             let s: Option<T> = sqlx::Row::try_get(row, name)?;
 
             let s = match (s, is_optional) {
-                (None, true) => return Ok(PartialSerialize::new(())),
+                (None, true) => return Ok(PartialSerializeV1::new(())),
                 (None, false) => {
                     panic!("claw_ql_bug: value is non-null and was assumed to be null")
                 }
                 (Some(e), _) => e,
             };
 
-            Ok(PartialSerialize::new(s))
+            Ok(PartialSerializeV1::new(s))
         }
     }
 }
@@ -596,7 +601,9 @@ pub mod dynamic_collection {
 
     use serde::Deserialize;
 
-    use crate::{database_extention::DatabaseExt, json_client_v0::sqlx_type_ident::SqlxTypeHandler};
+    use crate::{
+        database_extention::DatabaseExt, json_client_v0::sqlx_type_ident::SqlxTypeHandler,
+    };
 
     pub struct DynamicCollection<S> {
         pub name: String,
@@ -863,7 +870,9 @@ pub mod dynamic_collection {
                 &self.name_lower_case
             }
 
-            type Data = serde_json::Value;
+            type InputData = serde_json::Value;
+            type UpdateData = serde_json::Value;
+            type OutputData = serde_json::Value;
 
             type Id = SingleIncremintalInt<String>;
 
@@ -2619,26 +2628,28 @@ mod old_code {
         where
             T: Send + Sync + 'static,
             S: DatabaseExt,
-            <T as Collection>::Data: Send + Serialize + DeserializeOwned,
-            <T as Collection>::Data: ManyExpressions<'static, S>,
-            <T as Collection>::Partial: Send + Serialize + DeserializeOwned,
-            <T as Collection>::Partial: ManyExpressions<'static, S>,
+            <T as Collection>::InputData: Send + Serialize + DeserializeOwned,
+            <T as Collection>::InputData: ManyExpressions<'static, S>,
+            <T as Collection>::UpdateData: Send + Serialize + DeserializeOwned,
+            <T as Collection>::UpdateData: ManyExpressions<'static, S>,
+            <T as Collection>::OutputData: Send + Serialize + DeserializeOwned,
+            <T as Collection>::OutputData: ManyExpressions<'static, S>,
             T: Collection<Id = SingleIncremintalInt>,
-            T: for<'r> FromRowAlias<'r, S::Row, FromRowData = T::Data>,
+            T: for<'r> FromRowAlias<'r, S::Row, FromRowData = T::OutputData>,
             T: Members,
         {
             fn data_to_expression(
                 &self,
                 data: JsonValue,
             ) -> Result<Box<dyn ManyBoxedExpressions<S> + Send>, DeserializeError> {
-                let data = serde_json::from_value::<<T as Collection>::Data>(data)?;
+                let data = serde_json::from_value::<<T as Collection>::InputData>(data)?;
                 Ok(Box::new(data))
             }
             fn partial_to_expressions(
                 &self,
                 partial: JsonValue,
             ) -> Result<Box<dyn ManyBoxedExpressions<S> + Send>, DeserializeError> {
-                let partial = serde_json::from_value::<<T as Collection>::Partial>(partial)?;
+                let partial = serde_json::from_value::<<T as Collection>::UpdateData>(partial)?;
                 Ok(Box::new(partial))
             }
             fn table_name(&self) -> &str {
@@ -2769,8 +2780,9 @@ mod old_code {
                 fn table_name_lower_case(&self) -> &str {
                     todo!()
                 }
-                type Partial = JsonValue;
-                type Data = JsonValue;
+                type InputData = JsonValue;
+                type UpdateData = JsonValue;
+                type OutputData = JsonValue;
                 // type PartialInput = JsonValue;
                 // type PartialValidationError = DeserializeError;
                 // type Partial = JsonValue;
@@ -2868,6 +2880,7 @@ mod old_code {
         use sqlx::{Encode, IntoArguments, Pool, Sqlite, Type};
         use std::{collections::HashMap, marker::PhantomData};
 
+        use super::json_collection_trait::JsonCollection;
         use crate::collections::CollectionHandler;
         use crate::prelude::primary_key;
         use crate::prelude::stmt::CreateTableSt;
@@ -2879,7 +2892,6 @@ mod old_code {
             migration::OnMigrate,
             prelude::stmt::SelectSt,
         };
-        use super::json_collection_trait::JsonCollection;
 
         #[derive(Debug, Serialize, Deserialize)]
         pub struct AddCollectionBody {

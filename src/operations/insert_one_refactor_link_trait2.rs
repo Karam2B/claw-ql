@@ -236,17 +236,17 @@ pub struct InsertOne<Handler, Data, Links> {
     pub links: Links,
 }
 
-impl<H, LSpec, L> OperationOutput for InsertOne<H, H::Data, L>
+impl<H, LSpec, L> OperationOutput for InsertOne<H, H::InputData, L>
 where
     L: InsertLinkSplit<LinkSpec = LSpec>,
     LSpec: InsertLink,
     H: Collection,
 {
-    type Output = LinkedOutput<<H::Id as CollectionId>::IdData, H::Data, LSpec::Output>;
+    type Output = LinkedOutput<<H::Id as CollectionId>::IdData, H::OutputData, LSpec::Output>;
 }
 
 impl<S, Base, L, Link, PreOpInput, InsertItemsInput, PostOpInput> Operation<S>
-    for InsertOne<Base, Base::Data, L>
+    for InsertOne<Base, Base::InputData, L>
 where
     S: DatabaseExt,
     S: ExecutorTrait,
@@ -266,12 +266,12 @@ where
             PostOpInput = L::PostOpInput,
             OnInsertInput = InsertItemsInput,
         >,
-    Base: Collection<Data: Send, Id: Send + CollectionId<IdData: Send>>,
+    Base: Collection<InputData: Send, OutputData: Send, Id: Send + CollectionId<IdData: Send>>,
     Base: Send,
     Base: Clone,
     Base: Identifier<Identifier: for<'q> ManyExpressions<'q, S>>,
-    Base: OnInsert<InsertInput = Base::Data, InsertExpression: for<'q> ManyExpressions<'q, S>>,
-    Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::Data>,
+    Base: OnInsert<InsertInput = Base::InputData, InsertExpression: for<'q> ManyExpressions<'q, S>>,
+    Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::OutputData>,
     Base::Id: Identifier<Identifier: for<'q> Expression<'q, S>>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row, RData = <Base::Id as CollectionId>::IdData>,
     Link::PreOp: Operation<S>,

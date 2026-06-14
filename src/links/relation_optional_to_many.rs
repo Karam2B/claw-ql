@@ -189,7 +189,7 @@ mod impl_fetch_one {
     where
         Id: AsRef<str>,
         T: Collection<Id: SingleColumnId> + Members,
-        T: for<'r> FromRowAlias<'r, <S as Database>::Row, FromRowData = T::Data>,
+        T: for<'r> FromRowAlias<'r, <S as Database>::Row, FromRowData = T::OutputData>,
         F: Collection,
         S: Database,
         i64: for<'q> sqlx::Decode<'q, S> + Type<S>,
@@ -229,7 +229,7 @@ mod impl_fetch_one {
         }
         fn wheres(&self) -> Self::Wheres {}
 
-        type Inner = Option<CollectionOutput<i64, T::Data>>;
+        type Inner = Option<CollectionOutput<i64, T::OutputData>>;
 
         type SubOp = ();
 
@@ -261,7 +261,7 @@ mod impl_fetch_one {
             }
         }
 
-        type Output = Option<CollectionOutput<i64, T::Data>>;
+        type Output = Option<CollectionOutput<i64, T::OutputData>>;
 
         fn take(
             self,
@@ -356,7 +356,7 @@ mod optional_to_many_items_names {
     {
         type RData = (
             FromId::IdData,
-            Option<(<To::Id as CollectionId>::IdData, To::Data)>,
+            Option<(<To::Id as CollectionId>::IdData, To::OutputData)>,
         );
     }
 
@@ -364,9 +364,9 @@ mod optional_to_many_items_names {
     where
         FromId: CollectionId + FromRowAlias<'r, R, RData = <FromId as CollectionId>::IdData>,
         To: Collection,
-        To: FromRowAlias<'r, R, RData = <To as Collection>::Data>,
+        To: FromRowAlias<'r, R, RData = <To as Collection>::OutputData>,
         To::Id: TryFromRowAlias<'r, R, RData = <To::Id as CollectionId>::IdData>,
-        To::Data: fmt::Debug,
+        To::OutputData: fmt::Debug,
         FromId::IdData: fmt::Debug,
         <To::Id as CollectionId>::IdData: fmt::Debug,
         R: sqlx::Row,
@@ -491,7 +491,7 @@ mod impl_link_fetch_many {
         OptionaToManyItems<F::Id, T::Id, T>: FromRowData<
             RData = (
                 <F::Id as CollectionId>::IdData,
-                Option<(<T::Id as CollectionId>::IdData, T::Data)>,
+                Option<(<T::Id as CollectionId>::IdData, T::OutputData)>,
             ),
         >,
     {
@@ -533,7 +533,7 @@ mod impl_link_fetch_many {
 
         type Op = ();
 
-        type Output = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::Data>>;
+        type Output = Option<CollectionOutput<<T::Id as CollectionId>::IdData, T::OutputData>>;
 
         fn take_many(
             &self,
@@ -650,7 +650,7 @@ mod impl_set_new_for_insert {
         query_builder::Bind,
     };
 
-    impl<Key, From, To> InsertLinkConsumeData for SetNew<OptionalToMany<Key, From, To>, To::Data>
+    impl<Key, From, To> InsertLinkConsumeData for SetNew<OptionalToMany<Key, From, To>, To::InputData>
     where
         To: Collection,
         Key: Clone,
@@ -658,7 +658,7 @@ mod impl_set_new_for_insert {
         To: Clone,
         <To::Id as CollectionId>::IdData: Clone,
     {
-        type Link = SetNew<OptionalToMany<Key, From, To>, PhantomData<To::Data>>;
+        type Link = SetNew<OptionalToMany<Key, From, To>, PhantomData<To::InputData>>;
 
         fn consume_data(
             self,
@@ -684,7 +684,7 @@ mod impl_set_new_for_insert {
         }
     }
 
-    impl<Key, From, To> InsertOneLink for SetNew<OptionalToMany<Key, From, To>, PhantomData<To::Data>>
+    impl<Key, From, To> InsertOneLink for SetNew<OptionalToMany<Key, From, To>, PhantomData<To::InputData>>
     where
         To: Clone,
         From: Clone,
@@ -692,9 +692,9 @@ mod impl_set_new_for_insert {
         To: Collection,
         To::Id: CollectionId<IdData: Clone>,
     {
-        type PreOp = InsertOne<AutoGenerate, To, To::Data, ()>;
+        type PreOp = InsertOne<AutoGenerate, To, To::InputData, ()>;
 
-        type PreOpData = To::Data;
+        type PreOpData = To::InputData;
 
         fn pre_operation_init(&self, input: Self::PreOpData) -> Self::PreOp {
             InsertOne {
@@ -721,7 +721,7 @@ mod impl_set_new_for_insert {
         }
 
         type PreOpToInsertValue = <To::Id as CollectionId>::IdData;
-        type PreOpToTake = CollectionOutput<<To::Id as CollectionId>::IdData, To::Data>;
+        type PreOpToTake = CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>;
         type PreOpToPostOp = ();
 
         type InsertNames = AsIdentifier<OptionalToMany<Key, From, To>>;
@@ -763,7 +763,7 @@ mod impl_set_new_for_insert {
             ((), ())
         }
 
-        type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::Data>;
+        type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>;
 
         type PostOpOutput = ();
         fn post_op_output(
@@ -1007,7 +1007,7 @@ mod impl_set_id_for_insert {
             ColumnEqual<<To::Id as Identifier>::Identifier, <To::Id as CollectionId>::IdData>,
         >;
 
-        type PostOpOutput = LinkedOutput<<To::Id as CollectionId>::IdData, To::Data, ()>;
+        type PostOpOutput = LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>;
         fn post_op_output(
             &self,
             poo: <Self::PostOp as OperationOutput>::Output,
@@ -1036,11 +1036,11 @@ mod impl_set_id_for_insert {
             )
         }
 
-        type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::Data>;
+        type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>;
 
         fn take(
             self,
-            pre_op: LinkedOutput<<To::Id as CollectionId>::IdData, To::Data, ()>,
+            pre_op: LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>,
             _: (),
             _: Self::PreOpToTake,
         ) -> Self::Output {
@@ -1819,14 +1819,15 @@ mod impl_set_new_for_update {
         },
     };
 
-    impl<Key, From, To> UpdateLinkSplit for SetNew<OptionalToMany<Key, From, To>, To::Data>
+    impl<Key, From, To> UpdateLinkSplit for SetNew<OptionalToMany<Key, From, To>, To::InputData>
     where
         To: Clone + Collection,
         OptionalToMany<Key, From, To>: Clone,
-        To::Data: Clone,
+        To::InputData: Clone,
+        To::OutputData: Clone,
     {
-        type Link = SetNew<OptionalToMany<Key, From, To>, PhantomData<To::Data>>;
-        fn init_split(self) -> (Self::Link, UpdateLinkData<(), (), To::Data, ()>) {
+        type Link = SetNew<OptionalToMany<Key, From, To>, PhantomData<To::InputData>>;
+        fn init_split(self) -> (Self::Link, UpdateLinkData<(), (), To::InputData, ()>) {
             (
                 SetNew {
                     relation: self.relation,
@@ -1842,19 +1843,20 @@ mod impl_set_new_for_update {
         }
     }
 
-    impl<Key, From, To> UpdateLink for SetNew<OptionalToMany<Key, From, To>, PhantomData<To::Data>>
+    impl<Key, From, To> UpdateLink for SetNew<OptionalToMany<Key, From, To>, PhantomData<To::InputData>>
     where
         To: Clone + Collection,
-        To::Data: Clone,
+        To::InputData: Clone,
+        To::OutputData: Clone,
         OptionalToMany<Key, From, To>: Clone,
     {
-        type InitSplitForPreOp = To::Data;
+        type InitSplitForPreOp = To::InputData;
         type PreOpSplitWheres = ();
         type PreOpSplitValues = <To::Id as CollectionId>::IdData;
         type PreOpSplitPostOp = ();
-        type PreOpSplitTake = To::Data;
+        type PreOpSplitTake = To::OutputData;
 
-        type PreOp = InsertOne<AutoGenerate, To, To::Data, ()>;
+        type PreOp = InsertOne<AutoGenerate, To, To::InputData, ()>;
 
         fn pre_op(&self, init_split_for_pre_op: Self::InitSplitForPreOp) -> Self::PreOp {
             InsertOne {
@@ -1868,7 +1870,7 @@ mod impl_set_new_for_update {
         fn split_pre_op(
             &self,
             pre_op: Result<
-                LinkedOutput<<To::Id as CollectionId>::IdData, To::Data, ()>,
+                LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>,
                 ConstraintViolation,
             >,
         ) -> Result<
@@ -1947,7 +1949,7 @@ mod impl_set_new_for_update {
         ) {
         }
 
-        type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::Data>;
+        type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>;
 
         type PostOpOutput = ();
 

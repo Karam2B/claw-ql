@@ -127,8 +127,9 @@ pub fn main(input: TokenStream) -> TokenStream {
         }
 
         impl Collection for #this_lowercase {
-            type Partial = #partial;
-            type Data = #this;
+            type InputData = #this;
+            type UpdateData = #partial;
+            type OutputData = #this;
             type Id = SingleIncremintalInt;
             fn id(&self) -> &Self::Id {
                 &SingleIncremintalInt
@@ -257,8 +258,9 @@ fn test_collection_derive() {
             }
 
             impl Collection for todo {
-                type Partial = TodoPartial;
-                type Data = Todo;
+                type InputData = Todo;
+                type UpdateData = TodoPartial;
+                type OutputData = Todo;
                 type Members = (title, done, description,);
                 type Id = SingleIncremintalInt;
                 fn members(&self) -> &Self::Members {

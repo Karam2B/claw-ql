@@ -4,7 +4,7 @@ mod tests {
     fn test_data_flow() {
         let input = quote!(
             fn impl_link<Key, From, To>(
-                this: SetNew<OptionalToMany<Key, From, To>, To::Data>,
+                this: SetNew<OptionalToMany<Key, From, To>, To::InputData>,
             ) where
                 Key: Clone,
                 From: Clone,
@@ -28,7 +28,7 @@ mod tests {
         );
 
         let output = quote!(
-            fn impl_link<Key, From, To>(this: SetNew<OptionalToMany<Key, From, To>, To::Data>)
+            fn impl_link<Key, From, To>(this: SetNew<OptionalToMany<Key, From, To>, To::InputData>)
             where
                 Key: Clone,
                 From: Clone,

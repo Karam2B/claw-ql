@@ -95,8 +95,8 @@ where
     Links: Send,
     S: Database,
     Handler: Send,
-    Handler: Collection<Data: Send>
-        + for<'q> FromRowAlias<'q, S::Row, FromRowData = <Handler as Collection>::Data>,
+    Handler: Collection<OutputData: Send>
+        + for<'q> FromRowAlias<'q, S::Row, FromRowData = <Handler as Collection>::OutputData>,
     Handler: Members,
     Wheres: Clone + Send + ManyExpressions<'static, S>,
     Links: Send
@@ -111,7 +111,7 @@ where
     usize: ColumnIndex<S::Row>,
     i64: for<'q> Encode<'q, S> + for<'q> Decode<'q, S> + Type<S>,
 {
-    type Output = Option<LinkedOutput<i64, <Handler as Collection>::Data, Links::DeleteReturn>>;
+    type Output = Option<LinkedOutput<i64, <Handler as Collection>::OutputData, Links::DeleteReturn>>;
     async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output {
         let pre_op = self
             .0

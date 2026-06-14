@@ -44,12 +44,12 @@ where
 impl<T1, T2> SelectOneFragment<Sqlite> for ManyToMany<T1, T2>
 where
     T2: Send + Sync + Collection<Sqlite>,
-    T2::Data: Send + Sync,
+    T2::OutputData: Send + Sync,
     T1: Send + Sync,
 {
-    type Inner = (Option<i32>, Vec<CollectionOutput<T2::Data>>);
+    type Inner = (Option<i32>, Vec<CollectionOutput<T2::OutputData>>);
 
-    type Output = Vec<CollectionOutput<T2::Data>>;
+    type Output = Vec<CollectionOutput<T2::OutputData>>;
 
     fn on_select(&mut self, _data: &mut Self::Inner, _st: &mut SelectSt<Sqlite>) {
         // no op

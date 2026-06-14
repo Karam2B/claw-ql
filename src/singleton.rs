@@ -147,10 +147,9 @@ pub mod impl_collectinos {
         T: HasHandler,
         T::Handler: Collection + Singleton,
     {
+        type InputData = <T::Handler as Collection>::InputData;
         type UpdateData = <T::Handler as Collection>::UpdateData;
-
-        type Data = <T::Handler as Collection>::Data;
-        type InsertData = <T::Handler as Collection>::InsertData;
+        type OutputData = <T::Handler as Collection>::OutputData;
 
         type Id = <T::Handler as Collection>::Id;
 

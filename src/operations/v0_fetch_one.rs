@@ -51,11 +51,11 @@ impl<S: Database, Base, Links, Wheres> Operation<S> for FetchOne<Base, Links, Wh
 where
     S: DatabaseExt,
     for<'q> &'q str: ColumnIndex<S::Row>,
-    Base: Collection<Data: Send, Id = SingleIncremintalInt> + 'static,
+    Base: Collection<OutputData: Send, Id = SingleIncremintalInt> + 'static,
     <Base::Id as Id>::Data: for<'q> Decode<'q, S> + Type<S>,
     Base: Members,
     Wheres: ManyExpressions<'static, S>,
-    Base: for<'r> FromRowAlias<'r, S::Row, FromRowData = Base::Data>,
+    Base: for<'r> FromRowAlias<'r, S::Row, FromRowData = Base::OutputData>,
     for<'c> &'c mut <S as sqlx::Database>::Connection: Executor<'c, Database = S>,
     Links: Link<Base>,
     Links::Spec: Send
@@ -73,7 +73,7 @@ where
     type Output = Option<
         LinkedOutput<
             <Base::Id as Id>::Data,
-            Base::Data,
+            Base::OutputData,
             <<Links as Link<Base>>::Spec as LinkFetchOne<S>>::Output,
         >,
     >;

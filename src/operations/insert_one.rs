@@ -212,19 +212,19 @@ impl From<()> for ConstraintViolation {
     }
 }
 
-impl<I, H, PreL, L> OperationOutput for InsertOne<I, H, H::Data, PreL>
+impl<I, H, PreL, L> OperationOutput for InsertOne<I, H, H::InputData, PreL>
 where
     PreL: InsertLinkConsumeData<Link = L>,
     L: InsertOneLink,
     H: Collection,
 {
     type Output = Result<
-        LinkedOutput<<H::Id as CollectionId>::IdData, H::Data, L::Output>,
+        LinkedOutput<<H::Id as CollectionId>::IdData, H::OutputData, L::Output>,
         ConstraintViolation,
     >;
 }
 
-impl<Id, S, Base, LinkPreSplit, Link> Operation<S> for InsertOne<Id, Base, Base::Data, LinkPreSplit>
+impl<Id, S, Base, LinkPreSplit, Link> Operation<S> for InsertOne<Id, Base, Base::InputData, LinkPreSplit>
 where
     S: DatabaseExt,
     S: ExecutorTrait,
@@ -235,11 +235,11 @@ where
     Link: Send,
     Link: InsertOneLink,
     Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
-    Base: Collection<Data: Send, Id: Send + CollectionId<IdData: Send>>,
+    Base: Collection<InputData: Send, OutputData: Send, Id: Send + CollectionId<IdData: Send>>,
     Base: Send,
     Base: Identifier<Identifier: for<'q> ManyExpressions<'q, S>>,
-    Base: OnInsert<InsertInput = Base::Data, InsertExpression: for<'q> ManyExpressions<'q, S>>,
-    Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::Data>,
+    Base: OnInsert<InsertInput = Base::InputData, InsertExpression: for<'q> ManyExpressions<'q, S>>,
+    Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::OutputData>,
     Base::Id: Identifier<Identifier: for<'q> ManyExpressions<'q, S>>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row, RData = <Base::Id as CollectionId>::IdData>,
     Link::PreOp: Operation<S, Output: Send>,

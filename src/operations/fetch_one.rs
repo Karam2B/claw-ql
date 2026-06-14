@@ -21,7 +21,7 @@ where
     B: Collection,
     L: LinkFetch,
 {
-    type Output = Option<LinkedOutput<<B::Id as CollectionId>::IdData, B::Data, L::Output>>;
+    type Output = Option<LinkedOutput<<B::Id as CollectionId>::IdData, B::OutputData, L::Output>>;
 }
 
 impl<S, Base, Links, Wheres> Operation<S> for FetchOne<Base, Links, Wheres>
@@ -30,11 +30,11 @@ where
     S: ExecutorTrait,
     Base: Send,
     Base: Collection,
-    Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::Data>,
+    Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::OutputData>,
     Base::Id: Send + CollectionId<IdData: Send>,
     Base::Id: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row, RData = <Base::Id as CollectionId>::IdData>,
-    Base::Data: Send,
+    Base::OutputData: Send,
     Base: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
     Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
     Links: Send,

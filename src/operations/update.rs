@@ -175,7 +175,7 @@ where
     Links: UpdateLink,
 {
     type Output = Result<
-        Vec<LinkedOutput<<Handler::Id as CollectionId>::IdData, Handler::Data, Links::Output>>,
+        Vec<LinkedOutput<<Handler::Id as CollectionId>::IdData, Handler::OutputData, Links::Output>>,
         ConstraintViolation,
     >;
 }
@@ -189,10 +189,10 @@ where
     Base: Send,
     Base: Identifier<Identifier: Send + for<'q> ManyExpressions<'q, S>>,
     Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
-    Base: Collection<Data: Send>,
+    Base: Collection<OutputData: Send>,
     Base:
         V0OnUpdate<UpdateInput = Partial, UpdateExpression: Send + for<'q> ManyExpressions<'q, S>>,
-    Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::Data>,
+    Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::OutputData>,
     Base::Id: Send + CollectionId<IdData: Send>,
     Base::Id: Identifier<Identifier: Send + for<'q> ManyExpressions<'q, S>>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row, RData = <Base::Id as CollectionId>::IdData>,

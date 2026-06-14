@@ -576,13 +576,13 @@ pub mod collection_to_impl_from_row {
         singleton::Singleton,
     };
 
-    pub struct CollectionToImplFromRow<Handler: Collection>(pub Handler::Data);
+    pub struct CollectionToImplFromRow<Handler: Collection>(pub Handler::OutputData);
 
     impl<'r, R, Handler> FromRow<'r, R> for CollectionToImplFromRow<Handler>
     where
         Handler: Collection,
         R: Row,
-        Handler: Singleton + FromRowAlias<'r, R, RData = <Handler as Collection>::Data>,
+        Handler: Singleton + FromRowAlias<'r, R, RData = <Handler as Collection>::OutputData>,
     {
         fn from_row(row: &'r R) -> Result<Self, sqlx::Error> {
             match Handler::singleton().no_alias(row) {

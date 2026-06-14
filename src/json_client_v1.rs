@@ -128,7 +128,7 @@ pub mod dynamic_collection {
     mod collection_impls {
         use crate::{
             collections::{Collection, SingleIncremintalInt},
-            partial_serde::PartialSerialize,
+            json_client_v1::partial_serde::PartialSerializeV1,
         };
 
         use super::*;
@@ -145,7 +145,9 @@ pub mod dynamic_collection {
                 &self.name_lower_case
             }
 
-            type Data = PartialSerialize;
+            type InputData = PartialSerializeV1;
+            type UpdateData = PartialSerializeV1;
+            type OutputData = PartialSerializeV1;
 
             type Id = SingleIncremintalInt<String>;
 
@@ -212,13 +214,13 @@ pub mod dynamic_collection {
 
         use crate::{
             from_row::{FromRowAlias, FromRowData},
-            partial_serde::PartialSerialize,
+            json_client_v1::partial_serde::PartialSerializeV1,
         };
 
         use super::*;
 
         impl<S> FromRowData for DynamicCollection<S> {
-            type RData = PartialSerialize;
+            type RData = PartialSerializeV1;
         }
 
         impl<'r, S> FromRowAlias<'r, S::Row> for DynamicCollection<S>
@@ -237,7 +239,7 @@ pub mod dynamic_collection {
                             .from_row_no_alias(field.is_optional, &field.name, row)?;
                     oj.insert(field.name.to_string(), s);
                 }
-                Ok(PartialSerialize::new(oj))
+                Ok(PartialSerializeV1::new(oj))
             }
 
             fn pre_alias(
@@ -256,7 +258,7 @@ pub mod dynamic_collection {
                     )?;
                     oj.insert(field.name.to_string(), s);
                 }
-                Ok(PartialSerialize::new(oj))
+                Ok(PartialSerializeV1::new(oj))
             }
 
             fn post_alias(
@@ -285,7 +287,7 @@ pub mod dynamic_collection {
                     )?;
                     oj.insert(field.name.to_string(), s);
                 }
-                Ok(PartialSerialize::new(oj))
+                Ok(PartialSerializeV1::new(oj))
             }
         }
     }
@@ -458,13 +460,13 @@ pub mod json_client {
 
     use crate::json_client_v0 as old_mod;
     use crate::json_client_v0::fetch_many::SupportedLinkFetchMany;
+    use crate::json_client_v1::partial_serde::{PartialDeserializeV1, PartialSerializeV1};
     use crate::json_client_v1::{
         add_collection::{AddCollectionInput, AddCollectionOutput},
         http_client_error::HttpClientError,
     };
     use crate::operations::fetch_many::ManyOutput;
     use crate::operations::{CollectionOutput, LinkedOutput};
-    use crate::partial_serde::{PartialDeserialize, PartialSerialize};
 
     pub type AddLinkInput = old_mod::add_link::AddLinkInput;
     pub type AddLinkOutput = old_mod::add_link::AddLinkOutput;
@@ -482,16 +484,16 @@ pub mod json_client {
     #[serde(deny_unknown_fields)]
     pub struct InsertOneInput {
         pub base: String,
-        pub data: PartialDeserialize,
-        pub links: Vec<PartialDeserialize>,
+        pub data: PartialDeserializeV1,
+        pub links: Vec<PartialDeserializeV1>,
     }
 
-    pub type InsertOneOutput = LinkedOutput<i64, PartialSerialize, Vec<PartialSerialize>>;
+    pub type InsertOneOutput = LinkedOutput<i64, PartialSerializeV1, Vec<PartialSerializeV1>>;
 
     #[derive(Debug, Deserialize)]
     pub struct Pagination {
         pub limit: i64,
-        pub first_item: Option<CollectionOutput<i64, BTreeMap<String, PartialDeserialize>>>,
+        pub first_item: Option<CollectionOutput<i64, BTreeMap<String, PartialDeserializeV1>>>,
         pub order_by: Vec<PagniationOrderBy>,
     }
 
@@ -534,8 +536,8 @@ pub mod json_client {
     }
 
     pub type FetchManyOutput = ManyOutput<
-        LinkedOutput<i64, PartialSerialize, Vec<PartialSerialize>>,
-        CollectionOutput<i64, BTreeMap<String, PartialSerialize>>,
+        LinkedOutput<i64, PartialSerializeV1, Vec<PartialSerializeV1>>,
+        CollectionOutput<i64, BTreeMap<String, PartialSerializeV1>>,
     >;
 
     #[derive(Debug, Deserialize)]
@@ -558,6 +560,7 @@ pub mod json_client {
         DropCollection(&'static str),
     }
 
+    #[claw_ql_macros::skip]
     macro_rules! ops {
         ($([$method_name:ident, $op_name:ident, $input:ident, $output:ident])*) => {
             impl JsonClient {
@@ -594,12 +597,116 @@ pub mod json_client {
         };
     }
 
-    ops!(
-        [insert_one, InsertOne, InsertOneInput, InsertOneOutput]
-        [add_collection, AddCollection, AddCollectionInput, AddCollectionOutput]
-        [add_link, AddLink, AddLinkInput, AddLinkOutput]
-        [fetch_many, FetchMany, FetchManyInput, FetchManyOutput]
-    );
+    impl JsonClient {
+        pub fn insert_one(
+            &self,
+            input: InsertOneInput,
+        ) -> impl Future<Output = Result<InsertOneOutput, HttpClientError>> + 'static + Send + use<>
+        {
+            let (sender, reciever) =
+                oneshot::async_channel::<Result<OperationOutput, HttpClientError>>();
+            self.sender
+                .send((Operation::InsertOne(input), sender))
+                .unwrap();
+            async move {
+                return reciever
+                    .await
+                    .map_err(|_| HttpClientError {
+                        status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                        payload: serde_json::to_value(format!("internal server error")).unwrap(),
+                    })?
+                    .map(|e| match e {
+                        OperationOutput::InsertOne(e) => Ok(e),
+                        _ => Err(HttpClientError {
+                            status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                            payload: serde_json::to_value(format!("internal server error"))
+                                .unwrap(),
+                        }),
+                    })?;
+            }
+        }
+        pub fn add_collection(
+            &self,
+            input: AddCollectionInput,
+        ) -> impl Future<Output = Result<AddCollectionOutput, HttpClientError>> + 'static + Send + use<>
+        {
+            let (sender, reciever) =
+                oneshot::async_channel::<Result<OperationOutput, HttpClientError>>();
+            self.sender
+                .send((Operation::AddCollection(input), sender))
+                .unwrap();
+            async move {
+                return reciever
+                    .await
+                    .map_err(|_| HttpClientError {
+                        status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                        payload: serde_json::to_value(format!("internal server error")).unwrap(),
+                    })?
+                    .map(|e| match e {
+                        OperationOutput::AddCollection(e) => Ok(e),
+                        _ => Err(HttpClientError {
+                            status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                            payload: serde_json::to_value(format!("internal server error"))
+                                .unwrap(),
+                        }),
+                    })?;
+            }
+        }
+        pub fn add_link(
+            &self,
+            input: AddLinkInput,
+        ) -> impl Future<Output = Result<AddLinkOutput, HttpClientError>> + 'static + Send + use<>
+        {
+            let (sender, reciever) =
+                oneshot::async_channel::<Result<OperationOutput, HttpClientError>>();
+            self.sender
+                .send((Operation::AddLink(input), sender))
+                .unwrap();
+            async move {
+                return reciever
+                    .await
+                    .map_err(|_| HttpClientError {
+                        status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                        payload: serde_json::to_value(format!("internal server error")).unwrap(),
+                    })?
+                    .map(|e| match e {
+                        OperationOutput::AddLink(e) => Ok(e),
+                        _ => Err(HttpClientError {
+                            status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                            payload: serde_json::to_value(format!("internal server error"))
+                                .unwrap(),
+                        }),
+                    })?;
+            }
+        }
+        pub fn fetch_many(
+            &self,
+            input: FetchManyInput,
+        ) -> impl Future<Output = Result<FetchManyOutput, HttpClientError>> + 'static + Send + use<>
+        {
+            let (sender, reciever) =
+                oneshot::async_channel::<Result<OperationOutput, HttpClientError>>();
+            self.sender
+                .send((Operation::FetchMany(input), sender))
+                .unwrap();
+            async move {
+                return reciever
+                    .await
+                    .map_err(|_| HttpClientError {
+                        status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                        payload: serde_json::to_value(format!("internal server error")).unwrap(),
+                    })?
+                    .map(|e| match e {
+                        OperationOutput::FetchMany(e) => Ok(e),
+                        _ => Err(HttpClientError {
+                            status: hyper::StatusCode::INTERNAL_SERVER_ERROR,
+                            payload: serde_json::to_value(format!("internal server error"))
+                                .unwrap(),
+                        }),
+                    })?;
+            }
+        }
+    }
 
     pub struct JsonClientSetting {
         pub check_for_unique_filters_on_update: bool,
@@ -883,7 +990,7 @@ pub mod dynamic_order_by {
         from_row::{FromRowAlias, FromRowData, FromRowError},
         json_client_v0::sqlx_type_ident::SqlxTypeHandler,
         json_client_v1::json_client::OrderDirection,
-        partial_serde::PartialSerialize,
+        json_client_v1::partial_serde::PartialSerializeV1,
         query_builder::{Expression, OpExpression, StatementBuilder},
     };
 
@@ -938,14 +1045,14 @@ pub mod dynamic_order_by {
     }
 
     impl<S> FromRowData for DynamicOrderBy<S> {
-        type RData = (String, PartialSerialize);
+        type RData = (String, PartialSerializeV1);
     }
 
     impl<'r, S: Database> FromRowAlias<'r, S::Row> for DynamicOrderBy<S> {
         fn no_alias(&self, row: &'r S::Row) -> Result<Self::RData, FromRowError> {
             let ret = self.sqlx_ident.from_row_no_alias(false, &self.col, row)?;
 
-            Ok((self.col.clone(), PartialSerialize::new(ret)))
+            Ok((self.col.clone(), PartialSerializeV1::new(ret)))
         }
 
         fn pre_alias(
@@ -989,7 +1096,7 @@ pub mod dynamic_order_by {
     }
 
     impl<S> FromRowData for Vec<DynamicOrderBy<S>> {
-        type RData = BTreeMap<String, PartialSerialize>;
+        type RData = BTreeMap<String, PartialSerializeV1>;
     }
 
     impl<'r, S> FromRowAlias<'r, S::Row> for Vec<DynamicOrderBy<S>>
@@ -1064,13 +1171,15 @@ pub mod supported_filter {
     use crate::expressions::ColumnEqual;
     use crate::json_client_v1::dynamic_collection::DynamicCollection;
     use crate::query_builder::functional_expr::BoxedExpression;
-    use crate::{database_extention::DatabaseExt, partial_serde::PartialDeserialize};
+    use crate::{
+        database_extention::DatabaseExt, json_client_v1::partial_serde::PartialDeserializeV1,
+    };
     use serde::{Deserialize, Serialize};
 
     #[derive(Deserialize, Clone, Debug)]
     #[non_exhaustive]
     pub enum SupportedFilter {
-        ColEq(ColumnEqual<String, PartialDeserialize>),
+        ColEq(ColumnEqual<String, PartialDeserializeV1>),
     }
 
     #[derive(Debug, Serialize)]
@@ -1137,10 +1246,10 @@ pub mod fetch_many {
         use tracing::warn;
 
         use crate::from_row::{FromRowAlias, FromRowData};
+        use crate::json_client_v1::partial_serde::PartialSerializeV1;
         use crate::operations::OperationOutput;
         use crate::operations::boxed_operation::BoxedOperation;
         use crate::operations::fetch_many::LinkFetch;
-        use crate::partial_serde::PartialSerialize;
         use crate::query_builder::ManyBoxedExpressions;
         use crate::select_items_trait_object::SelectItemsTraitObject;
         use crate::select_items_trait_object::ToImplSelectItems;
@@ -1161,7 +1270,7 @@ pub mod fetch_many {
                 &self,
                 item: Box<dyn Any + Send>,
                 op: &mut Box<dyn Any + Send>,
-            ) -> PartialSerialize;
+            ) -> PartialSerializeV1;
             fn join_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send>;
             fn wheres_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send>;
         }
@@ -1199,7 +1308,7 @@ pub mod fetch_many {
                 &self,
                 item: Box<dyn Any + Send>,
                 op: &mut Box<dyn Any + Send>,
-            ) -> PartialSerialize {
+            ) -> PartialSerializeV1 {
                 let s = self.take_many(
                     *item
                         .downcast::<<T::SelectItems as FromRowData>::RData>()
@@ -1208,7 +1317,7 @@ pub mod fetch_many {
                         .unwrap(),
                 );
 
-                PartialSerialize::new(s)
+                PartialSerializeV1::new(s)
             }
             fn select_items_expr(&self) -> Box<dyn SelectItemsTraitObject<S, ()>> {
                 Box::new(ToImplSelectItems {
@@ -1285,7 +1394,7 @@ pub mod fetch_many {
                 self.wheres_expr()
             }
 
-            type Output = PartialSerialize;
+            type Output = PartialSerializeV1;
 
             type OpInput = Box<dyn Any + Send>;
 
@@ -1368,7 +1477,7 @@ pub mod fetch_many {
 
             fn where_expressions(&self) -> Self::Wheres {}
 
-            type Output = Vec<PartialSerialize>;
+            type Output = Vec<PartialSerializeV1>;
 
             type OpInput = Vec<Box<dyn Any + Send>>;
 
@@ -1611,3 +1720,215 @@ pub mod insert_one {
 // pub mod delete_one
 
 // mod as_router
+
+pub mod partial_serde {
+    use core::fmt;
+    use std::{
+        ops::{Deref, Range},
+        sync::Arc,
+    };
+
+    use serde::{
+        Deserialize, Deserializer, Serialize,
+        de::{DeserializeOwned, Visitor},
+    };
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub struct PartialSerializeV1(serde_json::Value);
+
+    impl PartialSerializeV1 {
+        pub fn new<T: 'static + Clone + Serialize + fmt::Debug>(value: T) -> Self {
+            Self(serde_json::to_value(value).expect("claw_ql_bug: when serialize ever fail?"))
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct PartialDeserializeV1(String);
+
+    impl PartialDeserializeV1 {
+        pub fn continue_deserialize<T>(self) -> Result<T, serde_json::Error>
+        where
+            T: DeserializeOwned,
+        {
+            let value = serde_json::from_str::<T>(&self.0)?;
+            Ok(value)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for PartialDeserializeV1 {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let value = deserializer.deserialize_any(AnyVisitor)?;
+
+            Ok(PartialDeserializeV1(value))
+        }
+    }
+
+    pub struct AnyVisitor;
+
+    // this is not a complete set of supported types, but usually PartialDeserialize is used for maps so this is good enough
+    impl<'de> Visitor<'de> for AnyVisitor {
+        type Value = String;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("any value")
+        }
+        fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(format!("\"{}\"", v))
+        }
+        fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(format!("\"{}\"", v))
+        }
+        fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(String::from(if v { "true" } else { "false" }))
+        }
+
+        // here I deserialize maps as if they are serde_json::Value
+        // there might be a better performant way to do this, but for now this is functional
+        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            static OPEN_BRACKET: char = '{';
+            static CLOSE_BRACKET: char = '}';
+            let mut ret = String::from(OPEN_BRACKET);
+
+            if let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
+                ret.push('"');
+                ret.push_str(&key);
+                ret.push_str("\": ");
+                ret.push_str(&value.to_string());
+            }
+
+            while let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
+                ret.push_str(", ");
+                ret.push('"');
+                ret.push_str(&key);
+                ret.push_str("\": ");
+                ret.push_str(&value.to_string());
+            }
+            ret.push(CLOSE_BRACKET);
+            Ok(ret)
+        }
+    }
+
+    pub struct ArcSubStrJCV1 {
+        inner: Arc<str>,
+        range: Range<usize>,
+    }
+
+    impl ArcSubStrJCV1 {
+        pub fn from_arc(arc: &Arc<str>, range: Range<usize>) -> Self {
+            Self {
+                inner: arc.clone(),
+                range,
+            }
+        }
+        pub fn as_str(&self) -> &str {
+            &self.inner[self.range.clone()]
+        }
+    }
+
+    impl Deref for ArcSubStrJCV1 {
+        type Target = str;
+        fn deref(&self) -> &Self::Target {
+            &self.inner[self.range.clone()]
+        }
+    }
+
+    impl AsRef<str> for ArcSubStrJCV1 {
+        fn as_ref(&self) -> &str {
+            &self.inner[self.range.clone()]
+        }
+    }
+
+    impl AsRef<[u8]> for ArcSubStrJCV1 {
+        fn as_ref(&self) -> &[u8] {
+            self.inner[self.range.clone()].as_bytes()
+        }
+    }
+
+    #[allow(unused)]
+    #[cfg(test)]
+    mod test {
+        use std::ops::{Deref, Range};
+
+        use serde::Deserialize;
+
+        use crate::{
+            json_client_v1::partial_serde::{
+                ArcSubStrJCV1, PartialDeserializeV1, PartialSerializeV1,
+            },
+            operations::LinkedOutput,
+        };
+
+        #[derive(Debug, Deserialize)]
+        struct Input<T> {
+            base: String,
+            data: T,
+        }
+
+        #[test]
+        fn test_partial_serde() {
+            let input = "
+{
+    'base': 'todo',
+    'data': {
+        'title': 'new_todo',
+        'done': false,
+        'description': 'description',
+        'extra': {
+            'extra_title': 'extra_title'
+        }
+    }
+}
+"
+            .replace("'", "\"");
+
+            let s = serde_json::from_str::<Input<PartialDeserializeV1>>(&input).unwrap();
+
+            pretty_assertions::assert_eq!(s.base, String::from("todo"));
+            pretty_assertions::assert_eq!(
+                &s.data.0,
+                "{\"title\": \"new_todo\", \"done\": false, \"description\": \"description\", \"extra\": {\"extra_title\":\"extra_title\"}}"
+            );
+
+            let input = "
+[
+    'first_value', 'second_value'
+]
+"
+            .replace("'", "\"");
+
+            let s = serde_json::from_str::<(String, PartialDeserializeV1)>(&input).unwrap();
+
+            pretty_assertions::assert_eq!(s.0, String::from("first_value"));
+            pretty_assertions::assert_eq!(&s.1.0, "\"second_value\"");
+        }
+
+        #[test]
+        fn arc_str() {
+            use std::sync::Arc;
+
+            let input: Arc<str> = Arc::from("hello world");
+
+            let clone_of_first_alloc: Arc<str> = input.clone();
+            let slice_of_first_alloc: ArcSubStrJCV1 = ArcSubStrJCV1::from_arc(&input, 0..5);
+
+            assert_eq!(slice_of_first_alloc.as_str(), "hello");
+
+            assert_eq!(Arc::strong_count(&input), 3);
+        }
+    }
+}

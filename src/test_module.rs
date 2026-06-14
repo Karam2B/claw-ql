@@ -532,7 +532,9 @@ const _: () = {
             "todo"
         }
 
-        type Data = Todo;
+        type InputData = Todo;
+        type UpdateData = TodoPartial;
+        type OutputData = Todo;
 
         type Id = SingleIncremintalInt<&'static str>;
         fn id(&self) -> Self::Id {
@@ -727,7 +729,9 @@ const _: () = {
             "category"
         }
 
-        type Data = Category;
+        type InputData = Category;
+        type UpdateData = CategoryPartial;
+        type OutputData = Category;
 
         type Id = SingleIncremintalInt<&'static str>;
         fn id(&self) -> Self::Id {
