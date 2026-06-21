@@ -7,7 +7,7 @@ pub mod to_bind_trait {
     use sqlx::encode::IsNull;
     use sqlx::error::BoxDynError;
 
-    pub trait ToBind<S: Database>: Send {
+    pub trait ToBind<S: Database>: Send + Sync {
         fn clone_to_box<'q>(&self) -> Box<dyn ToBind<S> + Send + 'q>;
         fn bind_ref<'q>(&self, buf: &mut S::ArgumentBuffer<'q>) -> Result<IsNull, BoxDynError>;
         fn bind_boxed<'q>(
@@ -44,7 +44,7 @@ pub mod to_bind_trait {
     where
         T: Clone,
         T: IsNullTrait,
-        T: Send,
+        T: Send + Sync,
         S: Database,
         T: for<'q> Encode<'q, S> + Type<S> + 'static,
     {
@@ -490,7 +490,7 @@ pub mod json_client {
         pub links: LinkInformations,
     }
 
-    #[derive(Default, Debug)]
+    #[derive(Default, Debug, PartialEq, Eq)]
     pub struct LinkInformations {
         pub optional_to_many: HashSet<(String, String)>,
         pub timestamped: HashSet<String>,

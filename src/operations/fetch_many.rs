@@ -3,7 +3,7 @@ use crate::{
     database_extention::DatabaseExt,
     execute::Executable,
     expressions::larger_than_or_equal::LargerThanOrEqual,
-    extentions::common_expressions::{Aliased, V0OnInsert, Scoped},
+    extentions::common_expressions::{Aliased, Scoped, V0OnInsert},
     fix_executor::ExecutorTrait,
     from_row::{FromRowAlias, FromRowData, RowPreAliased},
     operations::{LinkedOutput, Operation, OperationOutput},
@@ -292,7 +292,7 @@ mod test {
 
     #[tokio::test]
     async fn main() {
-        let mut conn = Sqlite::connect_in_memory_2().await;
+        let mut conn = Sqlite::in_memory_connection().await;
 
         query(
             "

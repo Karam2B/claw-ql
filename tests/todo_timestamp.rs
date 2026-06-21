@@ -7,17 +7,14 @@ use claw_ql::{
         LinkedOutput, Operation,
         fetch_many::{FetchMany, ManyOutput},
     },
-    query_builder::{
-        StatementBuilder,
-        functional_expr::{ManyImplExpression, ManyPossible},
-    },
+    query_builder::StatementBuilder,
     test_module::{self, Todo},
 };
 use sqlx::Sqlite;
 
 #[tokio::test]
 async fn test_fetch_many() {
-    let mut conn = Sqlite::connect_in_memory_2().await;
+    let mut conn = Sqlite::in_memory_connection().await;
 
     Timestamp {
         collection: test_module::todo,
@@ -109,18 +106,12 @@ async fn test_fetch_many() {
 
 #[test]
 fn on_migrate_for_sqlite() {
-    let many = ManyImplExpression::new(
-        ManyPossible(
-            Timestamp {
-                collection: test_module::todo,
-            }
-            .statments(),
-        ),
-        "",
-        " ",
-    )
-    .unwrap();
-    let s = StatementBuilder::<Sqlite>::new(many);
+    let s = StatementBuilder::<Sqlite>::new(
+        Timestamp {
+            collection: test_module::todo,
+        }
+        .statments(),
+    );
 
     pretty_assertions::assert_eq!(
         s.stmt(),

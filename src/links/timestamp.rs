@@ -10,6 +10,24 @@ pub struct TimestampOutput {
     pub updated_at: String,
 }
 
+impl crate::gen_serde::Serialize<crate::gen_serde::json_serialize_side::JsonAsString>
+    for TimestampOutput
+{
+    fn serialize(&self, ctx: &mut crate::gen_serde::json_serialize_side::JsonAsString) {
+        use crate::gen_serde::Serialize;
+
+        ctx.0.push('{');
+        Serialize::serialize("created_at", ctx);
+        ctx.0.push(':');
+        self.created_at.serialize(ctx);
+        ctx.0.push(',');
+        Serialize::serialize("updated_at", ctx);
+        ctx.0.push(':');
+        self.updated_at.serialize(ctx);
+        ctx.0.push('}');
+    }
+}
+
 pub mod expressions {
     pub mod sql_default {
         use crate::{
@@ -38,28 +56,21 @@ pub mod expressions {
     }
 
     pub mod current_timestamp {
-        use crate::query_builder::OpExpression;
+        use crate::{
+            database_extention::DatabaseExt,
+            query_builder::{Expression, OpExpression, StatementBuilder},
+        };
 
         pub struct CurrentTimestamp;
 
         impl OpExpression for CurrentTimestamp {}
 
-        mod for_sqlite {
-            use sqlx::Sqlite;
-
-            use crate::{
-                database_extention::DatabaseExt,
-                links::timestamp::expressions::current_timestamp::CurrentTimestamp,
-                query_builder::{Expression, StatementBuilder},
-            };
-
-            impl<'q> Expression<'q, Sqlite> for CurrentTimestamp {
-                fn expression(self, ctx: &mut StatementBuilder<'q, Sqlite>)
-                where
-                    Sqlite: DatabaseExt,
-                {
-                    ctx.syntax("CURRENT_TIMESTAMP");
-                }
+        impl<'q, S> Expression<'q, S> for CurrentTimestamp
+        where
+            S: DatabaseExt,
+        {
+            fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+                ctx.syntax("CURRENT_TIMESTAMP");
             }
         }
     }
@@ -98,7 +109,12 @@ pub mod expressions {
     }
 
     pub mod create_trigger {
-        use crate::query_builder::{ManyExpressions, OpExpression};
+        use crate::{
+            database_extention::DatabaseExt,
+            query_builder::{
+                Expression, ManyExpressions, OpExpression, PossibleExpression, StatementBuilder,
+            },
+        };
 
         pub struct CreateTrigger<
             TriggerName,
@@ -119,60 +135,53 @@ pub mod expressions {
             pub statements: Statements,
         }
 
-        mod for_sqlite {
-            use sqlx::Sqlite;
+        impl<Tn, Lt, On, Ont, We, St> OpExpression for CreateTrigger<Tn, Lt, On, Ont, We, St> {}
 
-            use crate::{
-                links::timestamp::expressions::create_trigger::CreateTrigger,
-                query_builder::{Expression, ManyExpressions, OpExpression, PossibleExpression},
-            };
-
-            impl<Tn, Lt, On, Ont, We, St> OpExpression for CreateTrigger<Tn, Lt, On, Ont, We, St> {}
-            impl<'q, TriggerName, Lifetime, OperationName, OnTable, WhenExpression, Statements>
-                Expression<'q, Sqlite>
-                for CreateTrigger<
-                    TriggerName,
-                    Lifetime,
-                    OperationName,
-                    OnTable,
-                    WhenExpression,
-                    Statements,
-                >
-            where
-                TriggerName: 'q + Expression<'q, Sqlite>,
-                Lifetime: 'q + PossibleExpression<'q, Sqlite>,
-                OperationName: 'q + Expression<'q, Sqlite>,
-                OnTable: 'q + Expression<'q, Sqlite>,
-                WhenExpression: 'q + PossibleExpression<'q, Sqlite>,
-                Statements: 'q + ManyExpressions<'q, Sqlite>,
-            {
-                fn expression(self, ctx: &mut crate::query_builder::StatementBuilder<'q, Sqlite>) {
-                    ctx.syntax("CREATE ");
-                    if self.temp {
-                        ctx.syntax("TEMP ");
-                    }
-                    if self.if_not_exists {
-                        ctx.syntax("IF NOT EXISTS ");
-                    }
-                    ctx.syntax("TRIGGER ");
-                    self.trigger_name.expression(ctx);
-                    ctx.syntax(" ");
-                    self.lifetime.expression(ctx);
-                    ctx.syntax(" ");
-                    self.operation_name.expression(ctx);
-                    ctx.syntax(" ON ");
-                    self.on_table.expression(ctx);
-                    if self.for_each_row {
-                        ctx.syntax(" FOR EACH ROW ");
-                    }
-                    if self.when_expression.is_op() {
-                        ctx.syntax(" WHEN ");
-                        self.when_expression.expression(ctx);
-                    }
-                    ctx.syntax(" BEGIN ");
-                    self.statements.expression("", ";", ctx);
-                    ctx.syntax(" END;");
+        impl<'q, S, TriggerName, Lifetime, OperationName, OnTable, WhenExpression, Statements>
+            Expression<'q, S>
+            for CreateTrigger<
+                TriggerName,
+                Lifetime,
+                OperationName,
+                OnTable,
+                WhenExpression,
+                Statements,
+            >
+        where
+            S: DatabaseExt,
+            TriggerName: 'q + Expression<'q, S>,
+            Lifetime: 'q + PossibleExpression<'q, S>,
+            OperationName: 'q + Expression<'q, S>,
+            OnTable: 'q + Expression<'q, S>,
+            WhenExpression: 'q + PossibleExpression<'q, S>,
+            Statements: 'q + ManyExpressions<'q, S>,
+        {
+            fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+                ctx.syntax("CREATE ");
+                if self.temp {
+                    ctx.syntax("TEMP ");
                 }
+                if self.if_not_exists {
+                    ctx.syntax("IF NOT EXISTS ");
+                }
+                ctx.syntax("TRIGGER ");
+                self.trigger_name.expression(ctx);
+                ctx.syntax(" ");
+                self.lifetime.expression(ctx);
+                ctx.syntax(" ");
+                self.operation_name.expression(ctx);
+                ctx.syntax(" ON ");
+                self.on_table.expression(ctx);
+                if self.for_each_row {
+                    ctx.syntax(" FOR EACH ROW ");
+                }
+                if self.when_expression.is_op() {
+                    ctx.syntax(" WHEN ");
+                    self.when_expression.expression(ctx);
+                }
+                ctx.syntax(" BEGIN ");
+                self.statements.expression("", ";", ctx);
+                ctx.syntax(" END;");
             }
         }
 
@@ -180,106 +189,74 @@ pub mod expressions {
 
         impl OpExpression for TriggerLifetimeBefore {}
 
-        const _: () = {
-            use sqlx::Sqlite;
-
-            use crate::{
-                links::timestamp::expressions::create_trigger::TriggerLifetimeBefore,
-                query_builder::{Expression, StatementBuilder},
-            };
-
-            impl<'q> Expression<'q, Sqlite> for TriggerLifetimeBefore {
-                fn expression(self, ctx: &mut StatementBuilder<'q, Sqlite>) {
-                    ctx.syntax("BEFORE");
-                }
+        impl<'q, S> Expression<'q, S> for TriggerLifetimeBefore
+        where
+            S: DatabaseExt,
+        {
+            fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+                ctx.syntax("BEFORE");
             }
-        };
+        }
 
         pub struct TriggerLifetimeAfter;
 
         impl OpExpression for TriggerLifetimeAfter {}
 
-        const _: () = {
-            use sqlx::Sqlite;
-
-            use crate::{
-                links::timestamp::expressions::create_trigger::TriggerLifetimeAfter,
-                query_builder::{Expression, StatementBuilder},
-            };
-
-            impl<'q> Expression<'q, Sqlite> for TriggerLifetimeAfter {
-                fn expression(self, ctx: &mut StatementBuilder<'q, Sqlite>) {
-                    ctx.syntax("AFTER");
-                }
+        impl<'q, S> Expression<'q, S> for TriggerLifetimeAfter
+        where
+            S: DatabaseExt,
+        {
+            fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+                ctx.syntax("AFTER");
             }
-        };
+        }
 
         pub struct TriggerLifetimeInsteadOf;
 
         impl OpExpression for TriggerLifetimeInsteadOf {}
 
-        const _: () = {
-            use sqlx::Sqlite;
-
-            use crate::{
-                links::timestamp::expressions::create_trigger::TriggerLifetimeInsteadOf,
-                query_builder::{Expression, StatementBuilder},
-            };
-            impl<'q> Expression<'q, Sqlite> for TriggerLifetimeInsteadOf {
-                fn expression(self, ctx: &mut StatementBuilder<'q, Sqlite>) {
-                    ctx.syntax("INSTEAD OF");
-                }
+        impl<'q, S> Expression<'q, S> for TriggerLifetimeInsteadOf
+        where
+            S: DatabaseExt,
+        {
+            fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+                ctx.syntax("INSTEAD OF");
             }
-        };
+        }
 
         pub struct TriggerOperationNameInsert;
 
         impl OpExpression for TriggerOperationNameInsert {}
 
-        const _: () = {
-            use sqlx::Sqlite;
-
-            use crate::{
-                links::timestamp::expressions::create_trigger::TriggerOperationNameInsert,
-                query_builder::{Expression, StatementBuilder},
-            };
-            impl<'q> Expression<'q, Sqlite> for TriggerOperationNameInsert {
-                fn expression(self, ctx: &mut StatementBuilder<'q, Sqlite>) {
-                    ctx.syntax("INSERT");
-                }
+        impl<'q, S> Expression<'q, S> for TriggerOperationNameInsert
+        where
+            S: DatabaseExt,
+        {
+            fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+                ctx.syntax("INSERT");
             }
-        };
+        }
 
         pub struct TriggerOperationNameUpdate<OfColumns>(pub OfColumns);
 
         impl<OfColumns> OpExpression for TriggerOperationNameUpdate<OfColumns> {}
 
-        const _: () = {
-            use sqlx::Sqlite;
+        impl<'q, S, OfColumns> Expression<'q, S> for TriggerOperationNameUpdate<OfColumns>
+        where
+            S: DatabaseExt,
+            OfColumns: 'q + ManyExpressions<'q, S>,
+        {
+            fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
+                ctx.syntax("UPDATE");
 
-            use crate::{
-                links::timestamp::expressions::create_trigger::TriggerOperationNameUpdate,
-                query_builder::{Expression, StatementBuilder},
-            };
-
-            impl<'q, OfColumns> Expression<'q, Sqlite> for TriggerOperationNameUpdate<OfColumns>
-            where
-                OfColumns: 'q + ManyExpressions<'q, Sqlite>,
-            {
-                fn expression(self, ctx: &mut StatementBuilder<'q, Sqlite>) {
-                    ctx.syntax("UPDATE");
-
-                    self.0.expression(" OF ", ", ", ctx);
-                }
+                self.0.expression(" OF ", ", ", ctx);
             }
-        };
+        }
     }
 }
 
 mod impl_on_migrate {
     use std::marker::PhantomData;
-
-    use sqlx::Sqlite;
 
     use crate::{
         collections::Collection,
@@ -291,36 +268,37 @@ mod impl_on_migrate {
                 create_trigger::{CreateTrigger, TriggerLifetimeAfter, TriggerOperationNameUpdate},
                 current_timestamp::CurrentTimestamp,
                 sql_default::SqlDefault,
-                verbatim_statement::VerbatimStatement,
+                verbatim_statement::{VerbatimForAnyDb, VerbatimStatement},
             },
         },
         on_migrate::OnMigrate,
+        query_builder::functional_expr::{ManyImplExpression, ManyPossible},
         statements::AddColumn,
     };
+
+    type TimestampAddColumn<C> = AddColumn<
+        <C as TableNameExpression>::TableNameExpression,
+        ColumnDefinition<&'static str, String, SqlDefault<CurrentTimestamp>>,
+    >;
+
+    type TimestampCreateTrigger<C> = CreateTrigger<
+        &'static str,
+        TriggerLifetimeAfter,
+        TriggerOperationNameUpdate<()>,
+        <C as TableNameExpression>::TableNameExpression,
+        (),
+        VerbatimStatement<VerbatimForAnyDb>,
+    >;
 
     impl<C> OnMigrate for Timestamp<C>
     where
         C: Collection,
         C: TableNameExpression,
     {
-        type Statements = (
-            AddColumn<
-                C::TableNameExpression,
-                ColumnDefinition<&'static str, String, SqlDefault<CurrentTimestamp>>,
-            >,
-            AddColumn<
-                C::TableNameExpression,
-                ColumnDefinition<&'static str, String, SqlDefault<CurrentTimestamp>>,
-            >,
-            CreateTrigger<
-                &'static str,
-                TriggerLifetimeAfter,
-                TriggerOperationNameUpdate<()>,
-                C::TableNameExpression,
-                (),
-                VerbatimStatement<Sqlite>,
-            >,
-        );
+        type Statements = ManyImplExpression<
+            ManyPossible<(TimestampAddColumn<C>, TimestampAddColumn<C>, TimestampCreateTrigger<C>)>,
+        >;
+
         fn statments(&self) -> Self::Statements {
             let trigger = CreateTrigger {
                 trigger_name: "update_timestamp",
@@ -335,37 +313,42 @@ mod impl_on_migrate {
                     verbatim: String::from(
                         "UPDATE {table} SET \"updated_at\" = CURRENT_TIMESTAMP WHERE \"id\" = NEW.\"id\";",
                     ),
-                    for_db: Sqlite,
+                    for_db: VerbatimForAnyDb,
                 },
             };
-            (
-                AddColumn {
-                    table: self.collection.table_name_expression(),
-                    col_def: ColumnDefinition {
-                        name: "created_at",
-                        ty: PhantomData,
-                        constraints: SqlDefault {
-                            value: CurrentTimestamp,
+            ManyImplExpression::new(
+                ManyPossible((
+                    AddColumn {
+                        table: self.collection.table_name_expression(),
+                        col_def: ColumnDefinition {
+                            name: "created_at",
+                            ty: PhantomData,
+                            constraints: SqlDefault {
+                                value: CurrentTimestamp,
+                            },
                         },
                     },
-                },
-                AddColumn {
-                    table: self.collection.table_name_expression(),
-                    col_def: ColumnDefinition {
-                        name: "updated_at",
-                        ty: PhantomData,
-                        constraints: SqlDefault {
-                            value: CurrentTimestamp,
+                    AddColumn {
+                        table: self.collection.table_name_expression(),
+                        col_def: ColumnDefinition {
+                            name: "updated_at",
+                            ty: PhantomData,
+                            constraints: SqlDefault {
+                                value: CurrentTimestamp,
+                            },
                         },
                     },
-                },
-                trigger,
+                    trigger,
+                )),
+                "",
+                " ",
             )
+            .expect("timestamp migration is operational")
         }
     }
 }
 
-mod impl_fetch_many {
+pub mod impl_fetch_many {
     use sqlx::{ColumnIndex, Decode, Row, Type};
 
     use crate::{
@@ -381,7 +364,7 @@ mod impl_fetch_many {
     };
 
     #[derive(Debug, Clone)]
-    pub struct TimestampSelectItems<TableName>(TableName);
+    pub struct TimestampSelectItems<TableName>(pub TableName);
 
     impl Aliased for TimestampSelectItems<&'static str> {
         type Aliased = AliasedCols<'static>;
@@ -435,6 +418,54 @@ mod impl_fetch_many {
                 },
                 AliasedCol {
                     table: self.0.clone(),
+                    col: "updated_at",
+                    alias: SanitizeMany((alias, num, "updated_at")),
+                },
+            ]
+        }
+    }
+
+    impl Aliased for TimestampSelectItems<std::sync::Arc<str>> {
+        type Aliased = Vec<
+            AliasedCol<
+                std::sync::Arc<str>,
+                &'static str,
+                SanitizeMany<(&'static str, &'static str)>,
+            >,
+        >;
+
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
+            vec![
+                AliasedCol {
+                    table: std::sync::Arc::clone(&self.0),
+                    col: "created_at",
+                    alias: SanitizeMany((alias, "created_at")),
+                },
+                AliasedCol {
+                    table: std::sync::Arc::clone(&self.0),
+                    col: "updated_at",
+                    alias: SanitizeMany((alias, "updated_at")),
+                },
+            ]
+        }
+
+        type NumAliased = Vec<
+            AliasedCol<
+                std::sync::Arc<str>,
+                &'static str,
+                SanitizeMany<(&'static str, usize, &'static str)>,
+            >,
+        >;
+
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+            vec![
+                AliasedCol {
+                    table: std::sync::Arc::clone(&self.0),
+                    col: "created_at",
+                    alias: SanitizeMany((alias, num, "created_at")),
+                },
+                AliasedCol {
+                    table: std::sync::Arc::clone(&self.0),
                     col: "updated_at",
                     alias: SanitizeMany((alias, num, "updated_at")),
                 },
@@ -553,4 +584,10 @@ mod impl_fetch_many {
             item
         }
     }
+}
+
+/// On insert, read `created_at` / `updated_at` from the row `RETURNING` clause (columns use DB defaults).
+#[derive(Clone, Debug)]
+pub struct DatedSet<C: Clone> {
+    pub collection: C,
 }

@@ -76,6 +76,7 @@ pub mod dynamic_collection {
             )
         }
     }
+
     impl<S> Clone for DynamicCollection<S>
     where
         S: DatabaseExt,
@@ -536,7 +537,7 @@ pub mod json_client {
     }
 
     pub type FetchManyOutput = ManyOutput<
-        LinkedOutput<i64, PartialSerializeV1, Vec<PartialSerializeV1>>,
+        LinkedOutput<i64, PartialSerializeV1, Vec<crate::gen_serde::SerializedJson>>,
         CollectionOutput<i64, BTreeMap<String, PartialSerializeV1>>,
     >;
 
@@ -865,6 +866,7 @@ pub mod add_link {
         database_extention::DatabaseExt,
         fix_executor::ExecutorTrait,
         json_client_v1::{
+            dynamic_collection::DynamicCollection,
             http_client_error::HttpClientError,
             json_client::{AddLinkInput, AddLinkOutput},
             sqlx_executor::ClientData,
@@ -873,9 +875,10 @@ pub mod add_link {
             DefaultRelationKey, relation_optional_to_many::OptionalToMany, timestamp::Timestamp,
         },
         on_migrate::OnMigrate,
-        prelude::sql::ManyPossible,
-        query_builder::{StatementBuilder, functional_expr::ManyImplExpression},
+        query_builder::StatementBuilder,
     };
+
+    const ADD_LINK_ERRORS: &[&str] = &["link_already_exists", "collection_not_found"];
 
     pub(crate) fn add_link<S: Database>(
         this: Arc<ClientData<S>>,
@@ -883,6 +886,9 @@ pub mod add_link {
     ) -> impl Future<Output = Result<AddLinkOutput, HttpClientError>> + 'static + Send + use<S>
     where
         S: DatabaseExt + ExecutorTrait,
+        String: sqlx::Type<S>,
+        Timestamp<DynamicCollection<S>>:
+            OnMigrate<Statements: for<'q> crate::query_builder::Expression<'q, S>>,
     {
         async move {
             match input {
@@ -893,18 +899,18 @@ pub mod add_link {
                         .optional_to_many
                         .contains(&(to.clone(), from.clone()))
                     {
-                        Err("link already exists")?
+                        return Err(ADD_LINK_ERRORS[0].into());
                     }
 
                     let col_gaurd = this.collections.read().await;
                     let from_gaurd = col_gaurd
                         .get(from.as_str())
-                        .ok_or("collection doesn't exist")?
+                        .ok_or(ADD_LINK_ERRORS[1])?
                         .read()
                         .await;
                     let to_gaurd = col_gaurd
                         .get(to.as_str())
-                        .ok_or("collection doesn't exist")?
+                        .ok_or(ADD_LINK_ERRORS[1])?
                         .read()
                         .await;
 
@@ -919,7 +925,6 @@ pub mod add_link {
                     let mut mig_gaurd = this.migration.write().await;
 
                     let mut conn = this.pool.acquire().await.unwrap();
-                    // panic!("{}", mig.as_str());
                     S::execute(&mut conn, mig.as_str()).await.unwrap();
 
                     mig_gaurd.push(mig);
@@ -939,24 +944,17 @@ pub mod add_link {
                     let cols_gaurd = this.collections.read().await;
                     let col_gaurd = cols_gaurd
                         .get(collection.as_str())
-                        .ok_or("collection doesn't exist")?
+                        .ok_or(ADD_LINK_ERRORS[1])?
                         .read()
                         .await;
 
-                    let mig = StatementBuilder::new_no_data(
-                        ManyImplExpression::new(
-                            ManyPossible(
-                                Timestamp {
-                                    collection: col_gaurd.clone(),
-                                }
-                                .statments(),
-                            ),
-                            "",
-                            " ",
-                        )
-                        .unwrap(),
+                    let mig = StatementBuilder::<S>::new_no_data(
+                        Timestamp {
+                            collection: col_gaurd.clone(),
+                        }
+                        .statments(),
                     )
-                    .unwrap();
+                    .expect("bug: timestamp migration contains bind parameters");
 
                     let mut mig_gaurd = this.migration.write().await;
                     let mut linfo_gaurd = this.link_info.write().await;
@@ -1241,12 +1239,11 @@ pub mod fetch_many {
     use std::{ops::Not, sync::Arc};
 
     pub mod extending_link_trait {
-        use serde::Serialize;
         use sqlx::Database;
         use tracing::warn;
 
         use crate::from_row::{FromRowAlias, FromRowData};
-        use crate::json_client_v1::partial_serde::PartialSerializeV1;
+        use crate::gen_serde::{Serialize, SerializedJson, json_serialize_side::JsonAsString};
         use crate::operations::OperationOutput;
         use crate::operations::boxed_operation::BoxedOperation;
         use crate::operations::fetch_many::LinkFetch;
@@ -1270,7 +1267,7 @@ pub mod fetch_many {
                 &self,
                 item: Box<dyn Any + Send>,
                 op: &mut Box<dyn Any + Send>,
-            ) -> PartialSerializeV1;
+            ) -> SerializedJson;
             fn join_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send>;
             fn wheres_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send>;
         }
@@ -1290,13 +1287,12 @@ pub mod fetch_many {
             T::OpInput: 'static + Send,
             T::Op: Send + 'static + BoxedOperation<S>,
             T::Op: OperationOutput,
-            T::Output: Serialize,
+            T::Output: Serialize<JsonAsString>,
             T::SelectItems: FromRowData<RData: Send + 'static>,
             T::SelectItems: for<'r> FromRowAlias<'r, S::Row>,
             T::Join: Send + 'static + ManyBoxedExpressions<S>,
             T::Wheres: Send + 'static + ManyBoxedExpressions<S>,
-            // for PartialSerialize
-            T::Output: Clone + fmt::Debug,
+            T::Output: fmt::Debug,
         {
             fn join_expr(&self) -> Box<dyn ManyBoxedExpressions<S> + Send> {
                 Box::new(self.non_duplicating_join_expressions())
@@ -1308,7 +1304,7 @@ pub mod fetch_many {
                 &self,
                 item: Box<dyn Any + Send>,
                 op: &mut Box<dyn Any + Send>,
-            ) -> PartialSerializeV1 {
+            ) -> SerializedJson {
                 let s = self.take_many(
                     *item
                         .downcast::<<T::SelectItems as FromRowData>::RData>()
@@ -1317,7 +1313,7 @@ pub mod fetch_many {
                         .unwrap(),
                 );
 
-                PartialSerializeV1::new(s)
+                SerializedJson::new(&s)
             }
             fn select_items_expr(&self) -> Box<dyn SelectItemsTraitObject<S, ()>> {
                 Box::new(ToImplSelectItems {
@@ -1394,7 +1390,7 @@ pub mod fetch_many {
                 self.wheres_expr()
             }
 
-            type Output = PartialSerializeV1;
+            type Output = SerializedJson;
 
             type OpInput = Box<dyn Any + Send>;
 
@@ -1477,7 +1473,7 @@ pub mod fetch_many {
 
             fn where_expressions(&self) -> Self::Wheres {}
 
-            type Output = Vec<PartialSerializeV1>;
+            type Output = Vec<SerializedJson>;
 
             type OpInput = Vec<Box<dyn Any + Send>>;
 
@@ -1737,8 +1733,38 @@ pub mod partial_serde {
     pub struct PartialSerializeV1(serde_json::Value);
 
     impl PartialSerializeV1 {
-        pub fn new<T: 'static + Clone + Serialize + fmt::Debug>(value: T) -> Self {
+        pub fn new<T: Serialize + fmt::Debug>(value: T) -> Self {
             Self(serde_json::to_value(value).expect("claw_ql_bug: when serialize ever fail?"))
+        }
+
+        pub fn value(&self) -> &serde_json::Value {
+            &self.0
+        }
+    }
+
+    impl crate::gen_serde::Serialize<crate::gen_serde::json_serialize_side::JsonAsString>
+        for PartialSerializeV1
+    {
+        fn serialize(&self, ctx: &mut crate::gen_serde::json_serialize_side::JsonAsString) {
+            ctx.0.push_str(&self.0.to_string());
+        }
+    }
+
+    impl crate::gen_serde::Serialize<crate::gen_serde::json_serialize_side::JsonAsString>
+        for crate::operations::CollectionOutput<i64, PartialSerializeV1>
+    {
+        fn serialize(&self, ctx: &mut crate::gen_serde::json_serialize_side::JsonAsString) {
+            use crate::gen_serde::Serialize as GenSerialize;
+
+            ctx.0.push('{');
+            GenSerialize::serialize("id", ctx);
+            ctx.0.push(':');
+            GenSerialize::serialize(&self.id, ctx);
+            ctx.0.push(',');
+            GenSerialize::serialize("attributes", ctx);
+            ctx.0.push(':');
+            GenSerialize::serialize(&self.attributes, ctx);
+            ctx.0.push('}');
         }
     }
 

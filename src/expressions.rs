@@ -79,6 +79,7 @@ pub mod single_col_expressions {
         update_mod::Update,
     };
 
+    #[derive(Clone)]
     pub struct ScopedCol<T, C> {
         pub table: T,
         pub col: C,
@@ -831,6 +832,7 @@ pub mod standard_naming_conventions {
     }
 
     // represent a standard way to name a conjuction table
+    #[derive(Clone)]
     pub struct ConjuctionTableName<T1, T2, Key> {
         pub first: T1,
         pub second: T2,

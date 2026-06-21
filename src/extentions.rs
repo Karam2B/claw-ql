@@ -67,6 +67,16 @@ pub mod common_expressions {
         fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased;
     }
 
+    /// This is one way to generate trait object from `FromRowAlias`
+    /// but I think I will depricate it
+    ///
+    /// I have
+    /// 1. `SelectItemsTraitObject` trait object
+    ///     this generate trait object from `FromRowAlias` + `Aliased`
+    /// 2. I want to create RawFromRow trait object
+    ///     this generate trait object from ONLY `FromRowAlias`
+    ///
+    /// but this is like a mix of both, and I don't like it, it introduces problematic constraints
     pub mod dyn_from_row {
         use core::fmt;
         use std::any::{Any, type_name_of_val};
@@ -213,6 +223,102 @@ pub mod common_expressions {
                 R: sqlx::Row,
             {
                 Ok(Box::new(self.two_alias_2(row)?))
+            }
+        }
+    }
+
+    pub mod raw_from_row {
+        use std::any::Any;
+
+        use sqlx::Database;
+
+        use crate::from_row::{
+            FromRowAlias, FromRowData, FromRowError, RowPreAliased, RowTwoAliased,
+        };
+
+        pub trait RawFromRow<S: Database> {
+            fn dyn_no_alias<'r>(
+                &self,
+                row: &'r S::Row,
+            ) -> Result<Box<dyn Any + Send>, FromRowError>;
+            fn dyn_pre_alias<'r>(
+                &self,
+                row: RowPreAliased<'r, S::Row>,
+            ) -> Result<Box<dyn Any + Send>, FromRowError>;
+            fn dyn_two_alias<'r>(
+                &self,
+                row: RowTwoAliased<'r, S::Row>,
+            ) -> Result<Box<dyn Any + Send>, FromRowError>;
+        }
+
+        impl<S, T> RawFromRow<S> for T
+        where
+            S: Database,
+            T: for<'r> FromRowAlias<'r, S::Row, RData: Send + 'static>,
+        {
+            fn dyn_no_alias<'r>(
+                &self,
+                row: &'r <S as Database>::Row,
+            ) -> Result<Box<dyn Any + Send>, FromRowError> {
+                Ok(Box::new(self.no_alias(row)?))
+            }
+
+            fn dyn_pre_alias<'r>(
+                &self,
+                row: RowPreAliased<'r, <S as Database>::Row>,
+            ) -> Result<Box<dyn Any + Send>, FromRowError> {
+                Ok(Box::new(self.pre_alias(row)?))
+            }
+
+            fn dyn_two_alias<'r>(
+                &self,
+                row: RowTwoAliased<'r, <S as Database>::Row>,
+            ) -> Result<Box<dyn Any + Send>, FromRowError> {
+                Ok(Box::new(self.two_alias(row)?))
+            }
+        }
+
+        impl<'b, S> FromRowData for Box<dyn RawFromRow<S> + Send + 'b> {
+            type RData = Box<dyn Any + Send>;
+        }
+        impl<'b, 'r, S: Database> FromRowAlias<'r, <S as Database>::Row>
+            for Box<dyn RawFromRow<S> + Send + 'b>
+        {
+            fn no_alias(
+                &self,
+                row: &'r S::Row,
+            ) -> Result<Self::RData, crate::prelude::from_row_alias::FromRowError> {
+                (&**self).dyn_no_alias(row)
+            }
+
+            fn pre_alias(
+                &self,
+                row: crate::prelude::from_row_alias::RowPreAliased<'r, S::Row>,
+            ) -> Result<Self::RData, crate::prelude::from_row_alias::FromRowError>
+            where
+                S::Row: sqlx::prelude::Row,
+            {
+                (&**self).dyn_pre_alias(row)
+            }
+
+            fn post_alias(
+                &self,
+                _: crate::prelude::from_row_alias::RowPostAliased<'r, S::Row>,
+            ) -> Result<Self::RData, crate::prelude::from_row_alias::FromRowError>
+            where
+                S::Row: sqlx::prelude::Row,
+            {
+                panic!("to be deprecated")
+            }
+
+            fn two_alias(
+                &self,
+                row: crate::prelude::from_row_alias::RowTwoAliased<'r, S::Row>,
+            ) -> Result<Self::RData, crate::prelude::from_row_alias::FromRowError>
+            where
+                S::Row: sqlx::prelude::Row,
+            {
+                (&**self).dyn_two_alias(row)
             }
         }
     }

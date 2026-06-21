@@ -68,14 +68,17 @@ pub mod select_items_trait_object {
 
     pub trait SelectItemsTraitObject<S, CastFromRowResult>: Send {
         fn str_alias_erase(&self, alias: &'static str) -> Box<dyn ManyBoxedExpressions<S> + Send>;
+
         fn num_alias_erase(
             &self,
             num: usize,
             alias: &'static str,
         ) -> Box<dyn ManyBoxedExpressions<S> + Send>;
+
         fn no_alias_2<'r>(&self, row: &'r S::Row) -> Result<Box<dyn Any + Send>, FromRowError>
         where
             S: Database;
+
         fn pre_alias_2<'r>(
             &self,
             row: RowPreAliased<'r, S::Row>,
@@ -83,6 +86,7 @@ pub mod select_items_trait_object {
         where
             S: Database,
             S::Row: sqlx::Row;
+
         fn post_alias_2<'r>(
             &self,
             row: RowPostAliased<'r, S::Row>,
@@ -90,6 +94,7 @@ pub mod select_items_trait_object {
         where
             S: Database,
             S::Row: sqlx::Row;
+
         fn two_alias_2<'r>(
             &self,
             row: RowTwoAliased<'r, S::Row>,
@@ -261,7 +266,7 @@ pub mod select_items_trait_object {
 
         #[tokio::test]
         async fn test_ref_link() {
-            let mut db = Sqlite::connect_in_memory_2().await;
+            let mut db = Sqlite::in_memory_connection().await;
 
             sqlx::query(
                 "
@@ -584,6 +589,7 @@ pub mod debug_row {
         }
     }
 }
+
 pub mod into_infer_from_phantom {
     use std::marker::PhantomData;
 
@@ -877,6 +883,16 @@ pub mod sub_arc {
         pub fn new(arc: Arc<str>, range: Range<usize>) -> Self {
             Self { arc, range }
         }
+
+        /// The shared buffer this subslice borrows from (or owns after escape decoding).
+        pub fn backing_arc(&self) -> &Arc<str> {
+            &self.arc
+        }
+
+        /// Copy into a fresh `Arc<str>` so collection storage does not keep request JSON alive.
+        pub fn detach(&self) -> Arc<str> {
+            Arc::from(self.as_str())
+        }
     }
 
     impl Clone for SubArc<str> {
@@ -895,6 +911,18 @@ pub mod sub_arc {
     impl AsRef<str> for SubArc<str> {
         fn as_ref(&self) -> &str {
             self.deref()
+        }
+    }
+
+    impl PartialOrd for SubArc<str> {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.as_str().cmp(other.as_str()))
+        }
+    }
+
+    impl Ord for SubArc<str> {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            self.as_str().cmp(other.as_str())
         }
     }
 
@@ -989,6 +1017,62 @@ pub mod sub_arc {
         }
     }
 }
+
+#[allow(unused)]
+#[warn(unused_must_use)]
+pub mod constraints {
+    use std::ops;
+
+    pub struct Constrained<T, C> {
+        pub value: T,
+        constraints: C,
+    }
+
+    impl<T, C> Constrained<T, C>
+    where
+        C: Constrain<T>,
+    {
+        pub fn new(value: T, constraints: C) -> Result<Self, C::Err> {
+            constraints.runtime_check(&value)?;
+            Ok(Constrained { value, constraints })
+        }
+    }
+
+    impl<T, C> ops::Deref for Constrained<T, C> {
+        type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+            &self.value
+        }
+    }
+
+    impl<T, C> ops::DerefMut for Constrained<T, C> {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.value
+        }
+    }
+
+    pub trait Constrain<Value>: Sized {
+        type Err;
+        fn runtime_check(&self, value: &Value) -> Result<(), Self::Err>;
+    }
+
+    pub struct Lowercase;
+
+    impl<T: AsRef<str>> Constrain<T> for Lowercase {
+        type Err = ();
+
+        fn runtime_check(&self, value: &T) -> Result<(), Self::Err> {
+            let s = value.as_ref().chars();
+            let mut string = String::new();
+
+            todo!()
+        }
+    }
+}
+
+#[cfg(all(test, feature = "trace"))]
+mod track_sqlx_query;
 
 mod gen_serde;
 

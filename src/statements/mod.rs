@@ -49,17 +49,15 @@ mod impl_for_sqlx_fo {
         query_builder::{Expression, StatementBuilder},
         statements::AddColumn,
     };
-    use sqlx::Sqlite;
+    use sqlx::Database;
 
-    impl<'q, Table, ColDef> Expression<'q, Sqlite> for AddColumn<Table, ColDef>
+    impl<'q, S, Table, ColDef> Expression<'q, S> for AddColumn<Table, ColDef>
     where
-        Table: Expression<'q, Sqlite> + 'q,
-        ColDef: Expression<'q, Sqlite> + 'q,
+        S: Database + DatabaseExt,
+        Table: Expression<'q, S> + 'q,
+        ColDef: Expression<'q, S> + 'q,
     {
-        fn expression(self, ctx: &mut StatementBuilder<'q, Sqlite>)
-        where
-            Sqlite: DatabaseExt,
-        {
+        fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
             ctx.syntax("ALTER TABLE ");
             self.table.expression(ctx);
             ctx.syntax(" ADD COLUMN ");

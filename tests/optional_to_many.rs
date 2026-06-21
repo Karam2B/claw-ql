@@ -23,7 +23,7 @@ async fn fetch_many() {
     )
     .unwrap();
 
-    let mut conn = Sqlite::connect_in_memory_2().await;
+    let mut conn = Sqlite::in_memory_connection().await;
 
     query(
         "
@@ -115,7 +115,7 @@ async fn insert_ops() {
     )
     .unwrap();
 
-    let mut conn = Sqlite::connect_in_memory_2().await;
+    let mut conn = Sqlite::in_memory_connection().await;
 
     query(
         "

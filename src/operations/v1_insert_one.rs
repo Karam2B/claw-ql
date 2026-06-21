@@ -101,9 +101,11 @@ where
     Link::PostOp: Operation<S>,
     Link::InsertItems: Send + Clone,
     Link::InsertItems: Identifier<Identifier: for<'q> ManyExpressions<'q, S>>,
-    Link::InsertItems: V0OnInsert<InsertInput = (), InsertExpression: for<'q> ManyExpressions<'q, S>>,
+    Link::InsertItems:
+        V0OnInsert<InsertInput = (), InsertExpression: for<'q> ManyExpressions<'q, S>>,
     Link::InsertItems: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
-    Base: V0OnInsert<InsertInput = Base::InputData, InsertExpression: for<'q> ManyExpressions<'q, S>>,
+    Base:
+        V0OnInsert<InsertInput = Base::InputData, InsertExpression: for<'q> ManyExpressions<'q, S>>,
     Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::OutputData>,
     Base::Id: Identifier<Identifier: for<'q> Expression<'q, S>>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row, RData = <Base::Id as CollectionId>::IdData>,
@@ -178,7 +180,7 @@ mod test {
 
     #[tokio::test]
     async fn main() {
-        let mut conn = Sqlite::connect_in_memory_2().await;
+        let mut conn = Sqlite::in_memory_connection().await;
 
         query(
             "

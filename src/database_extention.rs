@@ -6,4 +6,6 @@ pub trait DatabaseExt: Database {
     fn sanitize_start(into: &mut String);
     fn sanitize_end(into: &mut String);
     fn sanitize(string: &str, into: &mut String);
+    type IdExpression;
+    fn id_on_create_table_expression() -> Self::IdExpression;
 }

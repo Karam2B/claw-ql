@@ -11,6 +11,100 @@ pub trait Serialize<Format> {
     fn serialize(&self, ctx: &mut Format);
 }
 
+mod impl_std_traits_for_trait_objects {
+    use super::Serialize;
+    use core::fmt;
+
+    impl<T: fmt::Debug + Default> fmt::Debug for dyn Serialize<T> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let mut t = T::default();
+            self.serialize(&mut t);
+            t.fmt(f)?;
+            Ok(())
+        }
+    }
+
+    impl<T: fmt::Debug + Default> fmt::Debug for dyn Serialize<T> + Send {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            let mut t = T::default();
+            self.serialize(&mut t);
+            t.fmt(f)?;
+            Ok(())
+        }
+    }
+
+    impl<T: PartialEq + Default> PartialEq for dyn Serialize<T> {
+        fn eq(&self, other: &Self) -> bool {
+            let mut t1 = T::default();
+            self.serialize(&mut t1);
+            let mut t2 = T::default();
+            other.serialize(&mut t2);
+            t1 == t2
+        }
+    }
+
+    impl<T: Eq + Default> Eq for dyn Serialize<T> {}
+}
+
+mod impl_my_types {
+    use crate::{
+        gen_serde::{ListEncoding, ObjectEncoding, Serialize},
+        operations::{LinkedOutput, fetch_many::ManyOutput},
+    };
+
+    impl<F> Serialize<F> for Box<dyn Serialize<F> + Send> {
+        fn serialize(&self, ctx: &mut F) {
+            Serialize::serialize(&**self, ctx)
+        }
+    }
+
+    impl<F, T> Serialize<F> for Vec<T>
+    where
+        T: Serialize<F>,
+        F: ListEncoding,
+    {
+        fn serialize(&self, ctx: &mut F) {
+            let mut list = ctx.serialize_start();
+            for value in self {
+                ctx.serialize_value(&mut list, value);
+            }
+            ctx.serialize_end(list);
+        }
+    }
+
+    impl<F, I, C, L> Serialize<F> for LinkedOutput<I, C, L>
+    where
+        I: Serialize<F>,
+        C: Serialize<F>,
+        L: Serialize<F>,
+        str: Serialize<F>,
+        F: ObjectEncoding,
+    {
+        fn serialize(&self, ctx: &mut F) {
+            let mut object = ctx.serialize_start();
+            ctx.serialize_pair(&mut object, "id", &self.id);
+            ctx.serialize_pair(&mut object, "attributes", &self.attributes);
+            ctx.serialize_pair(&mut object, "links", &self.links);
+            ctx.serialize_end(object);
+        }
+    }
+
+    impl<F, T, Next> Serialize<F> for ManyOutput<T, Next>
+    where
+        F: ObjectEncoding,
+        str: Serialize<F>,
+        Vec<T>: Serialize<F>,
+        Option<Next>: Serialize<F>,
+    {
+        fn serialize(&self, ctx: &mut F) {
+            let mut object = ctx.serialize_start();
+            ctx.serialize_pair(&mut object, "items", &self.items);
+            ctx.serialize_pair(&mut object, "next_item", &self.next_item);
+            ctx.serialize_end(object);
+        }
+    }
+}
+
 pub trait Deserializer<'de>: Sized {
     type Err;
     type Format;
@@ -30,6 +124,16 @@ pub trait ObjectEncoding {
         V: Serialize<Self> + ?Sized;
     fn join(&mut self, object: &mut Self::Object);
     fn serialize_end(&mut self, object: Self::Object);
+}
+
+pub trait ListEncoding {
+    type List;
+    fn serialize_start(&mut self) -> Self::List;
+    fn serialize_value<T>(&mut self, list: &mut Self::List, value: &T)
+    where
+        T: Serialize<Self>,
+        Self: Sized;
+    fn serialize_end(&mut self, list: Self::List);
 }
 
 /// Declares **how** a type is deserialized *before* choosing a [`Deserializer`]: the [`Handler`]
@@ -67,19 +171,21 @@ pub trait DeserializeMap<'de>: Deserializer<'de> {
     type MapAccess;
     fn start_map(&mut self) -> Result<Self::MapAccess, Self::Err>;
 
+    fn map_has_next(&self, map: &Self::MapAccess) -> bool;
+
     /// deserialize pairs with unknown key value -- the deserialize impl does not know the value of the key, only knows its type
-    fn deserialize_pair_unknown_key<Key, Value>(
+    fn deserialize_with_unknown_key<Key, Value>(
         &mut self,
         map: &mut Self::MapAccess,
         key_handler: Key::Handler,
         value_handler: Value::Handler,
     ) -> Result<(Key, Value), Self::Err>
     where
-        Key: UnknownKey<Self> + DeserializeSpec + Deserialize<'de, Self>,
-        Value: DeserializeSpec + Deserialize<'de, Self>;
+        Key: UnknownKey<Self> + Deserialize<'de, Self>,
+        Value: Deserialize<'de, Self>;
 
     /// deserialize pairs with known key value -- the deserialize impl known the value of the key
-    fn deserialize_pair_known_key<Key, Value>(
+    fn deserialize_with_known_key<Key, Value>(
         &mut self,
         map: &mut Self::MapAccess,
         key: Key,
@@ -107,32 +213,6 @@ pub trait DeserializeSeq<'de>: Deserializer<'de> {
     fn finish(&mut self, seq: Self::SeqAccess) -> Result<(), Self::Err>;
 }
 
-impl<T: DeserializeSpec> DeserializeSpec for Vec<T> {
-    type Handler = T::Handler;
-}
-
-impl<'de, S, T> Deserialize<'de, S> for Vec<T>
-where
-    S: DeserializeSeq<'de>,
-    T: DeserializeSpec + Deserialize<'de, S>,
-    T::Handler: Clone,
-    S::Err: From<&'static str>,
-{
-    fn deserialize(handler: T::Handler, serialized: &mut S) -> Result<Self, S::Err> {
-        let mut seq = DeserializeSeq::start_seq(serialized)?;
-        let mut out = Vec::new();
-        while DeserializeSeq::seq_has_next(serialized, &mut seq)? {
-            out.push(DeserializeSeq::deserialize_value(
-                serialized,
-                &mut seq,
-                handler.clone(),
-            )?);
-        }
-        DeserializeSeq::finish(serialized, seq)?;
-        Ok(out)
-    }
-}
-
 pub enum MapOrSeq<Map, Seq> {
     Map(Map),
     Seq(Seq),
@@ -153,7 +233,7 @@ pub trait DeserializeMapOrSeq<'de>: DeserializeMap<'de> {
         Key: UnknownKey<Self> + DeserializeSpec + Deserialize<'de, Self>,
         Value: DeserializeSpec + Deserialize<'de, Self>,
     {
-        DeserializeMap::deserialize_pair_unknown_key(self, map, key_handler, value_handler)
+        DeserializeMap::deserialize_with_unknown_key(self, map, key_handler, value_handler)
     }
 
     fn deserialize_pair_known_key<Key, Value>(
@@ -166,7 +246,7 @@ pub trait DeserializeMapOrSeq<'de>: DeserializeMap<'de> {
         Self: KnownKey<Key>,
         Value: DeserializeSpec + Deserialize<'de, Self>,
     {
-        DeserializeMap::deserialize_pair_known_key(self, map, key, value_handler)
+        DeserializeMap::deserialize_with_known_key(self, map, key, value_handler)
     }
 
     fn deserialize_value<T>(
@@ -180,13 +260,43 @@ pub trait DeserializeMapOrSeq<'de>: DeserializeMap<'de> {
     fn finish_seq(&mut self, seq: Self::SeqAccess) -> Result<(), Self::Err>;
 }
 
+mod impl_std_types {
+    use super::{Deserialize, DeserializeSeq, DeserializeSpec};
+
+    impl<T: DeserializeSpec> DeserializeSpec for Vec<T> {
+        type Handler = T::Handler;
+    }
+
+    impl<'de, S, T> Deserialize<'de, S> for Vec<T>
+    where
+        S: DeserializeSeq<'de>,
+        T: DeserializeSpec + Deserialize<'de, S>,
+        T::Handler: Clone,
+        S::Err: From<&'static str>,
+    {
+        fn deserialize(handler: T::Handler, serialized: &mut S) -> Result<Self, S::Err> {
+            let mut seq = DeserializeSeq::start_seq(serialized)?;
+            let mut out = Vec::new();
+            while DeserializeSeq::seq_has_next(serialized, &mut seq)? {
+                out.push(DeserializeSeq::deserialize_value(
+                    serialized,
+                    &mut seq,
+                    handler.clone(),
+                )?);
+            }
+            DeserializeSeq::finish(serialized, seq)?;
+            Ok(out)
+        }
+    }
+}
+
 #[cfg(test)]
 mod dynamic_client_side {
-    use std::{marker::PhantomData, sync::Arc};
+    use std::sync::Arc;
 
     use crate::gen_serde::{
         Deserialize, DeserializeMap, DeserializeMapOrSeq, DeserializeSpec, Deserializer,
-        FromSerialized, FromSerializedExt, KnownKey, MapOrSeq, json_format_side::JsonFormat,
+        FromSerialized, KnownKey, MapOrSeq, deserialize, json_format_side::JsonFormat,
     };
 
     #[derive(Debug, PartialEq, Eq)]
@@ -223,21 +333,21 @@ mod dynamic_client_side {
         fn deserialize(handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err> {
             match serialized.start_map_or_seq()? {
                 MapOrSeq::Map(mut map) => {
-                    let title = DeserializeMap::deserialize_pair_known_key(
+                    let title = DeserializeMap::deserialize_with_known_key(
                         serialized,
                         &mut map,
                         "title",
                         (),
                     )?;
                     let another_field = if handler.another_field_is_string {
-                        StringOrInt::String(DeserializeMap::deserialize_pair_known_key(
+                        StringOrInt::String(DeserializeMap::deserialize_with_known_key(
                             serialized,
                             &mut map,
                             "another_field",
                             (),
                         )?)
                     } else {
-                        StringOrInt::Int(DeserializeMap::deserialize_pair_known_key(
+                        StringOrInt::Int(DeserializeMap::deserialize_with_known_key(
                             serialized,
                             &mut map,
                             "another_field",
@@ -258,15 +368,14 @@ mod dynamic_client_side {
     #[test]
     fn te_dynamic_example_string_branch() {
         let s: Arc<str> = Arc::from(r#"{"title":"hi","another_field":"from_json"}"#.to_string());
-        let got: DynamicExample = s
-            .deserialize_and_terminate_with_handler(
-                JsonFormat,
-                DynamicExampleHandler {
-                    another_field_is_string: true,
-                },
-                PhantomData::<DynamicExample>,
-            )
-            .unwrap();
+        let got: DynamicExample = deserialize(
+            s,
+            DynamicExampleHandler {
+                another_field_is_string: true,
+            },
+            JsonFormat,
+        )
+        .unwrap();
         assert_eq!(
             got,
             DynamicExample {
@@ -279,15 +388,14 @@ mod dynamic_client_side {
     #[test]
     fn te_dynamic_example_int_branch() {
         let s: Arc<str> = Arc::from(r#"{"title":"hi","another_field":42}"#.to_string());
-        let got: DynamicExample = s
-            .deserialize_and_terminate_with_handler(
-                JsonFormat,
-                DynamicExampleHandler {
-                    another_field_is_string: false,
-                },
-                PhantomData::<DynamicExample>,
-            )
-            .unwrap();
+        let got: DynamicExample = deserialize(
+            s,
+            DynamicExampleHandler {
+                another_field_is_string: false,
+            },
+            JsonFormat,
+        )
+        .unwrap();
         assert_eq!(
             got,
             DynamicExample {
@@ -304,12 +412,13 @@ mod client_side {
 
     use crate::gen_serde::{
         Deserialize, DeserializeMap, DeserializeMapOrSeq, DeserializeSpec, Deserializer,
-        FromSerialized, FromSerializedExt, IntoSerializedString, KnownKey, MapOrSeq,
-        ObjectEncoding, Serialize,
-        json_format_side::{JsonFormat, PartialDeserialize, StringArcRef},
+        FromSerialized, IntoSerializedString, KnownKey, MapOrSeq, ObjectEncoding, Serialize,
+        deserialize,
+        json_format_side::{JsonFormat, PartialDeserialize},
         json_serialize_side::JsonAsString,
     };
-    use std::{marker::PhantomData, sync::Arc};
+    use crate::sub_arc::ArcSubStr;
+    use std::sync::Arc;
 
     #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
     pub struct BasicObject {
@@ -330,7 +439,7 @@ mod client_side {
         fn deserialize(_handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err> {
             match serialized.start_map_or_seq()? {
                 MapOrSeq::Map(mut map) => {
-                    let title = DeserializeMap::deserialize_pair_known_key(
+                    let title = DeserializeMap::deserialize_with_known_key(
                         serialized,
                         &mut map,
                         "title",
@@ -352,9 +461,7 @@ mod client_side {
     fn te_object() {
         let s: Arc<str> = Arc::from(r#"{"title":"first_title"}"#.to_string());
 
-        let s = s
-            .deserialize_and_terminate_with(JsonFormat, PhantomData::<BasicObject>)
-            .unwrap();
+        let s: BasicObject = deserialize(s, (), JsonFormat).unwrap();
 
         pretty_assertions::assert_eq!(
             s,
@@ -368,9 +475,7 @@ mod client_side {
     fn te_array() {
         let s: Arc<str> = Arc::from(r#"["first_title"]"#.to_string());
 
-        let s = s
-            .deserialize_and_terminate_with(JsonFormat, PhantomData::<BasicObject>)
-            .unwrap();
+        let s: BasicObject = deserialize(s, (), JsonFormat).unwrap();
 
         pretty_assertions::assert_eq!(
             s,
@@ -413,40 +518,31 @@ mod client_side {
     #[test]
     fn te_i64_json() {
         let s: Arc<str> = Arc::from(" 42 ".to_string());
-        let v: i64 = s
-            .deserialize_and_terminate_with(JsonFormat, PhantomData::<i64>)
-            .unwrap();
+        let v: i64 = deserialize(s, (), JsonFormat).unwrap();
         assert_eq!(v, 42);
     }
 
     #[test]
     fn te_f64_json() {
         let s: Arc<str> = Arc::from("1.25e2".to_string());
-        let v: f64 = s
-            .deserialize_and_terminate_with(JsonFormat, PhantomData::<f64>)
-            .unwrap();
+        let v: f64 = deserialize(s, (), JsonFormat).unwrap();
         assert!((v - 125.0).abs() < 1e-9);
     }
 
     #[test]
     fn te_unit_null() {
         let s: Arc<str> = Arc::from("  null  ".to_string());
-        s.deserialize_and_terminate_with(JsonFormat, PhantomData::<()>)
-            .unwrap();
+        let _: () = deserialize(s, (), JsonFormat).unwrap();
     }
 
     #[test]
     fn te_option_string() {
         let none: Arc<str> = Arc::from("null".to_string());
-        let v: Option<String> = none
-            .deserialize_and_terminate_with(JsonFormat, PhantomData::<Option<String>>)
-            .unwrap();
+        let v: Option<String> = deserialize(none, (), JsonFormat).unwrap();
         assert_eq!(v, None);
 
         let some: Arc<str> = Arc::from("\"x\"".to_string());
-        let v: Option<String> = some
-            .deserialize_and_terminate_with(JsonFormat, PhantomData::<Option<String>>)
-            .unwrap();
+        let v: Option<String> = deserialize(some, (), JsonFormat).unwrap();
         assert_eq!(v.as_deref(), Some("x"));
     }
 
@@ -454,24 +550,19 @@ mod client_side {
     fn te_string_arc_ref_zero_copy() {
         let inner: Arc<str> = Arc::from(r#"  "plain"  "#.to_string());
         let doc = inner.clone();
-        let got: StringArcRef = doc
-            .deserialize_and_terminate_with(JsonFormat, PhantomData::<StringArcRef>)
-            .unwrap();
+        let got: ArcSubStr = deserialize(doc, (), JsonFormat).unwrap();
         assert_eq!(got.as_str(), "plain");
-        assert!(Arc::ptr_eq(&inner, &got.0));
-        assert_eq!(got.1, 3..8);
+        assert!(Arc::ptr_eq(&inner, got.backing_arc()));
+        assert_eq!(got.as_str(), &inner[3..8]);
     }
 
     #[test]
     fn te_string_arc_ref_escaped() {
         let inner: Arc<str> = Arc::from(r#""a\"b\\c""#.to_string());
         let doc = inner.clone();
-        let got: StringArcRef = doc
-            .deserialize_and_terminate_with(JsonFormat, PhantomData::<StringArcRef>)
-            .unwrap();
+        let got: ArcSubStr = deserialize(doc, (), JsonFormat).unwrap();
         assert_eq!(got.as_str(), r#"a"b\c"#);
-        assert!(!Arc::ptr_eq(&inner, &got.0));
-        assert_eq!(got.1, 0..got.as_str().len());
+        assert!(!Arc::ptr_eq(&inner, got.backing_arc()));
     }
 
     #[derive(Debug, PartialEq, Eq)]
@@ -496,13 +587,13 @@ mod client_side {
         fn deserialize(_handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err> {
             match serialized.start_map_or_seq()? {
                 MapOrSeq::Map(mut map) => {
-                    let identifier = DeserializeMap::deserialize_pair_known_key(
+                    let identifier = DeserializeMap::deserialize_with_known_key(
                         serialized,
                         &mut map,
                         "identifier",
                         (),
                     )?;
-                    let data = DeserializeMap::deserialize_pair_known_key(
+                    let data = DeserializeMap::deserialize_with_known_key(
                         serialized,
                         &mut map,
                         "data",
@@ -521,9 +612,7 @@ mod client_side {
         let s: Arc<str> =
             Arc::from(r#"{"identifier":"todo", "data": {"title": "from_string_key"}}"#.to_string());
 
-        let got: Collection = s
-            .deserialize_and_terminate_with(JsonFormat, PhantomData::<Collection>)
-            .unwrap();
+        let got: Collection = deserialize(s, (), JsonFormat).unwrap();
 
         assert_eq!(got.identifier, "todo");
         assert_eq!(got.data.0.as_str(), r#"{"title": "from_string_key"}"#);
@@ -556,7 +645,7 @@ mod client_side {
         fn deserialize(_handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err> {
             match serialized.start_map_or_seq()? {
                 MapOrSeq::Map(mut map) => {
-                    let title = DeserializeMap::deserialize_pair_known_key(
+                    let title = DeserializeMap::deserialize_with_known_key(
                         serialized,
                         &mut map,
                         String::from("title"),
@@ -577,9 +666,7 @@ mod client_side {
     #[test]
     fn te_object_known_key_string() {
         let s: Arc<str> = Arc::from(r#"{"title":"from_string_key"}"#.to_string());
-        let got: DeTodoStringKey = s
-            .deserialize_and_terminate_with(JsonFormat, PhantomData::<DeTodoStringKey>)
-            .unwrap();
+        let got: DeTodoStringKey = deserialize(s, (), JsonFormat).unwrap();
         assert_eq!(
             got,
             DeTodoStringKey {
@@ -589,16 +676,35 @@ mod client_side {
     }
 }
 
-mod json_serialize_side {
+pub(crate) mod json_serialize_side {
 
-    use crate::gen_serde::{ObjectEncoding, Serialize};
+    use crate::gen_serde::{ListEncoding, ObjectEncoding, Serialize};
 
     use super::json_format_side::JsonFormat;
 
     #[derive(Default)]
     pub struct JsonAsBuffer(pub Vec<u8>);
-    #[derive(Default)]
+    #[derive(Debug, PartialEq, Eq, Default)]
     pub struct JsonAsString(pub String);
+
+    fn append_json_string(out: &mut String, value: &str) {
+        out.push('"');
+        for ch in value.chars() {
+            match ch {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c if c.is_control() => {
+                    use std::fmt::Write;
+                    let _ = write!(out, "\\u{:04x}", c as u32);
+                }
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+    }
 
     impl Into<Vec<u8>> for JsonAsBuffer {
         fn into(self) -> Vec<u8> {
@@ -620,26 +726,59 @@ mod json_serialize_side {
 
     impl Serialize<JsonAsString> for str {
         fn serialize(&self, ctx: &mut JsonAsString) {
-            todo!()
+            append_json_string(&mut ctx.0, self);
         }
     }
 
     impl Serialize<JsonAsString> for String {
         fn serialize(&self, ctx: &mut JsonAsString) {
-            todo!()
+            append_json_string(&mut ctx.0, self);
+        }
+    }
+
+    impl Serialize<JsonAsString> for bool {
+        fn serialize(&self, ctx: &mut JsonAsString) {
+            ctx.0.push_str(if *self { "true" } else { "false" });
+        }
+    }
+
+    impl Serialize<JsonAsString> for () {
+        fn serialize(&self, ctx: &mut JsonAsString) {
+            ctx.0.push_str("null");
+        }
+    }
+
+    impl<T> Serialize<JsonAsString> for Option<T>
+    where
+        T: Serialize<JsonAsString>,
+    {
+        fn serialize(&self, ctx: &mut JsonAsString) {
+            match self {
+                None => ctx.0.push_str("null"),
+                Some(value) => value.serialize(ctx),
+            }
+        }
+    }
+
+    impl Serialize<JsonAsString> for i64 {
+        fn serialize(&self, ctx: &mut JsonAsString) {
+            use std::fmt::Write;
+            let _ = write!(ctx.0, "{self}");
         }
     }
 
     impl ObjectEncoding for JsonAsString {
-        type Object = ();
+        /// `true` while the first key/value pair is still pending.
+        type Object = bool;
 
         fn serialize_start(&mut self) -> Self::Object {
-            todo!()
+            self.0.push('{');
+            true
         }
 
         fn serialize_pair<K, V>(
             &mut self,
-            object: &mut <Self as ObjectEncoding>::Object,
+            first: &mut Self::Object,
             key: &K,
             value: &V,
         ) where
@@ -647,28 +786,56 @@ mod json_serialize_side {
             K: Serialize<Self> + ?Sized,
             V: Serialize<Self> + ?Sized,
         {
-            todo!()
+            if !*first {
+                self.0.push(',');
+            }
+            *first = false;
+            key.serialize(self);
+            self.0.push(':');
+            value.serialize(self);
         }
 
-        fn join(&mut self, object: &mut Self::Object) {
-            todo!()
+        fn join(&mut self, _object: &mut Self::Object) {}
+
+        fn serialize_end(&mut self, _object: Self::Object) {
+            self.0.push('}');
+        }
+    }
+
+    impl ListEncoding for JsonAsString {
+        /// `true` while the first list element is still pending.
+        type List = bool;
+
+        fn serialize_start(&mut self) -> Self::List {
+            self.0.push('[');
+            true
         }
 
-        fn serialize_end(&mut self, object: Self::Object) {
-            todo!()
+        fn serialize_value<T>(&mut self, first: &mut Self::List, value: &T)
+        where
+            T: Serialize<Self>,
+            Self: Sized,
+        {
+            if !*first {
+                self.0.push(',');
+            }
+            *first = false;
+            value.serialize(self);
+        }
+
+        fn serialize_end(&mut self, _list: Self::List) {
+            self.0.push(']');
         }
     }
 }
 
 pub(crate) mod json_format_side {
-    use std::marker::PhantomData;
     use std::ops::Range;
     use std::sync::Arc;
 
     use crate::gen_serde::{
         Deserialize, DeserializeMap, DeserializeMapOrSeq, DeserializeSeq, DeserializeSpec,
-        Deserializer, FromSerialized, FromSerializedExt, KnownKey, KnownKeyInfo, MapOrSeq,
-        UnknownKey,
+        Deserializer, FromSerialized, KnownKey, KnownKeyInfo, MapOrSeq, UnknownKey, deserialize,
     };
     use crate::sub_arc::ArcSubStr;
 
@@ -889,13 +1056,14 @@ pub(crate) mod json_format_side {
             T: for<'de> Deserialize<'de, JsonAsArcCursor, Handler = ()>,
         {
             let slice: Arc<str> = Arc::from(self.0.as_str());
-            FromSerializedExt::deserialize_and_terminate_with(slice, JsonFormat, PhantomData::<T>)
+            deserialize(slice, (), JsonFormat)
         }
         pub fn continue_deserialize_with<T>(&self, handler: T::Handler) -> Result<T, String>
         where
             T: for<'de> Deserialize<'de, JsonAsArcCursor>,
         {
-            todo!()
+            let slice: Arc<str> = Arc::from(self.0.as_str());
+            deserialize(slice, handler, JsonFormat)
         }
     }
 
@@ -921,43 +1089,16 @@ pub(crate) mod json_format_side {
         }
     }
 
-    /// JSON string decoded to UTF-8, stored as either a subslice of the original buffer (fast
-    /// path when there are no `\\` escapes) or a dedicated [`Arc<str>`] after decoding.
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct StringArcRef(pub Arc<str>, pub Range<usize>);
-
-    impl StringArcRef {
-        pub fn as_str(&self) -> &str {
-            self.0
-                .get(self.1.clone())
-                .expect("claw_ql_bug: string arc range must stay in bounds")
-        }
-    }
-
-    impl std::ops::Deref for StringArcRef {
-        type Target = str;
-
-        fn deref(&self) -> &Self::Target {
-            self.as_str()
-        }
-    }
-
-    impl AsRef<str> for StringArcRef {
-        fn as_ref(&self) -> &str {
-            self.as_str()
-        }
-    }
-
-    impl DeserializeSpec for StringArcRef {
+    impl DeserializeSpec for ArcSubStr {
         type Handler = ();
     }
 
-    impl<'de> Deserialize<'de, JsonAsArcCursor> for StringArcRef {
+    impl<'de> Deserialize<'de, JsonAsArcCursor> for ArcSubStr {
         fn deserialize(
             _handler: Self::Handler,
             serialized: &mut JsonAsArcCursor,
         ) -> Result<Self, <JsonAsArcCursor as Deserializer<'de>>::Err> {
-            let (parsed, end) = parse_json_string_arc_ref(&serialized.inner, serialized.start)?;
+            let (parsed, end) = parse_json_arc_substr(&serialized.inner, serialized.start)?;
             serialized.start = end;
             Ok(parsed)
         }
@@ -1025,12 +1166,9 @@ pub(crate) mod json_format_side {
         Err("unterminated string".into())
     }
 
-    /// Like [`parse_json_string`], but returns a [`StringArcRef`] that borrows from `inner` when
+    /// Like [`parse_json_string`], but returns an [`ArcSubStr`] that borrows from `inner` when
     /// the JSON string contains no backslash escapes; otherwise returns decoded text in a new `Arc`.
-    fn parse_json_string_arc_ref(
-        inner: &Arc<str>,
-        start: usize,
-    ) -> Result<(StringArcRef, usize), String> {
+    fn parse_json_arc_substr(inner: &Arc<str>, start: usize) -> Result<(ArcSubStr, usize), String> {
         let s = inner.as_ref();
         let mut i = skip_ws_json(s, start);
         let b = s.as_bytes();
@@ -1045,14 +1183,14 @@ pub(crate) mod json_format_side {
             match b[i] {
                 b'"' => {
                     let end_after = i + 1;
-                    let arc_ref = match decoded {
-                        None => StringArcRef(Arc::clone(inner), content_start..i),
+                    let arc_sub = match decoded {
+                        None => ArcSubStr::new(Arc::clone(inner), content_start..i),
                         Some(s_out) => {
                             let len = s_out.len();
-                            StringArcRef(Arc::from(s_out), 0..len)
+                            ArcSubStr::new(Arc::from(s_out), 0..len)
                         }
                     };
-                    return Ok((arc_ref, end_after));
+                    return Ok((arc_sub, end_after));
                 }
                 b'\\' => {
                     if decoded.is_none() {
@@ -1273,6 +1411,8 @@ pub(crate) mod json_format_side {
 
     impl UnknownKey<JsonAsArcCursor> for String {}
 
+    impl UnknownKey<JsonAsArcCursor> for crate::sub_arc::ArcSubStr {}
+
     impl<'de> DeserializeMap<'de> for JsonAsArcCursor {
         type MapAccess = JsonMapAccess;
 
@@ -1282,7 +1422,11 @@ pub(crate) mod json_format_side {
             Ok(map_access)
         }
 
-        fn deserialize_pair_unknown_key<Key, Value>(
+        fn map_has_next(&self, map: &Self::MapAccess) -> bool {
+            map.entries.len() > 0
+        }
+
+        fn deserialize_with_unknown_key<Key, Value>(
             &mut self,
             map: &mut Self::MapAccess,
             key_handler: Key::Handler,
@@ -1315,7 +1459,7 @@ pub(crate) mod json_format_side {
             Ok((key, value))
         }
 
-        fn deserialize_pair_known_key<Key, Value>(
+        fn deserialize_with_known_key<Key, Value>(
             &mut self,
             map: &mut Self::MapAccess,
             key: Key,
@@ -1492,58 +1636,21 @@ pub(crate) mod json_format_side {
     const CLOSE_BRACKET_BYTE: u8 = CLOSE_BRACKET as u8;
 }
 
-pub trait FromSerializedExt<'de, Format>: FromSerialized<'de, Format> {
-    /// Deserialize using the default handler [`()`]. Only available when [`DeserializeSpec::Handler`] is [`()`].
-    fn deserialize_and_terminate<T>(
-        self,
-    ) -> Result<T, <Self::Deserializer as Deserializer<'de>>::Err>
-    where
-        Self: Sized,
-        T: Deserialize<'de, Self::Deserializer, Handler = ()>,
-    {
-        let mut s = self.start();
-        let t = T::deserialize((), &mut s)?;
-        Self::terminate(s)?;
-        Ok(t)
-    }
-
-    /// Same as [`deserialize_and_terminate`] when `T::Handler` is [`()`] (ignores `format` / `into`).
-    #[inline]
-    fn deserialize_and_terminate_with<T>(
-        self,
-        _format: Format,
-        into: std::marker::PhantomData<T>,
-    ) -> Result<T, <Self::Deserializer as Deserializer<'de>>::Err>
-    where
-        Self: Sized,
-        T: Deserialize<'de, Self::Deserializer, Handler = ()>,
-    {
-        let _: std::marker::PhantomData<T> = into;
-        self.deserialize_and_terminate::<T>()
-    }
-
-    /// Deserialize `T` using an explicit **handler** (configuration). Use when [`DeserializeSpec::Handler`]
-    /// is not [`()`], e.g. runtime-controlled field shapes.
-    #[inline]
-    fn deserialize_and_terminate_with_handler<T>(
-        self,
-        _format: Format,
-        handler: T::Handler,
-        into: std::marker::PhantomData<T>,
-    ) -> Result<T, <Self::Deserializer as Deserializer<'de>>::Err>
-    where
-        Self: Sized,
-        T: Deserialize<'de, Self::Deserializer>,
-    {
-        let _: std::marker::PhantomData<T> = into;
-        let mut s = self.start();
-        let t = T::deserialize(handler, &mut s)?;
-        Self::terminate(s)?;
-        Ok(t)
-    }
+/// Deserialize `Into` from `from` using `handler`, then verify no trailing input remains.
+pub fn deserialize<'de, Format, From, Into>(
+    from: From,
+    handler: <Into as DeserializeSpec>::Handler,
+    _format: Format,
+) -> Result<Into, <From::Deserializer as Deserializer<'de>>::Err>
+where
+    From: FromSerialized<'de, Format>,
+    Into: DeserializeSpec + Deserialize<'de, From::Deserializer>,
+{
+    let mut serialized = from.start();
+    let value = Into::deserialize(handler, &mut serialized)?;
+    From::terminate(serialized)?;
+    Ok(value)
 }
-
-impl<'de, Format, T> FromSerializedExt<'de, Format> for T where T: FromSerialized<'de, Format> {}
 
 pub trait IntoSerializedString<Format> {
     fn serialize_to_string(&self) -> String;
@@ -1578,5 +1685,42 @@ where
         self.serialize(&mut buffer);
 
         buffer.into()
+    }
+}
+
+/// Link / partial row payload as a finished JSON text blob (see [`JsonAsString`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SerializedJson(pub std::sync::Arc<str>);
+
+impl SerializedJson {
+    pub fn new<T>(value: &T) -> Self
+    where
+        T: Serialize<json_serialize_side::JsonAsString>,
+    {
+        Self(std::sync::Arc::from(IntoSerializedString::<
+            json_serialize_side::JsonAsString,
+        >::serialize_to_string(value)))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Serialize<json_serialize_side::JsonAsString> for SerializedJson {
+    fn serialize(&self, ctx: &mut json_serialize_side::JsonAsString) {
+        ctx.0.push_str(self.as_str());
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for SerializedJson {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serde_json::from_str::<serde_json::Value>(self.as_str())
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
     }
 }

@@ -33,7 +33,7 @@ async fn test_json_client() {
         .try_init()
         .unwrap();
 
-    let pool = Sqlite::connect_in_memory().await;
+    let pool = Sqlite::in_memory_pool().await;
     let (jc, ex) = JsonClient::new_sqlx_db(pool.clone(), JsonClientSetting::default_setting());
 
     tokio::spawn(ex.run());

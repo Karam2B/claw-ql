@@ -608,7 +608,7 @@ mod test {
 
     #[tokio::test]
     async fn main() {
-        let pool = Sqlite::connect_in_memory().await;
+        let pool = Sqlite::in_memory_pool().await;
 
         let row = sqlx::query(
             "

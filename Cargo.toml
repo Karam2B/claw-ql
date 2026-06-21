@@ -23,6 +23,7 @@ inventory = { version = "0.3.20", optional = true }
 futures = "0.3.31"
 left-right = "0.11.7"
 oneshot = { version = "0.2.1", features = ["async"] }
+anyhow = "1.0.102"
 
 [dev-dependencies]
 tracing-subscriber = "0.3.18"

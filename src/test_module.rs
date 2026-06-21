@@ -829,6 +829,336 @@ const _: () = {
     }
 };
 
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+pub struct Tag {
+    pub title: String,
+}
+
+const _: () = {
+    use crate::prelude::from_row_alias::*;
+
+    impl<'r> FromRowData for tag {
+        type RData = Tag;
+    }
+
+    impl<'r, R: sqlx::Row> FromRowAlias<'r, R> for tag
+    where
+        R: Row + 'r,
+        String: Type<R::Database> + Decode<'r, R::Database>,
+        for<'a> &'a str: ColumnIndex<R>,
+    {
+        fn two_alias(
+            &self,
+            row: crate::from_row::RowTwoAliased<'r, R>,
+        ) -> Result<Self::RData, crate::from_row::FromRowError>
+        where
+            R: sqlx::Row,
+        {
+            Ok(Tag {
+                title: row.try_get("title")?,
+            })
+        }
+        fn no_alias(&self, row: &'r R) -> Result<Self::RData, FromRowError> {
+            Ok(Tag {
+                title: row.try_get("title")?,
+            })
+        }
+        fn pre_alias(&self, row: RowPreAliased<'r, R>) -> Result<Self::RData, FromRowError> {
+            Ok(Tag {
+                title: row.try_get("title")?,
+            })
+        }
+        fn post_alias(&self, row: RowPostAliased<'r, R>) -> Result<Self::RData, FromRowError> {
+            Ok(Tag {
+                title: row.try_get("title")?,
+            })
+        }
+    }
+};
+
+#[derive(Default, Debug)]
+pub struct TagPartial {
+    pub title: Update<String>,
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct tag;
+
+impl Singleton for tag {
+    fn singleton() -> &'static Self {
+        &tag
+    }
+}
+
+const _: () = {
+    use crate::prelude::macro_derive_collection::*;
+
+    impl Collection for tag {
+        fn table_name(&self) -> &str {
+            "Tag"
+        }
+        fn table_name_lower_case(&self) -> &str {
+            "tag"
+        }
+
+        type InputData = Tag;
+        type UpdateData = TagPartial;
+        type OutputData = Tag;
+
+        type Id = SingleIncremintalInt<&'static str>;
+        fn id(&self) -> Self::Id {
+            SingleIncremintalInt("Tag")
+        }
+    }
+
+    impl HasHandler for Tag {
+        type Handler = tag;
+    }
+    impl HasHandler for TagPartial {
+        type Handler = tag;
+    }
+    impl AsTuple for Tag {
+        type Tuple = (String,);
+        const NAMES: &'static [&'static str] = &["title"];
+        fn into_tuple(self) -> Self::Tuple {
+            (self.title,)
+        }
+        fn from_tuple(tuple: Self::Tuple) -> Self {
+            Self { title: tuple.0 }
+        }
+    }
+    impl AsTuple for TagPartial {
+        type Tuple = (Update<String>,);
+        const NAMES: &'static [&'static str] = &["title"];
+        fn into_tuple(self) -> Self::Tuple {
+            (self.title,)
+        }
+        fn from_tuple(tuple: Self::Tuple) -> Self {
+            Self { title: tuple.0 }
+        }
+    }
+};
+
+pub mod tag_members {
+    use super::tag;
+    use crate::{prelude::macro_derive_collection::*, query_builder::OpExpression};
+
+    #[derive(Clone, Default)]
+    pub struct title;
+
+    impl Member for title {
+        fn name(&self) -> &str {
+            "title"
+        }
+        type CollectionHandler = tag;
+        type Data = String;
+    }
+
+    crate::member_impl_from_row_alias!(title);
+    crate::member_impl_debug!(title);
+    crate::member_is_unique_filter!(title, false);
+    crate::member_impl_expression!(title);
+
+    #[derive(Clone, Default)]
+    pub struct id;
+
+    impl Member for id {
+        fn name(&self) -> &str {
+            "id"
+        }
+        type CollectionHandler = tag;
+        type Data = <SingleIncremintalInt<&'static str> as CollectionId>::IdData;
+    }
+
+    crate::member_impl_from_row_alias!(id);
+    crate::member_impl_debug!(id);
+    crate::member_is_unique_filter!(id, true);
+    crate::member_impl_expression!(id);
+}
+
+const _: () = {
+    use crate::prelude::on_migrate_derive::*;
+    impl OnMigrate for tag {
+        type Statements = CreateTable<
+            create_table,
+            table_as_expression<tag>,
+            ManyPossible<(
+                <tag as Collection>::Id,
+                col_def_for_collection_member<tag_members::title>,
+            )>,
+        >;
+        fn statments(&self) -> Self::Statements {
+            CreateTable {
+                init: create_table,
+                name: table_as_expression(tag),
+                col_defs: ManyPossible((
+                    Collection::id(self).clone(),
+                    col_def_for_collection_member(tag_members::title),
+                )),
+            }
+        }
+    }
+};
+
+const _: () = {
+    use crate::extentions::common_expressions::{Aliased, Identifier, MigrateExpression, Scoped};
+
+    impl TableNameExpression for tag {
+        type TableNameExpression = &'static str;
+        fn table_name_expression(&self) -> Self::TableNameExpression {
+            "Tag"
+        }
+        type LowerCaseTableNameExpression = &'static str;
+        fn lower_case_table_name_expression(&self) -> Self::LowerCaseTableNameExpression {
+            "tag"
+        }
+    }
+
+    impl Scoped for tag {
+        type Scoped = ScopedCols<'static>;
+        fn scoped(&self) -> Self::Scoped {
+            ScopedCols {
+                table: "Tag",
+                cols: <Tag as AsTuple>::NAMES,
+            }
+        }
+    }
+
+    impl Aliased for tag {
+        type Aliased = AliasedCols<'static>;
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
+            AliasedCols {
+                table: "Tag",
+                cols: <Tag as AsTuple>::NAMES,
+                alias,
+            }
+        }
+        type NumAliased = NumAliasedCols<'static>;
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+            NumAliasedCols {
+                table: "Tag",
+                cols: <Tag as AsTuple>::NAMES,
+                num,
+                alias,
+            }
+        }
+    }
+
+    impl MembersAndIdAliased for tag {
+        type MembersAndIdAliased = AliasedCols<'static>;
+        fn members_and_id_aliased(&self, alias: &'static str) -> Self::MembersAndIdAliased {
+            AliasedCols {
+                table: "Tag",
+                cols: &["id", "title"],
+                alias,
+            }
+        }
+    }
+
+    impl Identifier for tag {
+        type Identifier = &'static [&'static str];
+        fn identifier(&self) -> Self::Identifier {
+            <Tag as AsTuple>::NAMES
+        }
+    }
+
+    impl V0OnUpdate for tag {
+        type UpdateInput = TagPartial;
+        type UpdateExpression = TagPartial;
+
+        fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression {
+            input
+        }
+    }
+
+    impl V0OnInsert for tag {
+        type InsertInput = Tag;
+        type InsertExpression = Tag;
+
+        fn on_insert(self, input: Self::InsertInput) -> Self::InsertExpression {
+            input
+        }
+    }
+
+    impl OnInsert for tag {
+        type InsertInput = Tag;
+        type InsertExpression = Tag;
+
+        fn on_insert(&self, input: Self::InsertInput) -> Self::InsertExpression {
+            input
+        }
+    }
+
+    impl OnUpdate for tag {
+        type UpdateInput = TagPartial;
+        type UpdateExpression = TagPartial;
+
+        fn on_update(&self, input: Self::UpdateInput) -> Self::UpdateExpression {
+            input
+        }
+    }
+
+    impl IsOpExpression for Tag {
+        fn is_op(&self) -> bool {
+            true
+        }
+    }
+
+    impl<'q, S: DatabaseExt> ManyExpressions<'q, S> for Tag
+    where
+        String: Type<S> + Encode<'q, S>,
+    {
+        fn expression(
+            self,
+            start: &'static str,
+            join: &'static str,
+            ctx: &mut StatementBuilder<'q, S>,
+        ) where
+            S: DatabaseExt,
+        {
+            ctx.syntax(start);
+            ctx.bind(self.title);
+        }
+    }
+
+    impl IsOpExpression for TagPartial {
+        fn is_op(&self) -> bool {
+            matches!(self.title, Update::Set(_))
+        }
+    }
+    impl<'q, S> ManyExpressions<'q, S> for TagPartial
+    where
+        S: Database,
+        String: Type<S> + Encode<'q, S>,
+    {
+        fn expression(
+            self,
+            start: &'static str,
+            join: &'static str,
+            ctx: &mut StatementBuilder<'q, S>,
+        ) where
+            S: DatabaseExt,
+        {
+            if let Update::Set(title) = self.title {
+                ctx.syntax(start);
+                ctx.sanitize("title");
+                ctx.syntax(" = ");
+                ctx.bind(title);
+            }
+        }
+    }
+
+    impl MigrateExpression for tag {
+        type MigrateExpression = (MigratingCol<&'static str, String>,);
+        fn migrate_expression(&self) -> Self::MigrateExpression {
+            (MigratingCol {
+                col: "title",
+                phantom: std::marker::PhantomData,
+            },)
+        }
+    }
+};
+
 mod impl_link {
     use std::convert::Infallible;
 

@@ -1,7 +1,7 @@
 #![allow(non_camel_case_types)]
 #![allow(unexpected_cfgs)]
 
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
 use sqlx::{Database, Encode, Type};
 
@@ -131,6 +131,32 @@ pub trait Expression<'q, S>: OpExpression + 'q {
 
 impl OpExpression for String {}
 impl<'q, S> Expression<'q, S> for String
+where
+    S: DatabaseExt,
+{
+    fn expression(self, ctx: &mut StatementBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+        ctx.sanitize(self.as_str());
+    }
+}
+
+impl OpExpression for Arc<str> {}
+impl<'q, S> Expression<'q, S> for Arc<str>
+where
+    S: DatabaseExt,
+{
+    fn expression(self, ctx: &mut StatementBuilder<'q, S>)
+    where
+        S: DatabaseExt,
+    {
+        ctx.sanitize(self.as_ref());
+    }
+}
+
+impl OpExpression for crate::sub_arc::ArcSubStr {}
+impl<'q, S> Expression<'q, S> for crate::sub_arc::ArcSubStr
 where
     S: DatabaseExt,
 {

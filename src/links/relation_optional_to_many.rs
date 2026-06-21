@@ -18,6 +18,7 @@ pub mod fk_name {
         query_builder::{Expression, OpExpression, StatementBuilder},
     };
 
+    #[derive(Clone)]
     pub struct AsIdentifier<Relation> {
         pub relation: Relation,
     }
@@ -74,13 +75,31 @@ pub mod find_place_for_this {
 
     use sqlx::{ColumnIndex, Decode, Row, Type};
 
-    use crate::from_row::{
-        FromRowAlias, FromRowData, FromRowError, RowPostAliased, RowPreAliased, RowTwoAliased,
+    use crate::{
+        extentions::common_expressions::Aliased,
+        from_row::{
+            FromRowAlias, FromRowData, FromRowError, RowPostAliased, RowPreAliased, RowTwoAliased,
+        },
     };
 
+    #[derive(Clone)]
     pub struct OneColumn<Name, ExpectedType> {
         pub as_name: Name,
         pub as_type: PhantomData<ExpectedType>,
+    }
+
+    impl<Name, ExpectedType> Aliased for OneColumn<Name, ExpectedType>
+    where
+        Name: Aliased,
+    {
+        type Aliased = Name::Aliased;
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
+            self.as_name.aliased(alias)
+        }
+        type NumAliased = Name::NumAliased;
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+            self.as_name.num_aliased(num, alias)
+        }
     }
 
     impl<AsName, AsType> FromRowData for OneColumn<AsName, AsType> {
@@ -146,7 +165,7 @@ mod impl_on_migrate {
         type Statements = AddColumn<
             F::TableNameExpression,
             ColumnDefinition<
-                ForeignKeyName<Key, T::TableNameExpression>,
+                ForeignKeyName<Key, T::LowerCaseTableNameExpression>,
                 Option<i64>,
                 foriegn_key<ManyPossible<(on_delete_set_null,)>>,
             >,
@@ -157,7 +176,7 @@ mod impl_on_migrate {
                 col_def: ColumnDefinition {
                     name: ForeignKeyName {
                         key: self.fk_unique_id.clone(),
-                        to: self.to.table_name_expression(),
+                        to: self.to.lower_case_table_name_expression(),
                     },
                     ty: PhantomData,
                     constraints: foriegn_key {
@@ -511,7 +530,7 @@ mod impl_link_fetch_many {
             T::TableNameExpression,
             <T::Id as Identifier>::Identifier,
             F::TableNameExpression,
-            ForeignKeyName<Key, T::TableNameExpression>,
+            ForeignKeyName<Key, T::LowerCaseTableNameExpression>,
         >;
 
         fn non_duplicating_join_expressions(&self) -> Self::Join {
@@ -522,7 +541,7 @@ mod impl_link_fetch_many {
                 local_table: self.from.table_name_expression(),
                 local_column: ForeignKeyName {
                     key: self.fk_unique_id.clone(),
-                    to: self.to.table_name_expression(),
+                    to: self.to.lower_case_table_name_expression(),
                 },
             }
         }
@@ -684,7 +703,8 @@ mod impl_set_new_for_insert {
         }
     }
 
-    impl<Key, From, To> InsertOneLink for SetNew<OptionalToMany<Key, From, To>, PhantomData<To::InputData>>
+    impl<Key, From, To> InsertOneLink
+        for SetNew<OptionalToMany<Key, From, To>, PhantomData<To::InputData>>
     where
         To: Clone,
         From: Clone,
@@ -797,7 +817,7 @@ mod impl_set_new_for_insert {
 
         #[tokio::test]
         async fn test_insert_one_set_new() {
-            let mut conn = Sqlite::connect_in_memory_2().await;
+            let mut conn = Sqlite::in_memory_connection().await;
 
             sqlx::query(
                 "
@@ -1062,7 +1082,7 @@ mod impl_set_id_for_insert {
 
         #[tokio::test]
         async fn test_insert_one() {
-            let mut conn = Sqlite::connect_in_memory_2().await;
+            let mut conn = Sqlite::in_memory_connection().await;
 
             sqlx::query(
                 "
@@ -1459,16 +1479,7 @@ mod impl_set_id_for_update {
 
         #[tokio::test]
         async fn set_for_update_link() {
-            let mut conn = Sqlite::connect_in_memory_2().await;
-
-            tracing::dispatcher::set_global_default(
-                tracing_subscriber::fmt()
-                    .with_max_level(tracing::Level::TRACE)
-                    .with_test_writer()
-                    .finish()
-                    .into(),
-            )
-            .unwrap();
+            let mut conn = Sqlite::in_memory_connection().await;
 
             sqlx::query(
                 "
@@ -1982,9 +1993,7 @@ mod impl_for_delete {
     use crate::{
         collections::{Collection, CollectionId},
         links::relation_optional_to_many::{find_place_for_this::OneColumn, fk_name::AsIdentifier},
-        operations::{
-            delete::{DeleteLink, DeleteLinkData, DeleteLinkPreOp, DeleteLinkSplit},
-        },
+        operations::delete::{DeleteLink, DeleteLinkData, DeleteLinkPreOp, DeleteLinkSplit},
     };
 
     impl<Key, From, To> DeleteLinkSplit for OptionalToMany<Key, From, To>
@@ -2091,7 +2100,7 @@ mod impl_for_delete {
 
         #[tokio::test]
         async fn test_delete_link() {
-            let mut pool = Sqlite::connect_in_memory_2().await;
+            let mut pool = Sqlite::in_memory_connection().await;
 
             sqlx::query(
                 "

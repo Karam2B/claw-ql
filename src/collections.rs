@@ -145,6 +145,30 @@ pub(crate) mod impl_id {
         }
     }
 
+    impl Aliased for SingleIncremintalInt<std::sync::Arc<str>> {
+        type Aliased =
+            AliasedCol<std::sync::Arc<str>, &'static str, SanitizeMany<(&'static str, &'static str)>>;
+        fn aliased(&self, alias: &'static str) -> Self::Aliased {
+            AliasedCol {
+                table: std::sync::Arc::clone(&self.0),
+                col: "id",
+                alias: SanitizeMany((alias, "id")),
+            }
+        }
+        type NumAliased = AliasedCol<
+            std::sync::Arc<str>,
+            &'static str,
+            SanitizeMany<(&'static str, usize, &'static str)>,
+        >;
+        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
+            AliasedCol {
+                table: std::sync::Arc::clone(&self.0),
+                col: "id",
+                alias: SanitizeMany((alias, num, "id")),
+            }
+        }
+    }
+
     impl Scoped for SingleIncremintalInt<&'static str> {
         type Scoped = ScopedCol<&'static str, &'static str>;
         fn scoped(&self) -> Self::Scoped {
@@ -165,11 +189,28 @@ pub(crate) mod impl_id {
         }
     }
 
+    impl Scoped for SingleIncremintalInt<std::sync::Arc<str>> {
+        type Scoped = ScopedCol<std::sync::Arc<str>, &'static str>;
+        fn scoped(&self) -> Self::Scoped {
+            ScopedCol {
+                table: std::sync::Arc::clone(&self.0),
+                col: "id",
+            }
+        }
+    }
+
     impl<T> Identifier for SingleIncremintalInt<T> {
         type Identifier = &'static str;
         fn identifier(&self) -> Self::Identifier {
             "id"
         }
+    }
+
+    impl<T> crate::extentions::common_expressions::V0OnInsert for SingleIncremintalInt<T> {
+        type InsertInput = ();
+        type InsertExpression = ();
+
+        fn on_insert(self, _: Self::InsertInput) -> Self::InsertExpression {}
     }
 
     impl V0OnUpdate for SingleIncremintalInt<&'static str> {

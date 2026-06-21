@@ -326,7 +326,7 @@ mod test {
 
     #[tokio::test]
     async fn main() {
-        let mut pool = Sqlite::connect_in_memory_2().await;
+        let mut pool = Sqlite::in_memory_connection().await;
 
         sqlx::query("
             CREATE TABLE Todo (
