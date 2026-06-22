@@ -32,6 +32,12 @@ pub type DynOptionalToMany<S> = crate::links::relation_optional_to_many::Optiona
     std::sync::Arc<crate::json_client::dynamic_collection::DynamicCollection<S>>,
     std::sync::Arc<crate::json_client::dynamic_collection::DynamicCollection<S>>,
 >;
+pub type DynOptionalToManyInverse<S> =
+    crate::links::relation_optional_to_many_inverse::OptionalToManyInverse<
+        crate::links::DefaultRelationKey,
+        std::sync::Arc<crate::json_client::dynamic_collection::DynamicCollection<S>>,
+        std::sync::Arc<crate::json_client::dynamic_collection::DynamicCollection<S>>,
+    >;
 pub type DynManyToMany<S> = crate::links::relation_many_to_many::ManyToMany<
     crate::links::DefaultRelationKey,
     std::sync::Arc<crate::json_client::dynamic_collection::DynamicCollection<S>>,
@@ -61,6 +67,9 @@ pub mod client_interface {
     pub enum SupportedType {
         String,
         Boolean,
+        Int,
+        Float64,
+        Array(Box<SupportedType>),
     }
 
     //*******************
@@ -71,6 +80,45 @@ pub mod client_interface {
     #[derive(Debug)]
     pub enum SupportedFilter {
         ColEq(ColumnEqual<ArcSubStr, PartialDeserialize>),
+        ColNe {
+            col: ArcSubStr,
+            ne: PartialDeserialize,
+        },
+        ColGt {
+            col: ArcSubStr,
+            gt: PartialDeserialize,
+        },
+        ColGte {
+            col: ArcSubStr,
+            gte: PartialDeserialize,
+        },
+        ColLt {
+            col: ArcSubStr,
+            lt: PartialDeserialize,
+        },
+        ColLte {
+            col: ArcSubStr,
+            lte: PartialDeserialize,
+        },
+        ColContains {
+            col: ArcSubStr,
+            value: PartialDeserialize,
+        },
+        ColIsNull {
+            col: ArcSubStr,
+        },
+        ColIsNotNull {
+            col: ArcSubStr,
+        },
+        And {
+            filters: Vec<SupportedFilter>,
+        },
+        Or {
+            filters: Vec<SupportedFilter>,
+        },
+        Group {
+            filters: Vec<SupportedFilter>,
+        },
     }
 
     //*******************
@@ -151,6 +199,36 @@ pub mod client_interface {
 
     #[derive(Debug)]
     pub enum InsertOneError {
+        CollectionNotFound,
+        InvalidData,
+        InvalidLink,
+        LinkNotSetUpForThisBase,
+    }
+
+    //*******************
+    //*
+    //* InsertMany
+    //*
+    //*******************
+    #[derive(Debug)]
+    pub struct InsertManyItem {
+        pub data: PartialDeserialize,
+        pub links: Vec<SupportedInsertLink>,
+    }
+
+    #[derive(Debug)]
+    pub struct InsertManyInput {
+        pub base: ArcSubStr,
+        pub items: Vec<InsertManyItem>,
+    }
+
+    #[derive(Debug)]
+    pub struct InsertManyOutput {
+        pub items: Vec<InsertOneOutput>,
+    }
+
+    #[derive(Debug)]
+    pub enum InsertManyError {
         CollectionNotFound,
         InvalidData,
         InvalidLink,
@@ -405,7 +483,31 @@ mod ops {
                     i64: for<'r> ::sqlx::Decode<'r, S>
                         + for<'q> ::sqlx::Encode<'q, S>
                         + ::sqlx::Type<S>,
+                    f64: for<'r> ::sqlx::Decode<'r, S>
+                        + for<'q> ::sqlx::Encode<'q, S>
+                        + ::sqlx::Type<S>,
+                    ::sqlx::types::Json<Vec<std::string::String>>:
+                        for<'r> ::sqlx::Decode<'r, S>
+                        + for<'q> ::sqlx::Encode<'q, S>
+                        + ::sqlx::Type<S>,
+                    ::sqlx::types::Json<Vec<bool>>:
+                        for<'r> ::sqlx::Decode<'r, S>
+                        + for<'q> ::sqlx::Encode<'q, S>
+                        + ::sqlx::Type<S>,
+                    ::sqlx::types::Json<Vec<i64>>:
+                        for<'r> ::sqlx::Decode<'r, S>
+                        + for<'q> ::sqlx::Encode<'q, S>
+                        + ::sqlx::Type<S>,
+                    ::sqlx::types::Json<Vec<f64>>:
+                        for<'r> ::sqlx::Decode<'r, S>
+                        + for<'q> ::sqlx::Encode<'q, S>
+                        + ::sqlx::Type<S>,
                     $crate::links::relation_optional_to_many::OptionalToMany<
+                        $crate::links::DefaultRelationKey,
+                        std::sync::Arc<$crate::json_client::dynamic_collection::DynamicCollection<S>>,
+                        std::sync::Arc<$crate::json_client::dynamic_collection::DynamicCollection<S>>,
+                    >: $crate::json_client::fetch_many_trait_extension::JsonLinkFetchMany<S>,
+                    $crate::links::relation_optional_to_many_inverse::OptionalToManyInverse<
                         $crate::links::DefaultRelationKey,
                         std::sync::Arc<$crate::json_client::dynamic_collection::DynamicCollection<S>>,
                         std::sync::Arc<$crate::json_client::dynamic_collection::DynamicCollection<S>>,
@@ -419,6 +521,11 @@ mod ops {
                         std::sync::Arc<$crate::json_client::dynamic_collection::DynamicCollection<S>>,
                     >: $crate::json_client::fetch_many_trait_extension::JsonLinkFetchMany<S>,
                     $crate::links::relation_optional_to_many::OptionalToMany<
+                        $crate::links::DefaultRelationKey,
+                        std::sync::Arc<$crate::json_client::dynamic_collection::DynamicCollection<S>>,
+                        std::sync::Arc<$crate::json_client::dynamic_collection::DynamicCollection<S>>,
+                    >: $crate::json_client::fetch_one_trait_extension::JsonLinkFetchOne<S>,
+                    $crate::links::relation_optional_to_many_inverse::OptionalToManyInverse<
                         $crate::links::DefaultRelationKey,
                         std::sync::Arc<$crate::json_client::dynamic_collection::DynamicCollection<S>>,
                         std::sync::Arc<$crate::json_client::dynamic_collection::DynamicCollection<S>>,
@@ -540,6 +647,7 @@ mod ops {
         [fetch_many, FetchMany],
         [fetch_one, FetchOne],
         [insert_one, InsertOne],
+        [insert_many, InsertMany],
         [update_one, UpdateOne],
         [delete_one, DeleteOne]
     );
@@ -623,14 +731,15 @@ mod gen_serde_impls {
     use std::collections::BTreeMap;
 
     use crate::expressions::ColumnEqual;
-    use crate::gen_serde::json_format_side::PartialDeserialize;
+    use crate::gen_serde::json_format_side::{JsonAsArcCursor, PartialDeserialize};
     use crate::gen_serde::{
         Deserialize, DeserializeMap, DeserializeSeq, DeserializeSpec, Deserializer, KnownKey,
         UnknownKey,
     };
     use crate::json_client::client_interface::{
         AddCollectionInput, AddLinkInput, DeleteOneInput, Direction, DynamicFieldInput,
-        FetchManyInput, FetchOneInput, FirstItem, InsertOneInput, OrderBy, Pagination,
+        FetchManyInput, FetchOneInput, FirstItem, InsertManyInput, InsertManyItem, InsertOneInput,
+        OrderBy, Pagination,
         SupportedDeleteLink, SupportedFilter, SupportedInsertLink, SupportedLinkFetchMany,
         SupportedLinkFetchOne, SupportedType, SupportedUpdateLink, UpdateOneInput,
     };
@@ -643,16 +752,44 @@ mod gen_serde_impls {
     impl<'de, S> Deserialize<'de, S> for SupportedType
     where
         S: Deserializer<'de>,
-        String: Deserialize<'de, S>,
-        S::Err: From<&'static str>,
+        PartialDeserialize: Deserialize<'de, S>,
+        S::Err: From<&'static str> + From<String>,
     {
         fn deserialize(_handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err> {
-            match String::deserialize((), serialized)?.as_str() {
+            let partial = PartialDeserialize::deserialize((), serialized)?;
+            deserialize_supported_type_partial(&partial).map_err(S::Err::from)
+        }
+    }
+
+    fn deserialize_supported_type_partial(
+        partial: &PartialDeserialize,
+    ) -> Result<SupportedType, String> {
+        let trimmed = partial.0.as_str().trim();
+        if !trimmed.starts_with('{') {
+            let name: String = partial.continue_deserialize()?;
+            return match name.as_str() {
                 "String" => Ok(SupportedType::String),
                 "Boolean" => Ok(SupportedType::Boolean),
-                _other => Err(S::Err::from("unsupported SupportedType")),
-            }
+                "Int" => Ok(SupportedType::Int),
+                "Float64" => Ok(SupportedType::Float64),
+                _other => Err("unsupported SupportedType".into()),
+            };
         }
+
+        let mut cursor = JsonAsArcCursor {
+            inner: std::sync::Arc::from(partial.0.as_str()),
+            start: 0,
+        };
+        let mut map = DeserializeMap::start_map(&mut cursor)?;
+        let ty: String =
+            DeserializeMap::deserialize_with_known_key(&mut cursor, &mut map, "ty", ())?;
+        if ty != "Array" {
+            return Err("unsupported SupportedType object ty".into());
+        }
+        let of: SupportedType =
+            DeserializeMap::deserialize_with_known_key(&mut cursor, &mut map, "of", ())?;
+        DeserializeMap::finish(&mut cursor, map)?;
+        Ok(SupportedType::Array(Box::new(of)))
     }
 
     impl DeserializeSpec for DynamicFieldInput {
@@ -737,6 +874,55 @@ mod gen_serde_impls {
                 DeserializeMap::deserialize_with_known_key(serialized, &mut map, "links", ())?;
             DeserializeMap::finish(serialized, map)?;
             Ok(InsertOneInput { base, data, links })
+        }
+    }
+
+    impl DeserializeSpec for InsertManyItem {
+        type Handler = ();
+    }
+
+    impl<'de, S> Deserialize<'de, S> for InsertManyItem
+    where
+        S: Deserializer<'de>,
+        S: DeserializeMap<'de>,
+        PartialDeserialize: Deserialize<'de, S>,
+        Vec<SupportedInsertLink>: Deserialize<'de, S>,
+        S: KnownKey<&'static str>,
+        S::Err: From<&'static str>,
+    {
+        fn deserialize(_handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err> {
+            let mut map = DeserializeMap::start_map(serialized)?;
+            let data =
+                DeserializeMap::deserialize_with_known_key(serialized, &mut map, "data", ())?;
+            let links =
+                DeserializeMap::deserialize_with_known_key(serialized, &mut map, "links", ())?;
+            DeserializeMap::finish(serialized, map)?;
+            Ok(InsertManyItem { data, links })
+        }
+    }
+
+    impl DeserializeSpec for InsertManyInput {
+        type Handler = ();
+    }
+
+    impl<'de, S> Deserialize<'de, S> for InsertManyInput
+    where
+        S: Deserializer<'de>,
+        S: DeserializeMap<'de>,
+        S: DeserializeSeq<'de>,
+        ArcSubStr: Deserialize<'de, S>,
+        Vec<InsertManyItem>: Deserialize<'de, S>,
+        S: KnownKey<&'static str>,
+        S::Err: From<&'static str>,
+    {
+        fn deserialize(_handler: Self::Handler, serialized: &mut S) -> Result<Self, S::Err> {
+            let mut map = DeserializeMap::start_map(serialized)?;
+            let base =
+                DeserializeMap::deserialize_with_known_key(serialized, &mut map, "base", ())?;
+            let items =
+                DeserializeMap::deserialize_with_known_key(serialized, &mut map, "items", ())?;
+            DeserializeMap::finish(serialized, map)?;
+            Ok(InsertManyInput { base, items })
         }
     }
 
@@ -848,6 +1034,7 @@ mod gen_serde_impls {
     where
         S: Deserializer<'de>,
         S: DeserializeMap<'de>,
+        S: DeserializeSeq<'de>,
         ArcSubStr: Deserialize<'de, S>,
         PartialDeserialize: Deserialize<'de, S>,
         S: KnownKey<&'static str>,
@@ -868,6 +1055,111 @@ mod gen_serde_impls {
                     let eq =
                         DeserializeMap::deserialize_with_known_key(serialized, &mut map, "eq", ())?;
                     SupportedFilter::ColEq(ColumnEqual { col, eq })
+                }
+                "col_ne" => {
+                    let col = DeserializeMap::deserialize_with_known_key(
+                        serialized,
+                        &mut map,
+                        "col",
+                        (),
+                    )?;
+                    let ne =
+                        DeserializeMap::deserialize_with_known_key(serialized, &mut map, "ne", ())?;
+                    SupportedFilter::ColNe { col, ne }
+                }
+                "col_gt" => {
+                    let col = DeserializeMap::deserialize_with_known_key(
+                        serialized,
+                        &mut map,
+                        "col",
+                        (),
+                    )?;
+                    let gt =
+                        DeserializeMap::deserialize_with_known_key(serialized, &mut map, "gt", ())?;
+                    SupportedFilter::ColGt { col, gt }
+                }
+                "col_gte" => {
+                    let col = DeserializeMap::deserialize_with_known_key(
+                        serialized,
+                        &mut map,
+                        "col",
+                        (),
+                    )?;
+                    let gte = DeserializeMap::deserialize_with_known_key(
+                        serialized, &mut map, "gte", (),
+                    )?;
+                    SupportedFilter::ColGte { col, gte }
+                }
+                "col_lt" => {
+                    let col = DeserializeMap::deserialize_with_known_key(
+                        serialized,
+                        &mut map,
+                        "col",
+                        (),
+                    )?;
+                    let lt =
+                        DeserializeMap::deserialize_with_known_key(serialized, &mut map, "lt", ())?;
+                    SupportedFilter::ColLt { col, lt }
+                }
+                "col_lte" => {
+                    let col = DeserializeMap::deserialize_with_known_key(
+                        serialized,
+                        &mut map,
+                        "col",
+                        (),
+                    )?;
+                    let lte = DeserializeMap::deserialize_with_known_key(
+                        serialized, &mut map, "lte", (),
+                    )?;
+                    SupportedFilter::ColLte { col, lte }
+                }
+                "col_contains" => {
+                    let col = DeserializeMap::deserialize_with_known_key(
+                        serialized,
+                        &mut map,
+                        "col",
+                        (),
+                    )?;
+                    let value = DeserializeMap::deserialize_with_known_key(
+                        serialized, &mut map, "value", (),
+                    )?;
+                    SupportedFilter::ColContains { col, value }
+                }
+                "col_is_null" => {
+                    let col = DeserializeMap::deserialize_with_known_key(
+                        serialized,
+                        &mut map,
+                        "col",
+                        (),
+                    )?;
+                    SupportedFilter::ColIsNull { col }
+                }
+                "col_is_not_null" => {
+                    let col = DeserializeMap::deserialize_with_known_key(
+                        serialized,
+                        &mut map,
+                        "col",
+                        (),
+                    )?;
+                    SupportedFilter::ColIsNotNull { col }
+                }
+                "and" => {
+                    let filters = DeserializeMap::deserialize_with_known_key(
+                        serialized, &mut map, "filters", (),
+                    )?;
+                    SupportedFilter::And { filters }
+                }
+                "or" => {
+                    let filters = DeserializeMap::deserialize_with_known_key(
+                        serialized, &mut map, "filters", (),
+                    )?;
+                    SupportedFilter::Or { filters }
+                }
+                "group" => {
+                    let filters = DeserializeMap::deserialize_with_known_key(
+                        serialized, &mut map, "filters", (),
+                    )?;
+                    SupportedFilter::Group { filters }
                 }
                 _ => return Err(S::Err::from("unsupported filter ty")),
             };
@@ -1312,6 +1604,16 @@ mod add_collection_mod {
         bool: for<'d> sqlx::Decode<'d, S> + sqlx::Type<S> + for<'q> sqlx::Encode<'q, S>,
         std::string::String:
             sqlx::Type<S> + for<'q> sqlx::Encode<'q, S> + for<'d> sqlx::Decode<'d, S>,
+        i64: for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        f64: for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        sqlx::types::Json<Vec<String>>:
+            for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        sqlx::types::Json<Vec<bool>>:
+            for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        sqlx::types::Json<Vec<i64>>:
+            for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        sqlx::types::Json<Vec<f64>>:
+            for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
         DynamicCollection<S>: OnMigrate<Statements: Expression<'static, S>>,
         for<'a> &'a str: sqlx::ColumnIndex<<S as sqlx::Database>::Row>,
         for<'a> S::Arguments<'a>: IntoArguments<'a, S>,
@@ -1543,7 +1845,7 @@ mod update_one_mod {
             dynamic_collection::{
                 CollectionToSerialize, DynamicCollection, DynamicInsertInput, DynamicUpdateInput,
             },
-            sqlx_executor::{FromTo, SqlxExecutorData},
+            sqlx_executor::{FromTo, LinkInformations, SqlxExecutorData},
             update_one_trait_extension::{JsonUpdateOneLink, JsonUpdateOneToConsume},
         },
         links::{
@@ -1559,6 +1861,33 @@ mod update_one_mod {
     };
 
     type DynCollection<S> = Arc<DynamicCollection<S>>;
+
+    /// Links that add columns to the UPDATE SET clause (e.g. optional_to_many `set_null` clears an FK).
+    fn update_link_contributes_set_clause(
+        link: &SupportedUpdateLink,
+        rel: &LinkInformations,
+        base: &Arc<str>,
+    ) -> bool {
+        match link {
+            SupportedUpdateLink::SetNull { to } | SupportedUpdateLink::SetNew { to, .. } => rel
+                .optional_to_many
+                .contains(&FromTo {
+                    from: Arc::clone(base),
+                    to: to.detach(),
+                }),
+            SupportedUpdateLink::SetId { to, .. } => {
+                let forward = FromTo {
+                    from: Arc::clone(base),
+                    to: to.detach(),
+                };
+                rel.optional_to_many.contains(&forward) || rel.many_to_many.contains(&forward)
+            }
+            SupportedUpdateLink::RemoveId { to, .. } => rel.many_to_many.contains(&FromTo {
+                from: Arc::clone(base),
+                to: to.detach(),
+            }),
+        }
+    }
 
     pub fn update_one<S>(
         this: Arc<SqlxExecutorData<S>>,
@@ -1627,11 +1956,20 @@ mod update_one_mod {
             )
             .map_err(|_| UpdateOneError::InvalidData)?;
 
-            if data.0.is_empty() && input.links.is_empty() {
+            let rel_guard = this.link_info.read().await;
+
+            if data.0.is_empty()
+                && !input.links.iter().any(|link| {
+                    update_link_contributes_set_clause(
+                        link,
+                        &rel_guard,
+                        &base.collection_name.snake_case,
+                    )
+                })
+            {
                 return Err(UpdateOneError::InvalidData);
             }
 
-            let rel_guard = this.link_info.read().await;
             let mut links = Vec::<JsonUpdateOneToConsume<S>>::new();
 
             for link in input.links {
@@ -1849,7 +2187,7 @@ mod delete_one_mod {
         links::{
             DefaultRelationKey,
             relation_many_to_many::{DeleteManyToManyLinked, ManyToMany},
-            relation_optional_to_many::OptionalToMany,
+            relation_optional_to_many::{DeleteOptionalToManyLinked, OptionalToMany},
         },
         operations::{
             Operation,
@@ -1876,6 +2214,15 @@ mod delete_one_mod {
                     PreOpSplitTake: Send + 'static,
                 >,
             >,
+        DeleteOptionalToManyLinked<DefaultRelationKey, DynCollection<S>, DynCollection<S>>:
+            DeleteLinkSplit<
+                    InitSplitForPreOp: Send + 'static,
+                    Link: JsonDeleteOneLink<S>
+                              + DeleteLink<
+                        InitSplitForWheres: Send + 'static,
+                        PreOpSplitTake: Send + 'static,
+                    >,
+                >,
         DeleteManyToManyLinked<DefaultRelationKey, DynCollection<S>, DynCollection<S>>:
             DeleteLinkSplit<
                     InitSplitForPreOp: Send + 'static,
@@ -1915,11 +2262,16 @@ mod delete_one_mod {
                             .await;
                         let to = to_gaurd.clone();
                         all_gaurds.push(to_gaurd);
-                        links.push(JsonDeleteOneToConsume::from_split(OptionalToMany {
-                            fk_unique_id: DefaultRelationKey,
-                            from: base.clone(),
-                            to,
-                        }))
+                        links.push(JsonDeleteOneToConsume::from_split(
+                            DeleteOptionalToManyLinked {
+                                relation: OptionalToMany {
+                                    fk_unique_id: DefaultRelationKey,
+                                    from: base.clone(),
+                                    to,
+                                },
+                                from_id: input.id,
+                            },
+                        ))
                     }
                     SupportedDeleteLink::ManyToMany { to } => {
                         let to_gaurd = cols
@@ -2000,7 +2352,8 @@ mod insert_one_mod {
         json_client::{
             DynManyToMany, DynOptionalToMany,
             client_interface::{
-                InsertOneError, InsertOneInput, InsertOneOutput, SupportedInsertLink,
+                InsertManyError, InsertManyInput, InsertManyItem, InsertManyOutput, InsertOneError,
+                InsertOneInput, InsertOneOutput, SupportedInsertLink,
             },
             dynamic_collection::{CollectionToSerialize, DynamicCollection, DynamicInsertInput},
             insert_one_trait_extension::{JsonInsertOneLink, JsonInsertOneToConsume},
@@ -2019,6 +2372,123 @@ mod insert_one_mod {
     };
 
     type DynCollection<S> = Arc<DynamicCollection<S>>;
+
+    pub(super) async fn exec_insert_one<S>(
+        this: &SqlxExecutorData<S>,
+        base: Arc<DynamicCollection<S>>,
+        data: DynamicInsertInput<S>,
+        links_input: Vec<SupportedInsertLink>,
+        conn: &mut S::Connection,
+    ) -> Result<InsertOneOutput, InsertOneError>
+    where
+        i64: sqlx::Type<S> + for<'q> sqlx::Decode<'q, S> + for<'q> sqlx::Encode<'q, S>,
+        for<'a> &'a str: sqlx::ColumnIndex<<S as sqlx::Database>::Row>,
+        S: sqlx::Database + DatabaseExt + ExecutorTrait + Send + Sync + 'static,
+        DynCollection<S>: for<'r> FromRowAlias<'r, S::Row, RData = CollectionToSerialize>,
+        DynamicInsertInput<S>: for<'d> Deserialize<'d, JsonAsArcCursor, Handler = DynCollection<S>>,
+        SetId<DynOptionalToMany<S>, i64>: InsertLinkConsumeData<
+            Link: JsonInsertOneLink<S>
+                      + InsertOneLink<InsertValuesData: Send, PreOpData: Send, PostOpData: Send>,
+        >,
+        SetId<DynManyToMany<S>, i64>: InsertLinkConsumeData<
+            Link: JsonInsertOneLink<S>
+                      + InsertOneLink<InsertValuesData: Send, PreOpData: Send, PostOpData: Send>,
+        >,
+        SetNew<DynOptionalToMany<S>, DynamicInsertInput<S>>: InsertLinkConsumeData<
+            Link: JsonInsertOneLink<S>
+                      + InsertOneLink<InsertValuesData: Send, PreOpData: Send, PostOpData: Send>,
+        >,
+        Vec<JsonInsertOneToConsume<S>>:
+            InsertLinkConsumeData<Link = Vec<Box<dyn JsonInsertOneLink<S> + Send>>>,
+    {
+        let cols = this.collections.read().await;
+        let rel_guard = this.link_info.read().await;
+        let mut all_gaurds = Vec::new();
+        let mut links = Vec::<JsonInsertOneToConsume<S>>::new();
+
+        for link in links_input {
+            match link {
+                SupportedInsertLink::SetId { to, id } => {
+                    let to_gaurd = cols
+                        .get(to.as_str())
+                        .ok_or(InsertOneError::InvalidLink)?
+                        .read()
+                        .await;
+                    let to = to_gaurd.clone();
+                    all_gaurds.push(to_gaurd);
+
+                    let forward = FromTo {
+                        from: Arc::clone(&base.collection_name.snake_case),
+                        to: Arc::clone(&to.collection_name.snake_case),
+                    };
+
+                    if rel_guard.many_to_many.contains(&forward) {
+                        links.push(JsonInsertOneToConsume::new(SetId {
+                            relation: ManyToMany {
+                                relation_key: DefaultRelationKey,
+                                from: Arc::clone(&base),
+                                to,
+                            },
+                            id,
+                        }))
+                    } else if rel_guard.optional_to_many.contains(&forward) {
+                        links.push(JsonInsertOneToConsume::new(SetId {
+                            relation: OptionalToMany {
+                                fk_unique_id: DefaultRelationKey,
+                                from: Arc::clone(&base),
+                                to,
+                            },
+                            id,
+                        }))
+                    } else {
+                        return Err(InsertOneError::InvalidLink);
+                    }
+                }
+                SupportedInsertLink::SetNew { to, value } => {
+                    let to_gaurd = cols
+                        .get(to.as_str())
+                        .ok_or(InsertOneError::InvalidLink)?
+                        .read()
+                        .await;
+                    let to = to_gaurd.clone();
+                    all_gaurds.push(to_gaurd);
+                    let link_data: DynamicInsertInput<S> =
+                        deserialize(Arc::from(value.0.as_str()), Arc::clone(&to), JsonFormat)
+                            .map_err(|_| InsertOneError::InvalidData)?;
+                    links.push(JsonInsertOneToConsume::new(SetNew {
+                        relation: OptionalToMany {
+                            fk_unique_id: DefaultRelationKey,
+                            from: Arc::clone(&base),
+                            to,
+                        },
+                        data: link_data,
+                    }))
+                }
+            }
+        }
+
+        let out = Operation::<S>::exec_operation(
+            InsertOne {
+                id: AutoGenerate,
+                base,
+                data,
+                links,
+            },
+            conn,
+        )
+        .await
+        .expect("bug: insert one failed");
+
+        drop(all_gaurds);
+        drop(rel_guard);
+        drop(cols);
+
+        Ok(InsertOneOutput {
+            id: out.id,
+            attributes: out.attributes,
+            links: out.links,
+        })
+    }
 
     pub fn insert_one<S>(
         this: Arc<SqlxExecutorData<S>>,
@@ -2053,7 +2523,6 @@ mod insert_one_mod {
                 .read()
                 .await;
             let base = base_gaurd.clone();
-            let mut all_gaurds = vec![base_gaurd];
 
             let data: DynamicInsertInput<S> = deserialize(
                 Arc::from(input.data.0.as_str()),
@@ -2062,91 +2531,113 @@ mod insert_one_mod {
             )
             .map_err(|_| InsertOneError::InvalidData)?;
 
-            let rel_guard = this.link_info.read().await;
-            let mut links = Vec::<JsonInsertOneToConsume<S>>::new();
-
-            for link in input.links {
-                match link {
-                    SupportedInsertLink::SetId { to, id } => {
-                        let to_gaurd = cols
-                            .get(to.as_str())
-                            .ok_or(InsertOneError::InvalidLink)?
-                            .read()
-                            .await;
-                        let to = to_gaurd.clone();
-                        all_gaurds.push(to_gaurd);
-
-                        let forward = FromTo {
-                            from: Arc::clone(&base.collection_name.snake_case),
-                            to: Arc::clone(&to.collection_name.snake_case),
-                        };
-
-                        if rel_guard.many_to_many.contains(&forward) {
-                            links.push(JsonInsertOneToConsume::new(SetId {
-                                relation: ManyToMany {
-                                    relation_key: DefaultRelationKey,
-                                    from: base.clone(),
-                                    to,
-                                },
-                                id,
-                            }))
-                        } else if rel_guard.optional_to_many.contains(&forward) {
-                            links.push(JsonInsertOneToConsume::new(SetId {
-                                relation: OptionalToMany {
-                                    fk_unique_id: DefaultRelationKey,
-                                    from: base.clone(),
-                                    to,
-                                },
-                                id,
-                            }))
-                        } else {
-                            return Err(InsertOneError::InvalidLink);
-                        }
-                    }
-                    SupportedInsertLink::SetNew { to, value } => {
-                        let to_gaurd = cols
-                            .get(to.as_str())
-                            .ok_or(InsertOneError::InvalidLink)?
-                            .read()
-                            .await;
-                        let to = to_gaurd.clone();
-                        all_gaurds.push(to_gaurd);
-                        let link_data: DynamicInsertInput<S> =
-                            deserialize(Arc::from(value.0.as_str()), Arc::clone(&to), JsonFormat)
-                                .map_err(|_| InsertOneError::InvalidData)?;
-                        links.push(JsonInsertOneToConsume::new(SetNew {
-                            relation: OptionalToMany {
-                                fk_unique_id: DefaultRelationKey,
-                                from: base.clone(),
-                                to,
-                            },
-                            data: link_data,
-                        }))
-                    }
-                }
-            }
-
             let mut conn = this.pool.acquire().await.unwrap();
 
-            let out = Operation::<S>::exec_operation(
-                InsertOne {
-                    id: AutoGenerate,
-                    base,
-                    data,
-                    links,
-                },
-                &mut conn,
-            )
-            .await
-            .expect("bug: insert one failed");
-            drop(all_gaurds);
-            drop(rel_guard);
+            let out = exec_insert_one(&this, base, data, input.links, &mut conn).await?;
+
+            drop(base_gaurd);
             drop(cols);
-            Ok(InsertOneOutput {
-                id: out.id,
-                attributes: out.attributes,
-                links: out.links,
-            })
+            Ok(out)
+        }
+    }
+}
+
+mod insert_many_mod {
+    use std::sync::Arc;
+
+    use sqlx::ColumnIndex;
+
+    use crate::{
+        database_extention::DatabaseExt,
+        fix_executor::ExecutorTrait,
+        from_row::FromRowAlias,
+        gen_serde::{
+            Deserialize, deserialize,
+            json_format_side::{JsonAsArcCursor, JsonFormat},
+        },
+        json_client::{
+            DynManyToMany, DynOptionalToMany,
+            client_interface::{
+                InsertManyError, InsertManyInput, InsertManyOutput, InsertOneError,
+            },
+            dynamic_collection::{CollectionToSerialize, DynamicCollection, DynamicInsertInput},
+            insert_one_mod::exec_insert_one,
+            insert_one_trait_extension::{JsonInsertOneLink, JsonInsertOneToConsume},
+            sqlx_executor::SqlxExecutorData,
+        },
+        links::update_links::{SetId, SetNew},
+        operations::insert_one::{InsertLinkConsumeData, InsertOneLink},
+    };
+
+    type DynCollection<S> = Arc<DynamicCollection<S>>;
+
+    pub fn insert_many<S>(
+        this: Arc<SqlxExecutorData<S>>,
+        input: InsertManyInput,
+    ) -> impl Future<Output = Result<InsertManyOutput, InsertManyError>> + 'static + Send + use<S>
+    where
+        i64: sqlx::Type<S> + for<'q> sqlx::Decode<'q, S> + for<'q> sqlx::Encode<'q, S>,
+        for<'a> &'a str: sqlx::ColumnIndex<<S as sqlx::Database>::Row>,
+        S: sqlx::Database + DatabaseExt + ExecutorTrait + Send + Sync + 'static,
+        DynCollection<S>: for<'r> FromRowAlias<'r, S::Row, RData = CollectionToSerialize>,
+        DynamicInsertInput<S>: for<'d> Deserialize<'d, JsonAsArcCursor, Handler = DynCollection<S>>,
+        SetId<DynOptionalToMany<S>, i64>: InsertLinkConsumeData<
+            Link: JsonInsertOneLink<S>
+                      + InsertOneLink<InsertValuesData: Send, PreOpData: Send, PostOpData: Send>,
+        >,
+        SetId<DynManyToMany<S>, i64>: InsertLinkConsumeData<
+            Link: JsonInsertOneLink<S>
+                      + InsertOneLink<InsertValuesData: Send, PreOpData: Send, PostOpData: Send>,
+        >,
+        SetNew<DynOptionalToMany<S>, DynamicInsertInput<S>>: InsertLinkConsumeData<
+            Link: JsonInsertOneLink<S>
+                      + InsertOneLink<InsertValuesData: Send, PreOpData: Send, PostOpData: Send>,
+        >,
+        Vec<JsonInsertOneToConsume<S>>:
+            InsertLinkConsumeData<Link = Vec<Box<dyn JsonInsertOneLink<S> + Send>>>,
+    {
+        async move {
+            if input.items.is_empty() {
+                return Err(InsertManyError::InvalidData);
+            }
+
+            let cols = this.collections.read().await;
+            let base_gaurd = cols
+                .get(input.base.as_str())
+                .ok_or(InsertManyError::CollectionNotFound)?
+                .read()
+                .await;
+            let base = base_gaurd.clone();
+
+            let mut conn = this.pool.acquire().await.unwrap();
+            let mut items = Vec::with_capacity(input.items.len());
+
+            for item in input.items {
+                let data: DynamicInsertInput<S> = deserialize(
+                    Arc::from(item.data.0.as_str()),
+                    Arc::clone(&base),
+                    JsonFormat,
+                )
+                .map_err(|_| InsertManyError::InvalidData)?;
+
+                let out = exec_insert_one(&this, Arc::clone(&base), data, item.links, &mut conn)
+                    .await
+                    .map_err(|err| match err {
+                        InsertOneError::CollectionNotFound => InsertManyError::CollectionNotFound,
+                        InsertOneError::InvalidData => InsertManyError::InvalidData,
+                        InsertOneError::InvalidLink => InsertManyError::InvalidLink,
+                        InsertOneError::LinkNotSetUpForThisBase => {
+                            InsertManyError::LinkNotSetUpForThisBase
+                        }
+                    })?;
+
+                items.push(out);
+            }
+
+            drop(base_gaurd);
+            drop(cols);
+
+            Ok(InsertManyOutput { items })
         }
     }
 }
@@ -3738,13 +4229,137 @@ pub mod delete_one_trait_extension {
 mod supported_filters {
     use crate::{
         database_extention::DatabaseExt,
-        expressions::ColumnEqual,
+        expressions::{
+            ColumnEqual,
+            filters::{
+                ColumnContains, ColumnGreaterThan, ColumnGreaterThanOrEqual, ColumnIsNotNull,
+                ColumnIsNull, ColumnLessThan, ColumnLessThanOrEqual, ColumnNotEqual, FilterAnd,
+                FilterGroup, FilterOr,
+            },
+        },
+        gen_serde::json_format_side::PartialDeserialize,
         json_client::{
             ToBind, client_interface::SupportedFilter, dynamic_collection::DynamicCollection,
         },
         query_builder::functional_expr::BoxedExpression,
         sub_arc::ArcSubStr,
     };
+
+    fn field_by_col<'a, S>(
+        col: &ArcSubStr,
+        base: &'a DynamicCollection<S>,
+    ) -> Result<&'a crate::json_client::dynamic_collection::DynamicField<S>, ()>
+    where
+        S: DatabaseExt,
+    {
+        base.fields
+            .iter()
+            .find(|f| f.name.as_str() == col.as_str())
+            .ok_or(())
+    }
+
+    fn field_bind<S>(
+        col: ArcSubStr,
+        partial: PartialDeserialize,
+        base: &DynamicCollection<S>,
+    ) -> Result<(ArcSubStr, Box<dyn ToBind<S> + Send>), ()>
+    where
+        S: DatabaseExt,
+    {
+        let field = field_by_col(&col, base)?;
+        let bind = (field.type_info.to_bind)(partial)?;
+        Ok((col, bind))
+    }
+
+    fn string_contains_bind<S>(
+        col: ArcSubStr,
+        partial: PartialDeserialize,
+        base: &DynamicCollection<S>,
+    ) -> Result<(ArcSubStr, Box<dyn ToBind<S> + Send>), ()>
+    where
+        S: DatabaseExt,
+        String: for<'q> sqlx::Encode<'q, S> + sqlx::Type<S>,
+    {
+        let field = field_by_col(&col, base)?;
+        if (field.type_info.type_name)() != std::any::type_name::<String>() {
+            return Err(());
+        }
+        let needle: String = partial.continue_deserialize().map_err(|_| ())?;
+        let pattern = format!("%{}%", needle);
+        Ok((col, Box::new(pattern)))
+    }
+
+    pub fn parse_one_supported_filter<'q, S>(
+        filter: SupportedFilter,
+        base: &DynamicCollection<S>,
+    ) -> Result<Box<dyn BoxedExpression<S> + Send>, ()>
+    where
+        S: DatabaseExt,
+        ColumnEqual<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnNotEqual<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnGreaterThan<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnGreaterThanOrEqual<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnLessThan<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnLessThanOrEqual<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnContains<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnIsNull<ArcSubStr>: BoxedExpression<S>,
+        ColumnIsNotNull<ArcSubStr>: BoxedExpression<S>,
+        FilterAnd<Vec<Box<dyn BoxedExpression<S> + Send>>>: BoxedExpression<S>,
+        FilterOr<Vec<Box<dyn BoxedExpression<S> + Send>>>: BoxedExpression<S>,
+        FilterGroup<Vec<Box<dyn BoxedExpression<S> + Send>>>: BoxedExpression<S>,
+        String: for<'a> sqlx::Encode<'a, S> + sqlx::Type<S>,
+    {
+        Ok(match filter {
+            SupportedFilter::ColEq(ColumnEqual { col, eq }) => {
+                let (col, bind) = field_bind(col, eq, base)?;
+                Box::new(ColumnEqual { col, eq: bind })
+            }
+            SupportedFilter::ColNe { col, ne } => {
+                let (col, bind) = field_bind(col, ne, base)?;
+                Box::new(ColumnNotEqual { col, ne: bind })
+            }
+            SupportedFilter::ColGt { col, gt } => {
+                let (col, bind) = field_bind(col, gt, base)?;
+                Box::new(ColumnGreaterThan { col, val: bind })
+            }
+            SupportedFilter::ColGte { col, gte } => {
+                let (col, bind) = field_bind(col, gte, base)?;
+                Box::new(ColumnGreaterThanOrEqual { col, val: bind })
+            }
+            SupportedFilter::ColLt { col, lt } => {
+                let (col, bind) = field_bind(col, lt, base)?;
+                Box::new(ColumnLessThan { col, val: bind })
+            }
+            SupportedFilter::ColLte { col, lte } => {
+                let (col, bind) = field_bind(col, lte, base)?;
+                Box::new(ColumnLessThanOrEqual { col, val: bind })
+            }
+            SupportedFilter::ColContains { col, value } => {
+                let (col, bind) = string_contains_bind(col, value, base)?;
+                Box::new(ColumnContains { col, val: bind })
+            }
+            SupportedFilter::ColIsNull { col } => {
+                field_by_col(&col, base)?;
+                Box::new(ColumnIsNull { col })
+            }
+            SupportedFilter::ColIsNotNull { col } => {
+                field_by_col(&col, base)?;
+                Box::new(ColumnIsNotNull { col })
+            }
+            SupportedFilter::And { filters } => {
+                let inner = parse_supported_filter(filters, base)?;
+                Box::new(FilterAnd(inner))
+            }
+            SupportedFilter::Or { filters } => {
+                let inner = parse_supported_filter(filters, base)?;
+                Box::new(FilterOr(inner))
+            }
+            SupportedFilter::Group { filters } => {
+                let inner = parse_supported_filter(filters, base)?;
+                Box::new(FilterGroup(inner))
+            }
+        })
+    }
 
     pub fn parse_supported_filter<'q, S>(
         input: Vec<SupportedFilter>,
@@ -3753,27 +4368,23 @@ mod supported_filters {
     where
         S: DatabaseExt,
         ColumnEqual<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnNotEqual<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnGreaterThan<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnGreaterThanOrEqual<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnLessThan<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnLessThanOrEqual<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnContains<ArcSubStr, Box<dyn ToBind<S> + Send>>: BoxedExpression<S>,
+        ColumnIsNull<ArcSubStr>: BoxedExpression<S>,
+        ColumnIsNotNull<ArcSubStr>: BoxedExpression<S>,
+        FilterAnd<Vec<Box<dyn BoxedExpression<S> + Send>>>: BoxedExpression<S>,
+        FilterOr<Vec<Box<dyn BoxedExpression<S> + Send>>>: BoxedExpression<S>,
+        FilterGroup<Vec<Box<dyn BoxedExpression<S> + Send>>>: BoxedExpression<S>,
+        String: for<'a> sqlx::Encode<'a, S> + sqlx::Type<S>,
     {
-        let mut ret: Vec<Box<dyn BoxedExpression<S> + Send>> = vec![];
-        for each in input {
-            match each {
-                SupportedFilter::ColEq(ColumnEqual { col, eq }) => {
-                    if let Some(field) =
-                        base.fields.iter().find(|f| f.name.as_str() == col.as_str())
-                    {
-                        if let Ok(bind) = (field.type_info.to_bind)(eq) {
-                            ret.push(Box::new(ColumnEqual { col, eq: bind }));
-                        } else {
-                            return Err(());
-                        }
-                    } else {
-                        return Err(());
-                    }
-                }
-            }
-        }
-
-        Ok(ret)
+        input
+            .into_iter()
+            .map(|filter| parse_one_supported_filter(filter, base))
+            .collect()
     }
 }
 
@@ -3790,7 +4401,7 @@ mod fetch_one_mod {
         fix_executor::ExecutorTrait,
         from_row::FromRowAlias,
         json_client::{
-            DynManyToMany, DynOptionalToMany, DynTimestamp,
+            DynManyToMany, DynOptionalToMany, DynOptionalToManyInverse, DynTimestamp,
             client_interface::{
                 FetchOneError, FetchOneInput, FetchOneOutput, SupportedLinkFetchOne,
             },
@@ -3801,7 +4412,8 @@ mod fetch_one_mod {
         },
         links::{
             DefaultRelationKey, relation_many_to_many::ManyToMany,
-            relation_optional_to_many::OptionalToMany, timestamp::Timestamp,
+            relation_optional_to_many::OptionalToMany,
+            relation_optional_to_many_inverse::OptionalToManyInverse, timestamp::Timestamp,
         },
         operations::{Operation, fetch_one::FetchOne},
         query_builder::functional_expr::ManyFlat,
@@ -3817,9 +4429,11 @@ mod fetch_one_mod {
         S: DatabaseExt + ExecutorTrait + Send + Sync,
         DynCollection<S>: for<'r> FromRowAlias<'r, S::Row, RData = CollectionToSerialize>,
         DynOptionalToMany<S>: JsonLinkFetchOne<S>,
+        DynOptionalToManyInverse<S>: JsonLinkFetchOne<S>,
         DynManyToMany<S>: JsonLinkFetchOne<S>,
         DynTimestamp<S>: JsonLinkFetchOne<S>,
         i64: sqlx::Type<S> + for<'q> sqlx::Decode<'q, S> + for<'q> sqlx::Encode<'q, S>,
+        String: for<'q> sqlx::Encode<'q, S> + sqlx::Type<S>,
         for<'a> &'a str: ColumnIndex<S::Row>,
     {
         async move {
@@ -3853,9 +4467,19 @@ mod fetch_one_mod {
                             from: Arc::clone(&base.collection_name.snake_case),
                             to: Arc::clone(&to.collection_name.snake_case),
                         };
+                        let reverse = FromTo {
+                            from: Arc::clone(&to.collection_name.snake_case),
+                            to: Arc::clone(&base.collection_name.snake_case),
+                        };
 
                         if rel_guard.optional_to_many.contains(&forward) {
                             links.push(Box::new(OptionalToMany {
+                                fk_unique_id: DefaultRelationKey,
+                                from: Arc::clone(&base),
+                                to,
+                            }));
+                        } else if rel_guard.optional_to_many.contains(&reverse) {
+                            links.push(Box::new(OptionalToManyInverse {
                                 fk_unique_id: DefaultRelationKey,
                                 from: Arc::clone(&base),
                                 to,
@@ -3955,7 +4579,8 @@ mod fetch_many_mod {
         },
         links::{
             DefaultRelationKey, relation_many_to_many::ManyToMany,
-            relation_optional_to_many::OptionalToMany, timestamp::Timestamp,
+            relation_optional_to_many::OptionalToMany,
+            relation_optional_to_many_inverse::OptionalToManyInverse, timestamp::Timestamp,
         },
         operations::{
             CollectionOutput, Operation,
@@ -3986,10 +4611,16 @@ mod fetch_many_mod {
         Arc<DynamicCollection<S>>: for<'r> FromRowAlias<'r, S::Row, RData = CollectionToSerialize>,
         OptionalToMany<DefaultRelationKey, Arc<DynamicCollection<S>>, Arc<DynamicCollection<S>>>:
             JsonLinkFetchMany<S>,
+        OptionalToManyInverse<
+            DefaultRelationKey,
+            Arc<DynamicCollection<S>>,
+            Arc<DynamicCollection<S>>,
+        >: JsonLinkFetchMany<S>,
         ManyToMany<DefaultRelationKey, Arc<DynamicCollection<S>>, Arc<DynamicCollection<S>>>:
             JsonLinkFetchMany<S>,
         Timestamp<Arc<DynamicCollection<S>>>: JsonLinkFetchMany<S>,
         i64: for<'q> Decode<'q, S> + for<'q> Encode<'q, S> + Type<S>,
+        String: for<'q> Encode<'q, S> + Type<S>,
         for<'s> &'s str: ColumnIndex<S::Row>,
         //connection
     {
@@ -4027,9 +4658,19 @@ mod fetch_many_mod {
                             from: Arc::clone(&base.collection_name.snake_case),
                             to: Arc::clone(&to_collection.collection_name.snake_case),
                         };
+                        let reverse = FromTo {
+                            from: Arc::clone(&to_collection.collection_name.snake_case),
+                            to: Arc::clone(&base.collection_name.snake_case),
+                        };
 
                         if rel_gaurd.optional_to_many.contains(&forward) {
                             links.push(Box::new(OptionalToMany {
+                                fk_unique_id: DefaultRelationKey,
+                                from: Arc::clone(&base),
+                                to: to_collection,
+                            }));
+                        } else if rel_gaurd.optional_to_many.contains(&reverse) {
+                            links.push(Box::new(OptionalToManyInverse {
                                 fk_unique_id: DefaultRelationKey,
                                 from: Arc::clone(&base),
                                 to: to_collection,
@@ -4680,8 +5321,12 @@ mod fetch_many_trait_extension {
         type Join = Box<dyn ManyBoxedExpressions<S> + Send>;
 
         fn non_duplicating_join_expressions(&self) -> Self::Join {
-            warn!("multiple links");
-            Box::new(self.first().unwrap().join_expr())
+            if let Some(first) = self.first() {
+                warn!("multiple links");
+                Box::new(first.join_expr())
+            } else {
+                Box::new(())
+            }
         }
 
         type Wheres = ();
@@ -4943,11 +5588,55 @@ pub mod dynamic_collection {
 
     impl<S> Eq for VTable<S> where S: DatabaseExt {}
 
+    fn vtable_for_type<S>(ty: &SupportedType) -> Result<VTable<S>, ()>
+    where
+        S: sqlx::Database + DatabaseExt,
+        String: for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        bool: for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        i64: for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        f64: for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        sqlx::types::Json<Vec<String>>:
+            for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        sqlx::types::Json<Vec<bool>>:
+            for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        sqlx::types::Json<Vec<i64>>:
+            for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        sqlx::types::Json<Vec<f64>>:
+            for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        for<'a> &'a str: sqlx::ColumnIndex<S::Row>,
+    {
+        use sqlx::types::Json;
+
+        Ok(match ty {
+            SupportedType::String => VTable::new_as::<String>(),
+            SupportedType::Boolean => VTable::new_as::<bool>(),
+            SupportedType::Int => VTable::new_as::<i64>(),
+            SupportedType::Float64 => VTable::new_as::<f64>(),
+            SupportedType::Array(of) => match &**of {
+                SupportedType::String => VTable::new_as::<Json<Vec<String>>>(),
+                SupportedType::Boolean => VTable::new_as::<Json<Vec<bool>>>(),
+                SupportedType::Int => VTable::new_as::<Json<Vec<i64>>>(),
+                SupportedType::Float64 => VTable::new_as::<Json<Vec<f64>>>(),
+                SupportedType::Array(_) => return Err(()),
+            },
+        })
+    }
+
     impl<S> TryFrom<AddCollectionInput> for DynamicCollection<S>
     where
         S: sqlx::Database + DatabaseExt,
         String: for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
         bool: for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        i64: for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        f64: for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        sqlx::types::Json<Vec<String>>:
+            for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        sqlx::types::Json<Vec<bool>>:
+            for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        sqlx::types::Json<Vec<i64>>:
+            for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
+        sqlx::types::Json<Vec<f64>>:
+            for<'q> sqlx::Encode<'q, S> + sqlx::Type<S> + for<'d> sqlx::Decode<'d, S>,
         for<'a> &'a str: sqlx::ColumnIndex<S::Row>,
     {
         type Error = ();
@@ -4960,10 +5649,7 @@ pub mod dynamic_collection {
                 .map(|f| {
                     Ok(DynamicField {
                         name: FieldName::new(&f.name)?,
-                        type_info: match f.type_info {
-                            SupportedType::String => VTable::new_as::<String>(),
-                            SupportedType::Boolean => VTable::new_as::<bool>(),
-                        },
+                        type_info: vtable_for_type(&f.type_info)?,
                         is_optional: f.is_optional,
                     })
                 })
@@ -6050,7 +6736,7 @@ mod tests {
 
     use crate::{
         connect_in_memory::ConnectInMemory, json_client::client_interface::Client,
-        track_sqlx_query::watch_sqlx_calls,
+        track_sqlx_query::{assert_sql_eq, watch_sqlx_calls},
     };
 
     use super::test_utilities::{
@@ -6089,7 +6775,7 @@ mod tests {
                 )
                 .await;
 
-            pretty_assertions::assert_eq!(
+            assert_sql_eq(
                 cache.drain(),
                 vec![
                     r#"PRAGMA foreign_keys = ON;"#.to_string(),
@@ -6098,6 +6784,135 @@ mod tests {
             );
         })
         .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn insert_many_inserts_batch_on_one_connection() {
+        watch_sqlx_calls(async |scope, cache| {
+            let pool = Sqlite::in_memory_pool().await;
+            let (client, ex) = Client::new_sqlx_db(pool);
+            let client = client.into_string_client();
+
+            scope.spawn(ex.run());
+
+            setup_todo_collection(&client, &cache).await;
+
+            client
+                .exec(
+                    r#"
+{
+    "op": "insert_many",
+    "body": {
+        "base": "todo",
+        "items": [
+            {
+                "data": {
+                    "title": "first",
+                    "done": false,
+                    "description": "d1"
+                },
+                "links": []
+            },
+            {
+                "data": {
+                    "title": "second",
+                    "done": true,
+                    "description": "d2"
+                },
+                "links": []
+            }
+        ]
+    }
+}
+"#
+                    .to_string(),
+                )
+                .await;
+
+            assert_sql_eq(
+                cache.drain(),
+                vec![
+                    r#"PRAGMA foreign_keys = ON;"#.to_string(),
+                    r#"INSERT INTO "Todo" ("title", "description", "done") VALUES ($1, $2, $3) RETURNING "id", "title", "description", "done";"#.to_string(),
+                    r#"INSERT INTO "Todo" ("title", "description", "done") VALUES ($1, $2, $3) RETURNING "id", "title", "description", "done";"#.to_string(),
+                ]
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn insert_many_returns_items_with_ids_and_attributes() {
+        let pool = Sqlite::in_memory_pool().await;
+        let (client, ex) = Client::new_sqlx_db(pool);
+        let client = client.into_string_client();
+        let _executor = tokio::spawn(ex.run());
+
+        add_todo_collection(&client).await;
+
+        let result = client
+            .exec(
+                r#"
+{
+    "op": "insert_many",
+    "body": {
+        "base": "todo",
+        "items": [
+            {
+                "data": {
+                    "title": "first",
+                    "done": false,
+                    "description": "d1"
+                },
+                "links": []
+            },
+            {
+                "data": {
+                    "title": "second",
+                    "done": true,
+                    "description": "d2"
+                },
+                "links": []
+            }
+        ]
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+
+        pretty_assertions::assert_eq!(
+            result,
+            r#"{"output":{"items":[{"id":1,"attributes":{"description":"d1","done":false,"title":"first"},"links":[]},{"id":2,"attributes":{"description":"d2","done":true,"title":"second"},"links":[]}]}}"#
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn insert_many_empty_items_returns_invalid_data() {
+        let pool = Sqlite::in_memory_pool().await;
+        let (client, ex) = Client::new_sqlx_db(pool);
+        let client = client.into_string_client();
+        let _executor = tokio::spawn(ex.run());
+
+        add_todo_collection(&client).await;
+
+        let result = client
+            .exec(
+                r#"
+{
+    "op": "insert_many",
+    "body": {
+        "base": "todo",
+        "items": []
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+
+        pretty_assertions::assert_eq!(result, r#"{"error":"InvalidData"}"#);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -6411,6 +7226,102 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn fetch_one_from_category_returns_many_todos() {
+        let pool = Sqlite::in_memory_pool().await;
+        let (client, ex) = Client::new_sqlx_db(pool);
+        let client = client.into_string_client();
+        let _executor = tokio::spawn(ex.run());
+
+        add_todo_collection(&client).await;
+        add_category_collection(&client).await;
+        todo_is_one_to_many_with_category(&client).await;
+
+        client
+            .exec(
+                r#"
+{
+    "op": "insert_one",
+    "body": {
+        "base": "category",
+        "data": { "title": "work" },
+        "links": []
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+
+        client
+            .exec(
+                r#"
+{
+    "op": "insert_one",
+    "body": {
+        "base": "todo",
+        "data": {
+            "title": "todo_1",
+            "done": true,
+            "description": "desc"
+        },
+        "links": [
+            { "ty": "set_id", "to": "category", "id": 1 }
+        ]
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+
+        client
+            .exec(
+                r#"
+{
+    "op": "insert_one",
+    "body": {
+        "base": "todo",
+        "data": {
+            "title": "todo_2",
+            "done": false,
+            "description": null
+        },
+        "links": [
+            { "ty": "set_id", "to": "category", "id": 1 }
+        ]
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+
+        let result = client
+            .exec(
+                r#"
+{
+    "op": "fetch_one",
+    "body": {
+        "base": "category",
+        "id": 1,
+        "filters": [],
+        "links": [
+            { "ty": "optional_to_many", "to": "todo" }
+        ]
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+
+        pretty_assertions::assert_eq!(
+            result,
+            r#"{"output":{"id":1,"attributes":{"title":"work"},"links":[{"many_output":[{"id":1,"attributes":{"description":"desc","done":true,"title":"todo_1"}},{"id":2,"attributes":{"description":null,"done":false,"title":"todo_2"}}]}]}}"#
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn fetch_many_returns_inserted_todo_with_timestamp_link() {
         let pool = Sqlite::in_memory_pool().await;
         let (client, ex) = Client::new_sqlx_db(pool.clone());
@@ -6634,12 +7545,232 @@ mod tests {
         pretty_assertions::assert_eq!(result, r#"{"error":"InvalidFilter"}"#);
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn fetch_many_col_ne_contains_and_composite_filters() {
+        let pool = Sqlite::in_memory_pool().await;
+        let (client, ex) = Client::new_sqlx_db(pool.clone());
+        let client = client.into_string_client();
+        let _executor = tokio::spawn(ex.run());
+
+        add_todo_collection(&client).await;
+        todo_is_timestamped(&client).await;
+
+        client
+            .exec(
+                r#"
+{
+    "op": "insert_one",
+    "body": {
+        "base": "todo",
+        "data": { "title": "urgent_todo", "done": true },
+        "links": []
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+
+        client
+            .exec(
+                r#"
+{
+    "op": "insert_one",
+    "body": {
+        "base": "todo",
+        "data": { "title": "open_todo", "done": false },
+        "links": []
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+
+        clear_timestams(pool).await;
+
+        let not_done = client
+            .exec(
+                r#"
+{
+    "op": "fetch_many",
+    "body": {
+        "base": "todo",
+        "filters": [
+            { "ty": "col_ne", "col": "done", "ne": true }
+        ],
+        "links": [{ "ty": "timestamp" }],
+        "pagination": { "limit": 10, "first_item": null, "order_by": [] }
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+        pretty_assertions::assert_eq!(
+            not_done,
+            r#"{"output":{"items":[{"id":2,"attributes":{"description":null,"done":false,"title":"open_todo"},"links":[{"created_at":"demo created_at","updated_at":"demo updated_at"}]}],"next_item":null}}"#
+        );
+
+        let contains = client
+            .exec(
+                r#"
+{
+    "op": "fetch_many",
+    "body": {
+        "base": "todo",
+        "filters": [
+            { "ty": "col_contains", "col": "title", "value": "urgent" }
+        ],
+        "links": [{ "ty": "timestamp" }],
+        "pagination": { "limit": 10, "first_item": null, "order_by": [] }
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+        pretty_assertions::assert_eq!(
+            contains,
+            r#"{"output":{"items":[{"id":1,"attributes":{"description":null,"done":true,"title":"urgent_todo"},"links":[{"created_at":"demo created_at","updated_at":"demo updated_at"}]}],"next_item":null}}"#
+        );
+
+        let composite = client
+            .exec(
+                r#"
+{
+    "op": "fetch_many",
+    "body": {
+        "base": "todo",
+        "filters": [
+            {
+                "ty": "or",
+                "filters": [
+                    { "ty": "col_eq", "col": "done", "eq": true },
+                    { "ty": "col_contains", "col": "title", "value": "open" }
+                ]
+            }
+        ],
+        "links": [{ "ty": "timestamp" }],
+        "pagination": { "limit": 10, "first_item": null, "order_by": [] }
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+        pretty_assertions::assert_eq!(
+            composite,
+            r#"{"output":{"items":[{"id":1,"attributes":{"description":null,"done":true,"title":"urgent_todo"},"links":[{"created_at":"demo created_at","updated_at":"demo updated_at"}]},{"id":2,"attributes":{"description":null,"done":false,"title":"open_todo"},"links":[{"created_at":"demo created_at","updated_at":"demo updated_at"}]}],"next_item":null}}"#
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn add_collection_int_float_array_and_filter_by_int() {
+        let pool = Sqlite::in_memory_pool().await;
+        let (client, ex) = Client::new_sqlx_db(pool);
+        let client = client.into_string_client();
+        let _executor = tokio::spawn(ex.run());
+
+        client
+            .exec(
+                r#"
+{
+    "op": "add_collection",
+    "body": {
+        "name": "item",
+        "fields": [
+            { "name": "label", "type_info": "String", "is_optional": false },
+            { "name": "priority", "type_info": "Int", "is_optional": false },
+            { "name": "score", "type_info": "Float64", "is_optional": true },
+            { "name": "tags", "type_info": { "ty": "Array", "of": "String" }, "is_optional": true }
+        ]
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+
+        client
+            .exec(
+                r#"
+{
+    "op": "insert_one",
+    "body": {
+        "base": "item",
+        "data": {
+            "label": "low",
+            "priority": 1,
+            "score": 1.5,
+            "tags": ["a", "b"]
+        },
+        "links": []
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+
+        client
+            .exec(
+                r#"
+{
+    "op": "insert_one",
+    "body": {
+        "base": "item",
+        "data": {
+            "label": "high",
+            "priority": 10,
+            "score": 9.9,
+            "tags": ["z"]
+        },
+        "links": []
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+
+        let result = client
+            .exec(
+                r#"
+{
+    "op": "fetch_many",
+    "body": {
+        "base": "item",
+        "filters": [
+            {
+                "ty": "group",
+                "filters": [
+                    { "ty": "col_gt", "col": "priority", "gt": 5 },
+                    { "ty": "col_gte", "col": "score", "gte": 9.0 }
+                ]
+            }
+        ],
+        "links": [],
+        "pagination": { "limit": 10, "first_item": null, "order_by": [] }
+    }
+}
+"#
+                .to_string(),
+            )
+            .await;
+
+        pretty_assertions::assert_eq!(
+            result,
+            r#"{"output":{"items":[{"id":2,"attributes":{"label":"high","priority":10,"score":9.9,"tags":["z"]},"links":[]}],"next_item":null}}"#
+        );
+    }
+
     mod insert_one {
         use sqlx::Sqlite;
 
         use crate::{
             connect_in_memory::ConnectInMemory, json_client::client_interface::Client,
-            track_sqlx_query::watch_sqlx_calls,
+            track_sqlx_query::{assert_sql_eq, watch_sqlx_calls},
         };
 
         use crate::json_client::test_utilities::{
@@ -6768,7 +7899,7 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
                         "INSERT INTO \"Category\" (\"title\") VALUES ($1) RETURNING \"id\", \"title\";".to_string(),
@@ -6796,7 +7927,7 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
                         "INSERT INTO \"Todo\" (\"title\", \"description\", \"done\", \"fk_category_def\") VALUES ($1, $2, $3, $4) RETURNING \"id\", \"title\", \"description\", \"done\", \"fk_category_def\";".to_string(),
@@ -6813,7 +7944,7 @@ mod tests {
 
         use crate::{
             connect_in_memory::ConnectInMemory, json_client::client_interface::Client,
-            track_sqlx_query::watch_sqlx_calls,
+            track_sqlx_query::{assert_sql_eq, watch_sqlx_calls},
         };
 
         use crate::json_client::test_utilities::{
@@ -6889,7 +8020,7 @@ mod tests {
 
             pretty_assertions::assert_eq!(
                 result,
-                r#"{"output":{"id":1,"attributes":{"description":"before","done":false,"title":"linked_todo"},"links":[1]}}"#
+                r#"{"output":{"id":1,"attributes":{"description":"before","done":false,"title":"linked_todo"},"links":[{"id":1,"attributes":{"title":"existing_category"}}]}}"#
             );
         }
 
@@ -6947,6 +8078,113 @@ mod tests {
                 result,
                 r#"{"output":{"id":1,"attributes":{"description":"updated","done":true,"title":"todo_to_update"},"links":[{"id":1,"attributes":{"title":"new_category"}}]}}"#
             );
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn empty_data_with_set_new_links_category() {
+            let pool = Sqlite::in_memory_pool().await;
+            let (client, ex) = Client::new_sqlx_db(pool);
+            let client = client.into_string_client();
+            let _executor = tokio::spawn(ex.run());
+
+            add_todo_collection(&client).await;
+            add_category_collection(&client).await;
+            todo_is_one_to_many_with_category(&client).await;
+
+            client
+                .exec(
+                    r#"
+{
+    "op": "insert_one",
+    "body": {
+        "base": "todo",
+        "data": {
+            "title": "todo_to_update",
+            "done": true,
+            "description": "set_new_only"
+        },
+        "links": []
+    }
+}
+"#
+                    .to_string(),
+                )
+                .await;
+
+            let result = client
+                .exec(
+                    r#"
+{
+    "op": "update_one",
+    "body": {
+        "base": "todo",
+        "id": 1,
+        "data": {},
+        "links": [
+            { "ty": "set_new", "to": "category", "value": { "title": "new_category" } }
+        ]
+    }
+}
+"#
+                    .to_string(),
+                )
+                .await;
+
+            pretty_assertions::assert_eq!(
+                result,
+                r#"{"output":{"id":1,"attributes":{"description":"set_new_only","done":true,"title":"todo_to_update"},"links":[{"id":1,"attributes":{"title":"new_category"}}]}}"#
+            );
+        }
+
+        #[tokio::test(flavor = "current_thread")]
+        async fn empty_data_without_set_contributing_links_returns_invalid_data() {
+            let pool = Sqlite::in_memory_pool().await;
+            let (client, ex) = Client::new_sqlx_db(pool);
+            let client = client.into_string_client();
+            let _executor = tokio::spawn(ex.run());
+
+            add_todo_collection(&client).await;
+            add_category_collection(&client).await;
+            todo_is_one_to_many_with_category(&client).await;
+
+            client
+                .exec(
+                    r#"
+{
+    "op": "insert_one",
+    "body": {
+        "base": "todo",
+        "data": {
+            "title": "todo_only",
+            "done": false,
+            "description": null
+        },
+        "links": []
+    }
+}
+"#
+                    .to_string(),
+                )
+                .await;
+
+            let result = client
+                .exec(
+                    r#"
+{
+    "op": "update_one",
+    "body": {
+        "base": "todo",
+        "id": 1,
+        "data": {},
+        "links": []
+    }
+}
+"#
+                    .to_string(),
+                )
+                .await;
+
+            pretty_assertions::assert_eq!(result, r#"{"error":"InvalidData"}"#);
         }
 
         #[tokio::test(flavor = "current_thread")]
@@ -7019,7 +8257,7 @@ mod tests {
 
             pretty_assertions::assert_eq!(
                 result,
-                r#"{"output":{"id":1,"attributes":{"description":"before_null","done":false,"title":"todo_linked"},"links":[0]}}"#
+                r#"{"output":{"id":1,"attributes":{"description":"before_null","done":false,"title":"todo_linked"},"links":[null]}}"#
             );
         }
 
@@ -7050,7 +8288,7 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
                         "INSERT INTO \"Category\" (\"title\") VALUES ($1) RETURNING \"id\", \"title\";".to_string(),
@@ -7077,7 +8315,7 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
                         "INSERT INTO \"Todo\" (\"title\", \"description\", \"done\") VALUES ($1, $2, $3) RETURNING \"id\", \"title\", \"description\", \"done\";".to_string(),
@@ -7103,10 +8341,13 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
-                        "UPDATE \"Todo\" SET \"title\" = $1, \"fk_category_def\" = $2 WHERE \"Todo\".\"id\" = $3 RETURNING \"id\", \"title\", \"description\", \"done\", \"fk_category_def\";".to_string(),
+                        r#"UPDATE "Todo" SET "title" = $1, "fk_category_def" = $2 WHERE "Todo"."id" = $3 RETURNING "id", "title", "description", "done", "fk_category_def";"#
+                            .to_string(),
+                        r#"SELECT "Category"."id" AS "iid", "Category"."title" AS "btitle" FROM "Category" WHERE "id" = $1;"#
+                            .to_string(),
                     ]
                 );
             })
@@ -7141,7 +8382,7 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
                         "INSERT INTO \"Todo\" (\"title\", \"description\", \"done\") VALUES ($1, $2, $3) RETURNING \"id\", \"title\", \"description\", \"done\";".to_string(),
@@ -7167,7 +8408,7 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
                         "INSERT INTO \"Category\" (\"title\") VALUES ($1) RETURNING \"id\", \"title\";".to_string(),
@@ -7202,7 +8443,7 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
                         "INSERT INTO \"Category\" (\"title\") VALUES ($1) RETURNING \"id\", \"title\";".to_string(),
@@ -7231,7 +8472,7 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
                         "INSERT INTO \"Todo\" (\"title\", \"description\", \"done\", \"fk_category_def\") VALUES ($1, $2, $3, $4) RETURNING \"id\", \"title\", \"description\", \"done\", \"fk_category_def\";".to_string(),
@@ -7258,7 +8499,7 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
                         "UPDATE \"Todo\" SET \"fk_category_def\" =  NULL WHERE \"Todo\".\"id\" = $1 RETURNING \"id\", \"title\", \"description\", \"done\", \"fk_category_def\";".to_string(),
@@ -7274,7 +8515,7 @@ mod tests {
 
         use crate::{
             connect_in_memory::ConnectInMemory, json_client::client_interface::Client,
-            track_sqlx_query::watch_sqlx_calls,
+            track_sqlx_query::{assert_sql_eq, watch_sqlx_calls},
         };
 
         use crate::json_client::test_utilities::{
@@ -7402,7 +8643,7 @@ mod tests {
 
             pretty_assertions::assert_eq!(
                 result,
-                r#"{"output":{"id":1,"attributes":{"description":"with_cat","done":true,"title":"linked_todo"},"links":[1]}}"#
+                r#"{"output":{"id":1,"attributes":{"description":"with_cat","done":true,"title":"linked_todo"},"links":[{"id":1,"attributes":{"title":"cat_for_delete"}}]}}"#
             );
         }
 
@@ -7433,7 +8674,7 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
                         "INSERT INTO \"Category\" (\"title\") VALUES ($1) RETURNING \"id\", \"title\";".to_string(),
@@ -7462,7 +8703,7 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
                         "INSERT INTO \"Todo\" (\"title\", \"description\", \"done\", \"fk_category_def\") VALUES ($1, $2, $3, $4) RETURNING \"id\", \"title\", \"description\", \"done\", \"fk_category_def\";".to_string(),
@@ -7488,10 +8729,13 @@ mod tests {
                     )
                     .await;
 
-                pretty_assertions::assert_eq!(
+                assert_sql_eq(
                     cache.drain(),
                     vec![
-                        "DELETE FROM \"Todo\" WHERE \"Todo\".\"id\" = $1 RETURNING \"id\", \"title\", \"description\", \"done\", \"fk_category_def\";".to_string(),
+                        r#"SELECT "Todo"."id" AS "iid", "Todo"."title" AS "btitle", "Todo"."description" AS "bdescription", "Todo"."done" AS "bdone", "Category"."id" AS "lid", "Category"."title" AS "ltitle" FROM "Todo" LEFT JOIN "Category" ON "Todo"."fk_category_def" = "Category"."id" WHERE "Todo"."id" = $1;"#
+                            .to_string(),
+                        r#"DELETE FROM "Todo" WHERE "Todo"."id" = $1 RETURNING "id", "title", "description", "done", "fk_category_def";"#
+                            .to_string(),
                     ]
                 );
             })
@@ -7652,7 +8896,7 @@ mod tests {
 
             pretty_assertions::assert_eq!(
                 result,
-                r#"{"output":{"id":1,"attributes":{"description":"a","done":true,"title":"todo_a"},"links":[[{"id":1,"attributes":{"title":"urgent"}},{"id":2,"attributes":{"title":"home"}}]]}}"#
+                r#"{"output":{"id":1,"attributes":{"description":"a","done":true,"title":"todo_a"},"links":[{"many_output":[{"id":1,"attributes":{"title":"urgent"}},{"id":2,"attributes":{"title":"home"}}]}]}}"#
             );
         }
 
@@ -7724,7 +8968,7 @@ mod tests {
 
             pretty_assertions::assert_eq!(
                 result,
-                r#"{"output":{"items":[{"id":1,"attributes":{"description":"a","done":true,"title":"todo_a"},"links":[[{"id":1,"attributes":{"title":"urgent"}}]]}],"next_item":null}}"#
+                r#"{"output":{"items":[{"id":1,"attributes":{"description":"a","done":true,"title":"todo_a"},"links":[{"many_output":[{"id":1,"attributes":{"title":"urgent"}}]}]}],"next_item":null}}"#
             );
         }
 
@@ -7794,7 +9038,7 @@ mod tests {
 
             pretty_assertions::assert_eq!(
                 result,
-                r#"{"output":{"id":1,"attributes":{"description":"before","done":false,"title":"linked_todo"},"links":[1]}}"#
+                r#"{"output":{"id":1,"attributes":{"description":"before","done":false,"title":"linked_todo"},"links":[{"id":1,"attributes":{"title":"urgent"}}]}}"#
             );
         }
 
@@ -7883,7 +9127,7 @@ mod tests {
 
             pretty_assertions::assert_eq!(
                 result,
-                r#"{"output":{"id":1,"attributes":{"description":"with_tags","done":false,"title":"todo_linked"},"links":[1]}}"#
+                r#"{"output":{"id":1,"attributes":{"description":"with_tags","done":false,"title":"todo_linked"},"links":[{"id":1,"attributes":{"title":"urgent"}}]}}"#
             );
         }
 
@@ -7971,8 +9215,250 @@ mod tests {
 
             pretty_assertions::assert_eq!(
                 result,
-                r#"{"output":{"id":1,"attributes":{"description":"with_tags","done":true,"title":"linked_todo"},"links":[[1,2]]}}"#
+                r#"{"output":{"id":1,"attributes":{"description":"with_tags","done":true,"title":"linked_todo"},"links":[{"many_output":[{"id":1,"attributes":{"title":"urgent"}},{"id":2,"attributes":{"title":"home"}}]}]}}"#
             );
+        }
+    }
+    mod comprehensive {
+        use sqlx::Sqlite;
+
+        mod assert_helpers {
+            use crate::gen_serde::pretty_json;
+
+            pub fn pretty_exec_output(value: impl AsRef<str>) -> String {
+                pretty_json(value.as_ref())
+            }
+
+            pub fn pretty_sql(value: impl AsRef<str>) -> String {
+                value
+                    .as_ref()
+                    .split(';')
+                    .filter_map(|statement| {
+                        let statement = statement.split_whitespace().collect::<Vec<_>>().join(" ");
+                        if statement.is_empty() || statement.starts_with("PRAGMA ") {
+                            None
+                        } else {
+                            Some(format!("{statement};"))
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+
+            pub fn assert_exec_eq(actual: impl AsRef<str>, expected: impl AsRef<str>) {
+                pretty_assertions::assert_eq!(
+                    pretty_exec_output(actual),
+                    pretty_exec_output(expected),
+                );
+            }
+
+            pub fn assert_sql_drain(drain: Vec<String>, expected: impl AsRef<str>) {
+                pretty_assertions::assert_eq!(
+                    pretty_sql(
+                        crate::track_sqlx_query::without_pragma(drain)
+                            .join("\n"),
+                    ),
+                    pretty_sql(expected),
+                );
+            }
+        }
+
+        use assert_helpers::{assert_exec_eq, assert_sql_drain};
+
+        use crate::{
+            connect_in_memory::ConnectInMemory, json_client::client_interface::Client,
+            track_sqlx_query::{assert_sql_eq, watch_sqlx_calls},
+        };
+
+        use super::super::test_utilities::{
+            add_category_collection, add_tag_collection, add_todo_collection, clear_timestams,
+            todo_is_many_to_many_with_tag, todo_is_one_to_many_with_category, todo_is_timestamped,
+        };
+
+        /// End-to-end walkthrough with readable JSON/SQL diffs via pretty helpers.
+        #[tokio::test(flavor = "current_thread")]
+        async fn all_crud_operations_with_sql() {
+            watch_sqlx_calls(async |scope, cache| {
+                let pool = Sqlite::in_memory_pool().await;
+                let (client, ex) = Client::new_sqlx_db(pool.clone());
+                let client = client.into_string_client();
+                scope.spawn(ex.run());
+
+                add_todo_collection(&client).await;
+                assert_sql_drain(
+                    cache.drain(),
+                    r#"
+PRAGMA foreign_keys = ON;
+CREATE TABLE "Todo" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "title" TEXT NOT NULL, "description" TEXT, "done" BOOLEAN NOT NULL);
+"#,
+                );
+
+                add_category_collection(&client).await;
+                assert_sql_drain(
+                    cache.drain(),
+                    r#"CREATE TABLE "Category" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "title" TEXT NOT NULL);"#,
+                );
+
+                add_tag_collection(&client).await;
+                assert_sql_drain(
+                    cache.drain(),
+                    r#"CREATE TABLE "Tag" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "title" TEXT NOT NULL);"#,
+                );
+
+                todo_is_timestamped(&client).await;
+                cache.drain();
+
+                todo_is_one_to_many_with_category(&client).await;
+                assert_sql_drain(
+                    cache
+                        .drain()
+                        .into_iter()
+                        .filter(|sql| sql.contains("fk_category_def"))
+                        .collect(),
+                    r#"ALTER TABLE "Todo" ADD COLUMN "fk_category_def" INTEGER  REFERENCES "Category"("id") ON DELETE SET NULL;"#,
+                );
+
+                todo_is_many_to_many_with_tag(&client).await;
+                assert_sql_drain(
+                    cache.drain(),
+                    r#"CREATE TABLE "ct_todotag_def" ("todo_id" INTEGER NOT NULL  REFERENCES "Todo"("id") ON DELETE CASCADE, "tag_id" INTEGER NOT NULL  REFERENCES "Tag"("id") ON DELETE CASCADE, PRIMARY KEY ("todo_id", "tag_id"));"#,
+                );
+
+                cache.clear();
+
+                assert_exec_eq(
+                    client
+                        .exec(
+                            r#"
+{
+    "op": "insert_one",
+    "body": {
+        "base": "category",
+        "data": { "title": "work" },
+        "links": []
+    }
+}
+"#
+                            .to_string(),
+                        )
+                        .await,
+                    r#"
+{
+    "output": {
+        "id": 1,
+        "attributes": { "title": "work" },
+        "links": []
+    }
+}
+"#,
+                );
+                assert_sql_drain(
+                    cache.drain(),
+                    r#"INSERT INTO "Category" ("title") VALUES ($1) RETURNING "id", "title";"#,
+                );
+
+                assert_exec_eq(
+                    client
+                        .exec(
+                            r#"
+{
+    "op": "insert_one",
+    "body": {
+        "base": "todo",
+        "data": {
+            "title": "alpha",
+            "done": true,
+            "description": "a"
+        },
+        "links": [
+            { "ty": "set_id", "to": "category", "id": 1 }
+        ]
+    }
+}
+"#
+                            .to_string(),
+                        )
+                        .await,
+                    r#"
+{
+    "output": {
+        "id": 1,
+        "attributes": {
+            "description": "a",
+            "done": true,
+            "title": "alpha"
+        },
+        "links": [
+            { "id": 1, "attributes": { "title": "work" } }
+        ]
+    }
+}
+"#,
+                );
+                assert_sql_drain(
+                    cache.drain(),
+                    r#"
+INSERT INTO "Todo" ("title", "description", "done", "fk_category_def") VALUES ($1, $2, $3, $4) RETURNING "id", "title", "description", "done", "fk_category_def";
+SELECT "Category"."id" AS "iid", "Category"."title" AS "btitle" FROM "Category" WHERE "id" = $1;
+"#,
+                );
+
+                clear_timestams(pool.clone()).await;
+
+                assert_exec_eq(
+                    client
+                        .exec(
+                            r#"
+{
+    "op": "fetch_one",
+    "body": {
+        "base": "todo",
+        "id": 1,
+        "filters": [
+            { "ty": "col_eq", "col": "done", "eq": true }
+        ],
+        "links": [
+            { "ty": "optional_to_many", "to": "category" }
+            { "ty": "many_to_many", "to": "tag" }
+            { "ty": "timestamp" }
+        ]
+    }
+}
+"#
+                            .to_string(),
+                        )
+                        .await,
+                    r#"
+{
+    "output": {
+        "id": 1,
+        "attributes": {
+            "description": "a",
+            "done": true,
+            "title": "alpha"
+        },
+        "links": [
+            { "id": 1, "attributes": { "title": "work" } },
+            { "many_output": [] },
+            {
+                "created_at": "demo created_at",
+                "updated_at": "demo updated_at"
+            }
+        ]
+    }
+}
+"#,
+                );
+                assert_sql_drain(
+                    cache.drain(),
+                    r#"
+UPDATE "Todo" SET "created_at" = "demo created_at", "updated_at" = "demo updated_at";
+SELECT "Todo"."id" AS "iid", "Todo"."title" AS "btitle", "Todo"."description" AS "bdescription", "Todo"."done" AS "bdone", "Category"."id" AS "l0id", "Category"."title" AS "l0title", "Todo"."id" AS "l1id", "Todo"."created_at" AS "l2created_at", "Todo"."updated_at" AS "l2updated_at" FROM "Todo" LEFT JOIN "Category" ON "Todo"."fk_category_def" = "Category"."id" WHERE "Todo"."id" = $1 AND "done" = $2;
+SELECT "ct_todotag_def"."todo_id" AS "from_id", "Tag"."id", "Tag"."title" FROM "ct_todotag_def" INNER JOIN "Tag" ON "ct_todotag_def"."tag_id" = "Tag"."id" WHERE "ct_todotag_def"."todo_id" IN ($1);
+"#,
+                );
+            })
+            .await;
         }
     }
 }
@@ -7984,7 +9470,7 @@ mod test_utilities {
     use crate::{
         connect_in_memory::ConnectInMemory,
         json_client::{client_interface::Client, string_client::StringClient},
-        track_sqlx_query::{Cache, watch_sqlx_calls},
+        track_sqlx_query::{Cache, assert_sql_eq, watch_sqlx_calls},
     };
 
     pub async fn setup_todo_collection(sc: &StringClient, cache: &Cache) {
@@ -8145,7 +9631,7 @@ mod test_utilities {
 
             add_todo_collection(&client).await;
 
-            pretty_assertions::assert_eq!(
+            assert_sql_eq(
                 cache.drain(),
                 vec![
                     r#"PRAGMA foreign_keys = ON;"#.to_string(),
@@ -8156,18 +9642,15 @@ mod test_utilities {
             add_category_collection(&client).await;
             // add_tag_collection(&client).await;
 
-            pretty_assertions::assert_eq!(
+            assert_sql_eq(
                 cache.drain(),
-                vec![
-                    r#"PRAGMA foreign_keys = ON;"#.to_string(),
-                    r#"CREATE TABLE "Category" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "title" TEXT NOT NULL);"#.to_string(),
-                ]
+                vec![r#"CREATE TABLE "Category" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "title" TEXT NOT NULL);"#.to_string()]
             );
 
             todo_is_one_to_many_with_category(&client).await;
             // todo_is_many_to_many_with_tag(&client).await;
 
-            pretty_assertions::assert_eq!(
+            assert_sql_eq(
                 cache.drain(),
                 vec![
                     r#"ALTER TABLE "Todo" ADD COLUMN "fk_category_def" INTEGER  REFERENCES "Category"("id") ON DELETE SET NULL;"#.to_string(),

@@ -223,6 +223,7 @@ mod many_to_many_items {
     };
 
     #[derive(Clone, Debug)]
+    #[allow(dead_code)]
     pub struct ManyToManyItems<FromId, ToId, ToAttributes> {
         pub from_id: FromId,
         pub to_id: ToId,
@@ -355,6 +356,7 @@ mod many_to_many_joins {
         query_builder::{Expression, ManyExpressions, OpExpression, StatementBuilder},
     };
 
+    #[allow(dead_code)]
     pub struct ManyToManyJoins<JunctionJoin, ToJoin>(pub JunctionJoin, pub ToJoin);
 
     impl<JunctionJoin, ToJoin> OpExpression for ManyToManyJoins<JunctionJoin, ToJoin> {}
@@ -619,7 +621,7 @@ mod impl_link_fetch_many {
             ManyToMany, post_op::FetchManyToManyLinked,
         },
         links::relation_many_to_many::post_op::ManyToManyLinkedMap,
-        operations::{CollectionOutput, OperationOutput, fetch_many::LinkFetch},
+        operations::{CollectionOutput, ManyLinkOutput, OperationOutput, fetch_many::LinkFetch},
     };
 
     impl<Key, From, To> LinkFetch for ManyToMany<Key, From, To>
@@ -653,7 +655,7 @@ mod impl_link_fetch_many {
 
         type Op = FetchManyToManyLinked<Key, From, To>;
 
-        type Output = Vec<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
+        type Output = ManyLinkOutput<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
 
         fn take_many(
             &self,
@@ -663,7 +665,9 @@ mod impl_link_fetch_many {
         where
             Self::SelectItems: FromRowData,
         {
-            op.remove(&from_id).unwrap_or_default()
+            ManyLinkOutput {
+                many_output: op.remove(&from_id).unwrap_or_default(),
+            }
         }
 
         type OpInput = Vec<<From::Id as CollectionId>::IdData>;
@@ -704,34 +708,34 @@ mod impl_mutate_links {
     use sqlx::{Decode, Encode, Row, Type};
 
     use crate::{
-        collections::{AutoGenerate, Collection, CollectionId, SingleColumnId},
+        collections::{Collection, CollectionId, SingleColumnId},
         database_extention::DatabaseExt,
         execute::Executable,
         expressions::{ColumnEqual, table},
         expressions::single_col_expressions::UpdatingCol,
         extentions::{
             Members,
-            common_expressions::{Aliased, Identifier, Scoped, TableNameExpression, V0OnInsert},
+            common_expressions::{Aliased, Identifier, Scoped, TableNameExpression},
         },
         fix_executor::ExecutorTrait,
-        from_row::{FromRowAlias, FromRowData, FromRowError},
+        from_row::{FromRowAlias, FromRowData},
         links::{
             relation_many_to_many::ManyToMany,
             relation_optional_to_many::find_place_for_this::OneColumn,
-            update_links::{SetId, SetNew},
+            update_links::SetId,
         },
         operations::{
-            CollectionOutput, LinkedOutput, Operation, OperationOutput,
+            CollectionOutput, LinkedOutput, ManyLinkOutput, Operation, OperationOutput,
             delete::{DeleteLink, DeleteLinkData, DeleteLinkPreOp, DeleteLinkSplit},
             fetch_one::FetchOne,
             insert_one::{
-                ConstraintViolation, InsertLinkConsumeData, InsertLinkData, InsertOne,
+                ConstraintViolation, InsertLinkConsumeData, InsertLinkData,
                 InsertOneLink,
             },
             update::{UpdateLink, UpdateLinkData, UpdateLinkSplit},
         },
         query_builder::{
-            Bind, Expression, ManyExpressions, OpExpression, StatementBuilder,
+            Bind, Expression, ManyExpressions, StatementBuilder,
             functional_expr::ManyFlat,
         },
         statements::{
@@ -1070,8 +1074,10 @@ mod impl_mutate_links {
 
     impl<Key, From, To> UpdateLinkSplit for SetJunctionId<Key, From, To>
     where
-        To: Collection<Id: SingleColumnId> + TableNameExpression,
-        From: Collection<Id: SingleColumnId + Identifier + Scoped> + TableNameExpression,
+        To: Collection<Id: SingleColumnId + Identifier> + TableNameExpression + Members + Clone,
+        To::OutputData: Clone,
+        <To::Id as CollectionId>::IdData: ::std::convert::From<i64> + Clone,
+        From: Collection<Id: SingleColumnId + Identifier + Scoped> + TableNameExpression + Clone,
         Key: Clone + AsRef<str>,
         From: Clone,
         To: Clone,
@@ -1104,12 +1110,14 @@ mod impl_mutate_links {
 
     impl<Key, From, To> UpdateLink for SetJunctionId<Key, From, To>
     where
-        To: Collection<Id: SingleColumnId>,
+        To: Collection<Id: SingleColumnId + Identifier> + TableNameExpression + Members + Clone,
         From: Collection<Id: SingleColumnId + Identifier + Scoped> + TableNameExpression + Clone,
         ManyToMany<Key, From, To>: Clone,
         Key: Clone + AsRef<str>,
         From: Clone,
         To: Clone,
+        To::OutputData: Clone,
+        <To::Id as CollectionId>::IdData: ::std::convert::From<i64> + Clone,
     {
         type InitSplitForPreOp = ();
         type PreOpSplitWheres = ();
@@ -1158,25 +1166,41 @@ mod impl_mutate_links {
         }
         type FromRow = ();
         fn from_row(&self) -> Self::FromRow {}
-        type PostOp = ();
+        type PostOp = FetchOne<
+            To,
+            (),
+            ColumnEqual<<To::Id as Identifier>::Identifier, <To::Id as CollectionId>::IdData>,
+        >;
         type InitSplitPostOp = ();
-        fn post_op(&self, _: Self::InitSplitPostOp, _: Self::PreOpSplitPostOp) -> Self::PostOp {}
+        fn post_op(&self, _: Self::InitSplitPostOp, _: Self::PreOpSplitPostOp) -> Self::PostOp {
+            FetchOne {
+                base: self.relation.to.clone(),
+                links: (),
+                wheres: ColumnEqual {
+                    col: self.relation.to.id().identifier(),
+                    eq: <To::Id as CollectionId>::IdData::from(self.to_id),
+                },
+            }
+        }
         fn from_row_result(&self, _: &(), _: &mut Self::PostOp) {}
-        type Output = i64;
-        type PostOpOutput = ();
+        type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>;
+        type PostOpOutput = LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>;
         fn post_op_output(
             &self,
-            _: <Self::PostOp as OperationOutput>::Output,
+            poo: <Self::PostOp as OperationOutput>::Output,
         ) -> Result<Self::PostOpOutput, ConstraintViolation> {
-            Ok(())
+            Ok(poo.expect("linked row should exist"))
         }
         fn take(
             &self,
             _: (),
-            _: &mut Self::PostOpOutput,
+            post_op: &mut Self::PostOpOutput,
             _: &mut Self::PreOpSplitTake,
         ) -> Self::Output {
-            self.to_id
+            CollectionOutput {
+                id: post_op.id.clone(),
+                attributes: post_op.attributes.clone(),
+            }
         }
     }
 
@@ -1189,8 +1213,10 @@ mod impl_mutate_links {
 
     impl<Key, From, To> UpdateLinkSplit for RemoveJunctionId<Key, From, To>
     where
-        To: Collection<Id: SingleColumnId> + TableNameExpression,
-        From: Collection<Id: SingleColumnId + Identifier + Scoped> + TableNameExpression,
+        To: Collection<Id: SingleColumnId + Identifier> + TableNameExpression + Members + Clone,
+        To::OutputData: Clone,
+        <To::Id as CollectionId>::IdData: ::std::convert::From<i64> + Clone,
+        From: Collection<Id: SingleColumnId + Identifier + Scoped> + TableNameExpression + Clone,
         Key: Clone + AsRef<str>,
         From: Clone,
         To: Clone,
@@ -1223,29 +1249,39 @@ mod impl_mutate_links {
 
     impl<Key, From, To> UpdateLink for RemoveJunctionId<Key, From, To>
     where
-        To: Collection<Id: SingleColumnId>,
+        To: Collection<Id: SingleColumnId + Identifier> + TableNameExpression + Members + Clone,
         From: Collection<Id: SingleColumnId + Identifier + Scoped> + TableNameExpression + Clone,
         ManyToMany<Key, From, To>: Clone,
         Key: Clone + AsRef<str>,
         From: Clone,
         To: Clone,
+        To::OutputData: Clone,
+        <To::Id as CollectionId>::IdData: ::std::convert::From<i64> + Clone,
     {
         type InitSplitForPreOp = ();
         type PreOpSplitWheres = ();
         type PreOpSplitValues = ();
         type PreOpSplitPostOp = ();
-        type PreOpSplitTake = ();
-        type PreOp = DeleteJunctionRow<Key, From, To>;
+        type PreOpSplitTake =
+            Option<LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>>;
+        type PreOp = FetchOne<
+            To,
+            (),
+            ColumnEqual<<To::Id as Identifier>::Identifier, <To::Id as CollectionId>::IdData>,
+        >;
         fn pre_op(&self, _: Self::InitSplitForPreOp) -> Self::PreOp {
-            DeleteJunctionRow {
-                link: self.relation.clone(),
-                from_id: self.from_id,
-                to_id: self.to_id,
+            FetchOne {
+                base: self.relation.to.clone(),
+                links: (),
+                wheres: ColumnEqual {
+                    col: self.relation.to.id().identifier(),
+                    eq: <To::Id as CollectionId>::IdData::from(self.to_id),
+                },
             }
         }
         fn split_pre_op(
             &self,
-            _: <Self::PreOp as OperationOutput>::Output,
+            linked: <Self::PreOp as OperationOutput>::Output,
         ) -> Result<
             (
                 Self::PreOpSplitWheres,
@@ -1255,7 +1291,7 @@ mod impl_mutate_links {
             ),
             ConstraintViolation,
         > {
-            Ok(((), (), (), ()))
+            Ok(((), (), (), linked))
         }
         type InitSplitForWheres = ();
         type UpdateWhere = ();
@@ -1277,11 +1313,17 @@ mod impl_mutate_links {
         }
         type FromRow = ();
         fn from_row(&self) -> Self::FromRow {}
-        type PostOp = ();
+        type PostOp = DeleteJunctionRow<Key, From, To>;
         type InitSplitPostOp = ();
-        fn post_op(&self, _: Self::InitSplitPostOp, _: Self::PreOpSplitPostOp) -> Self::PostOp {}
+        fn post_op(&self, _: Self::InitSplitPostOp, _: Self::PreOpSplitPostOp) -> Self::PostOp {
+            DeleteJunctionRow {
+                link: self.relation.clone(),
+                from_id: self.from_id,
+                to_id: self.to_id,
+            }
+        }
         fn from_row_result(&self, _: &(), _: &mut Self::PostOp) {}
-        type Output = i64;
+        type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>;
         type PostOpOutput = ();
         fn post_op_output(
             &self,
@@ -1293,13 +1335,18 @@ mod impl_mutate_links {
             &self,
             _: (),
             _: &mut Self::PostOpOutput,
-            _: &mut Self::PreOpSplitTake,
+            pre_op_split_take: &mut Self::PreOpSplitTake,
         ) -> Self::Output {
-            self.to_id
+            let linked = pre_op_split_take.take().expect("linked row should exist");
+            CollectionOutput {
+                id: linked.id,
+                attributes: linked.attributes,
+            }
         }
     }
 
     #[derive(Clone)]
+    #[allow(dead_code)]
     pub struct SelectJunctionToIds<Key, From, To> {
         link: ManyToMany<Key, From, To>,
         from_id: i64,
@@ -1373,9 +1420,11 @@ mod impl_mutate_links {
     where
         Self: Clone,
         To: Collection,
+        From: Collection,
         Key: Clone + AsRef<str>,
         From: Clone,
         To: Clone,
+        <From::Id as CollectionId>::IdData: ::std::convert::From<i64> + Copy + Eq + std::hash::Hash,
     {
         type Link = Self;
         type InitSplitForPreOp = ();
@@ -1388,19 +1437,24 @@ mod impl_mutate_links {
     where
         Self: Clone,
         From: Collection<Id: SingleColumnId> + Clone + TableNameExpression,
-        To: Collection<Id: SingleColumnId> + Clone + TableNameExpression,
+        To: Collection<Id: SingleColumnId + Identifier> + Clone + TableNameExpression + Members,
         <From as TableNameExpression>::LowerCaseTableNameExpression: AsRef<str>,
         <To as TableNameExpression>::LowerCaseTableNameExpression: AsRef<str>,
+        <From::Id as CollectionId>::IdData: ::std::convert::From<i64> + Copy + Eq + std::hash::Hash,
         Wheres: Clone,
         Key: Clone + AsRef<str>,
     {
         type InitSplitForPreOp = ();
-        type PreOp = SelectJunctionToIds<Key, From, To>;
+        type PreOp = crate::links::relation_many_to_many::post_op::FetchManyToManyLinked<
+            Key,
+            From,
+            To,
+        >;
         fn pre_op(&self, _: Self::InitSplitForPreOp, _: &Wheres) -> Self::PreOp {
-            SelectJunctionToIds {
-                link: self.link.clone(),
-                from_id: self.from_id,
-            }
+            crate::links::relation_many_to_many::post_op::FetchManyToManyLinked::new(
+                self.link.clone(),
+                vec![self.from_id.into()],
+            )
         }
     }
 
@@ -1409,18 +1463,25 @@ mod impl_mutate_links {
         Self: Clone,
         To: Collection,
         Key: Clone + AsRef<str>,
-        From: Clone,
+        From: Collection + Clone,
         To: Clone,
+        <From::Id as CollectionId>::IdData: ::std::convert::From<i64> + Copy + Eq + std::hash::Hash,
     {
-        type Output = Vec<i64>;
-        type PreOpOutput = Vec<i64>;
+        type Output =
+            ManyLinkOutput<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
+        type PreOpOutput = crate::links::relation_many_to_many::post_op::ManyToManyLinkedMap<
+            <From::Id as CollectionId>::IdData,
+            <To::Id as CollectionId>::IdData,
+            To::OutputData,
+        >;
         type PreOpSplitWheres = ();
-        type PreOpSplitTake = Vec<i64>;
+        type PreOpSplitTake =
+            Vec<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
         fn split_pre_op(
             &self,
-            pre_op: Self::PreOpOutput,
+            mut pre_op: Self::PreOpOutput,
         ) -> (Self::PreOpSplitWheres, Self::PreOpSplitTake) {
-            ((), pre_op)
+            ((), pre_op.remove(&self.from_id.into()).unwrap_or_default())
         }
         type InitSplitForWheres = ();
         type Wheres = ();
@@ -1434,14 +1495,18 @@ mod impl_mutate_links {
             _: <Self::DeleteReturnFromRow as FromRowData>::RData,
             pre_op_split_take: &mut Self::PreOpSplitTake,
         ) -> Self::Output {
-            std::mem::take(pre_op_split_take)
+            ManyLinkOutput {
+                many_output: std::mem::take(pre_op_split_take),
+            }
         }
         fn take_once(
             &self,
             _: <Self::DeleteReturnFromRow as FromRowData>::RData,
             pre_op_split_take: Self::PreOpSplitTake,
         ) -> Self::Output {
-            pre_op_split_take
+            ManyLinkOutput {
+                many_output: pre_op_split_take,
+            }
         }
     }
 }
@@ -1463,7 +1528,7 @@ mod test {
         },
         on_migrate::OnMigrate,
         operations::{
-            CollectionOutput, LinkedOutput, Operation,
+            CollectionOutput, LinkedOutput, ManyLinkOutput, Operation,
             fetch_many::{FetchMany, ManyOutput},
             fetch_one::FetchOne,
         },
@@ -1586,7 +1651,8 @@ mod test {
                             done: true,
                             description: Some("a".to_string()),
                         },
-                        links: vec![
+                        links: ManyLinkOutput {
+                            many_output: vec![
                             CollectionOutput {
                                 id: 1,
                                 attributes: Tag {
@@ -1599,7 +1665,8 @@ mod test {
                                     title: "home".to_string(),
                                 },
                             },
-                        ],
+                            ],
+                        },
                     },
                     LinkedOutput {
                         id: 2,
@@ -1608,12 +1675,14 @@ mod test {
                             done: false,
                             description: Some("b".to_string()),
                         },
-                        links: vec![CollectionOutput {
+                        links: ManyLinkOutput {
+                            many_output: vec![CollectionOutput {
                             id: 1,
                             attributes: Tag {
                                 title: "urgent".to_string(),
                             },
                         },],
+                        },
                     },
                 ],
                 next_item: None,
@@ -1666,7 +1735,8 @@ mod test {
                     done: true,
                     description: Some("a".to_string()),
                 },
-                links: vec![
+                links: ManyLinkOutput {
+                    many_output: vec![
                     CollectionOutput {
                         id: 1,
                         attributes: Tag {
@@ -1679,7 +1749,8 @@ mod test {
                             title: "home".to_string(),
                         },
                     },
-                ],
+                    ],
+                },
             })
         );
     }
@@ -1727,7 +1798,8 @@ mod test {
                         attributes: Category {
                             title: "work".to_string(),
                         },
-                        links: vec![
+                        links: ManyLinkOutput {
+                            many_output: vec![
                             CollectionOutput {
                                 id: 1,
                                 attributes: Tag {
@@ -1740,19 +1812,22 @@ mod test {
                                     title: "review".to_string(),
                                 },
                             },
-                        ],
+                            ],
+                        },
                     },
                     LinkedOutput {
                         id: 2,
                         attributes: Category {
                             title: "personal".to_string(),
                         },
-                        links: vec![CollectionOutput {
+                        links: ManyLinkOutput {
+                            many_output: vec![CollectionOutput {
                             id: 2,
                             attributes: Tag {
                                 title: "review".to_string(),
                             },
                         },],
+                        },
                     },
                 ],
                 next_item: None,
@@ -1799,7 +1874,7 @@ mod test {
                         done: false,
                         description: None,
                     },
-                    links: vec![],
+                    links: ManyLinkOutput { many_output: vec![] },
                 },],
                 next_item: None,
             }
@@ -1811,7 +1886,7 @@ mod test {
         use super::SetJunctionId;
         use crate::{
             operations::update::Update,
-            test_module::TodoPartial,
+            test_module::{Tag, TodoPartial},
             update_mod::Update as PartialUpdate,
         };
 
@@ -1854,6 +1929,14 @@ mod test {
         .unwrap();
 
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].links, 1);
+        assert_eq!(
+            out[0].links,
+            CollectionOutput {
+                id: 1,
+                attributes: Tag {
+                    title: "urgent".to_string(),
+                },
+            }
+        );
     }
 }

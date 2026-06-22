@@ -381,7 +381,7 @@ pub mod is_null {
             };
         }
 
-        impl_no_gens!(i32 i64 bool char String);
+        impl_no_gens!(i32 i64 f64 bool char String);
 
         macro_rules! impl_gens {
             ($ident:ident [$($gens:ident $(:$wheres:tt)?),*]) => {
@@ -396,6 +396,12 @@ pub mod is_null {
         }
 
         impl_gens!(HashMap[K,V,S]);
+
+        impl<T> IsNull for sqlx::types::Json<T> {
+            fn is_null() -> bool {
+                false
+            }
+        }
     }
 }
 
@@ -774,6 +780,7 @@ mod imp_on_delete_set_null_for_sqlite {
     }
 }
 
+pub mod filters;
 pub mod larger_than_or_equal {
     use crate::{
         database_extention::DatabaseExt,

@@ -4,8 +4,9 @@
 //! Only sqlx events whose span context is that tree (or a child, including sqlite worker
 //! threads) are stored in that scope's buffer.
 
+use std::cell::RefCell;
 use std::future::Future;
-use std::sync::{Arc, Mutex, Once, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, Once};
 
 use tracing::Subscriber;
 use tracing::field::{Field, Visit};
@@ -17,10 +18,18 @@ use tracing_subscriber::{
 const CAPTURE_SPAN_NAME: &str = "track_sqlx_query";
 
 static GLOBAL_INIT: Once = Once::new();
-static PENDING_BUFFER: OnceLock<Mutex<Option<Arc<Mutex<Vec<String>>>>>> = OnceLock::new();
+static CAPTURE_SCOPE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
-fn pending_buffer() -> &'static Mutex<Option<Arc<Mutex<Vec<String>>>>> {
-    PENDING_BUFFER.get_or_init(|| Mutex::new(None))
+thread_local! {
+    static PENDING_BUFFERS: RefCell<Vec<Arc<Mutex<Vec<String>>>>> = RefCell::new(Vec::new());
+}
+
+fn push_pending_buffer(buffer: Arc<Mutex<Vec<String>>>) {
+    PENDING_BUFFERS.with(|stack| stack.borrow_mut().push(buffer));
+}
+
+fn take_pending_buffer() -> Option<Arc<Mutex<Vec<String>>>> {
+    PENDING_BUFFERS.with(|stack| stack.borrow_mut().pop())
 }
 
 fn ensure_global_subscriber() {
@@ -92,11 +101,8 @@ where
         if attrs.metadata().name() != CAPTURE_SPAN_NAME {
             return;
         }
-        let buffer = pending_buffer()
-            .lock()
-            .expect("track_sqlx_query mutex poisoned")
-            .take()
-            .unwrap_or_else(|| Arc::new(Mutex::new(Vec::new())));
+        let buffer =
+            take_pending_buffer().unwrap_or_else(|| Arc::new(Mutex::new(Vec::new())));
         if let Some(span) = ctx.span(id) {
             span.extensions_mut().insert(Capture { queries: buffer });
         }
@@ -153,6 +159,18 @@ impl Cache {
     }
 }
 
+/// Drop connection setup statements that may appear once per pool connection.
+pub fn without_pragma(drain: Vec<String>) -> Vec<String> {
+    drain
+        .into_iter()
+        .filter(|statement| !statement.trim_start().starts_with("PRAGMA "))
+        .collect()
+}
+
+pub fn assert_sql_eq(actual: Vec<String>, expected: Vec<String>) {
+    pretty_assertions::assert_eq!(without_pragma(actual), without_pragma(expected));
+}
+
 /// Handle for the current test's sqlx query capture scope.
 pub struct Scope;
 
@@ -175,15 +193,17 @@ fn drain_queries(queries: Arc<Mutex<Vec<String>>>) -> Vec<String> {
 /// Run a synchronous closure in an isolated sqlx-query capture scope.
 ///
 /// Returns `(captured_sql, closure_result)`.
+#[allow(dead_code)]
 pub fn install<F, R>(f: F) -> (Vec<String>, R)
 where
     F: FnOnce(Scope, Cache) -> R,
 {
+    let _lock = CAPTURE_SCOPE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     ensure_global_subscriber();
     let queries = Arc::new(Mutex::new(Vec::new()));
-    *pending_buffer()
-        .lock()
-        .expect("track_sqlx_query mutex poisoned") = Some(Arc::clone(&queries));
+    push_pending_buffer(Arc::clone(&queries));
     let cache = Cache {
         queries: Arc::clone(&queries),
     };
@@ -192,10 +212,7 @@ where
     let _enter = span.enter();
     let result = f(Scope, cache);
     drop(_enter);
-    pending_buffer()
-        .lock()
-        .expect("track_sqlx_query mutex poisoned")
-        .take();
+    let _ = take_pending_buffer();
 
     (drain_queries(queries), result)
 }
@@ -211,11 +228,12 @@ where
 {
     use tracing::Instrument;
 
+    let _lock = CAPTURE_SCOPE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     ensure_global_subscriber();
     let queries = Arc::new(Mutex::new(Vec::new()));
-    *pending_buffer()
-        .lock()
-        .expect("track_sqlx_query mutex poisoned") = Some(Arc::clone(&queries));
+    push_pending_buffer(Arc::clone(&queries));
     let cache = Cache {
         queries: Arc::clone(&queries),
     };
@@ -224,10 +242,7 @@ where
         .instrument(tracing::info_span!(CAPTURE_SPAN_NAME))
         .await;
 
-    pending_buffer()
-        .lock()
-        .expect("track_sqlx_query mutex poisoned")
-        .take();
+    let _ = take_pending_buffer();
 
     let _ = drain_queries(queries);
 

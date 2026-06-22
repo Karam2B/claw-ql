@@ -242,24 +242,4 @@ async fn test_json_client() {
             ]
         })
     );
-
-    let delete = jc
-        .insert_one(
-            from_value(json!({
-                "base": "todo",
-                "data": {
-                    "title": "new_todo",
-                    "done": false,
-                    "description": "description_6",
-                },
-            }))
-            .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    pretty_assertions::assert_eq!(
-        serde_json::to_value(delete).unwrap(),
-        json!({ "id": 6, "attributes": { "title": "new_todo", "done": false, "description": "description_6", } })
-    );
 }

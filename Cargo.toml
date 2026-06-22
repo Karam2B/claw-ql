@@ -16,7 +16,7 @@ serde = { version = "1.0.203", optional = true }
 serde_json = { version = "1.0.117", optional = true }
 tower-service = { version = "0.3.3", optional = true }
 hyper = { version = "1.6.0", optional = true }
-axum = { version = "0.8.4",features = ["macros"], optional = true }
+axum = { version = "0.8.4", features = ["macros"], optional = true }
 tokio = { version = "1.37.0", features = ["full"], optional = true }
 # feature inventory
 inventory = { version = "0.3.20", optional = true }
@@ -41,9 +41,9 @@ inventory = { version = "0.3.20" }
 crates = ["sqlx", "sqlx-core", "sqlx-sqlite"]
 
 [patch.crates-io]
-sqlx = {path = './target/patch/sqlx-0.8.6'}
-sqlx-core = {path = './target/patch/sqlx-core-0.8.6'}
-sqlx-sqlite = {path = './target/patch/sqlx-sqlite-0.8.6'}
+sqlx = { path = './target/patch/sqlx-0.8.6' }
+sqlx-core = { path = './target/patch/sqlx-core-0.8.6' }
+sqlx-sqlite = { path = './target/patch/sqlx-sqlite-0.8.6' }
 
 [features]
 default = ["fix_executor", "sqlite", "trace", "http"]

@@ -14,14 +14,10 @@ use claw_ql::{
 
 #[tokio::test]
 async fn fetch_many() {
-    tracing::dispatcher::set_global_default(
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::TRACE)
-            .with_test_writer()
-            .finish()
-            .into(),
-    )
-    .unwrap();
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_test_writer()
+        .try_init();
 
     let mut conn = Sqlite::in_memory_connection().await;
 
@@ -106,14 +102,10 @@ async fn fetch_many() {
 
 #[tokio::test]
 async fn insert_ops() {
-    tracing::dispatcher::set_global_default(
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::TRACE)
-            .with_test_writer()
-            .finish()
-            .into(),
-    )
-    .unwrap();
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_test_writer()
+        .try_init();
 
     let mut conn = Sqlite::in_memory_connection().await;
 
@@ -167,5 +159,4 @@ async fn insert_ops() {
             links: 1
         }
     );
-    panic!();
 }

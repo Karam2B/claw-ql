@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "say-word": {
+      "command": "/home/karamlt/repos/claw-ql/mcp/say-word/.venv/bin/python",
+      "args": ["/home/karamlt/repos/claw-ql/mcp/say-word/server.py"]
+    }
+  }
+}

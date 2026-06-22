@@ -1,6 +1,7 @@
 mod impl_connect_in_memory {
     use crate::connect_in_memory::ConnectInMemory;
-    use sqlx::{ConnectOptions, Pool, Sqlite, SqlitePool, sqlite::SqliteConnectOptions};
+    use sqlx::{ConnectOptions, Pool, Sqlite, sqlite::SqliteConnectOptions};
+    use sqlx::pool::PoolOptions;
 
     impl ConnectInMemory for Sqlite {
         async fn in_memory_connection() -> <Self as sqlx::Database>::Connection {
@@ -11,7 +12,13 @@ mod impl_connect_in_memory {
                 .unwrap()
         }
         fn in_memory_pool() -> impl Future<Output = Pool<Self>> {
-            async { SqlitePool::connect("sqlite::memory:").await.unwrap() }
+            async {
+                PoolOptions::<Sqlite>::new()
+                    .max_connections(1)
+                    .connect("sqlite::memory:")
+                    .await
+                    .unwrap()
+            }
         }
     }
 }

@@ -813,14 +813,16 @@ mod impl_set_new_for_insert {
             links::{Link, update_links::SetNew},
             operations::{CollectionOutput, LinkedOutput, Operation, insert_one::InsertOne},
             test_module::{self, Category, Todo, category},
+            track_sqlx_query::watch_sqlx_calls,
         };
 
-        #[tokio::test]
+        #[tokio::test(flavor = "current_thread")]
         async fn test_insert_one_set_new() {
-            let mut conn = Sqlite::in_memory_connection().await;
+            watch_sqlx_calls(async |_, cache| {
+                let mut conn = Sqlite::in_memory_connection().await;
 
-            sqlx::query(
-                "
+                sqlx::query(
+                    "
                 CREATE TABLE Category (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     title TEXT NOT NULL
@@ -834,48 +836,61 @@ mod impl_set_new_for_insert {
                     FOREIGN KEY (fk_category_def) REFERENCES Category(id)
                 );
                 ",
-            )
-            .execute(&mut conn)
-            .await
-            .unwrap();
+                )
+                .execute(&mut conn)
+                .await
+                .unwrap();
+                cache.clear();
 
-            let output = Operation::<Sqlite>::exec_operation(
-                InsertOne {
-                    id: AutoGenerate,
-                    base: test_module::todo,
-                    data: Todo {
-                        title: "first_todo".to_string(),
-                        done: true,
-                        description: None,
-                    },
-                    links: SetNew {
-                        data: Category {
-                            title: "category_1".to_string(),
+                let output = Operation::<Sqlite>::exec_operation(
+                    InsertOne {
+                        id: AutoGenerate,
+                        base: test_module::todo,
+                        data: Todo {
+                            title: "first_todo".to_string(),
+                            done: true,
+                            description: None,
                         },
-                        relation: <category as Link<test_module::todo>>::spec(category),
+                        links: SetNew {
+                            data: Category {
+                                title: "category_1".to_string(),
+                            },
+                            relation: <category as Link<test_module::todo>>::spec(category),
+                        },
                     },
-                },
-                &mut conn,
-            )
-            .await;
+                    &mut conn,
+                )
+                .await;
 
-            pretty_assertions::assert_eq!(
-                output,
-                Ok(LinkedOutput {
-                    id: 1,
-                    attributes: Todo {
-                        title: "first_todo".to_string(),
-                        done: true,
-                        description: None,
-                    },
-                    links: CollectionOutput {
+                pretty_assertions::assert_eq!(
+                    cache.drain(),
+                    vec![
+                        r#"INSERT INTO "Category" ("title") VALUES ($1) RETURNING "id", "title";"#
+                            .to_string(),
+                        r#"INSERT INTO "Todo" ("title", "done", "description", "fk_category_def") VALUES ($1, $2, $3, $4) RETURNING "id", "title", "done", "description", "fk_category_def";"#
+                            .to_string(),
+                    ]
+                );
+
+                pretty_assertions::assert_eq!(
+                    output,
+                    Ok(LinkedOutput {
                         id: 1,
-                        attributes: Category {
-                            title: "category_1".to_string(),
+                        attributes: Todo {
+                            title: "first_todo".to_string(),
+                            done: true,
+                            description: None,
                         },
-                    },
-                })
-            );
+                        links: CollectionOutput {
+                            id: 1,
+                            attributes: Category {
+                                title: "category_1".to_string(),
+                            },
+                        },
+                    })
+                );
+            })
+            .await;
         }
     }
 }
@@ -1078,14 +1093,16 @@ mod impl_set_id_for_insert {
             links::{Link, update_links::SetId},
             operations::{CollectionOutput, LinkedOutput, Operation, insert_one::InsertOne},
             test_module::{self, Category, Todo, category},
+            track_sqlx_query::watch_sqlx_calls,
         };
 
-        #[tokio::test]
+        #[tokio::test(flavor = "current_thread")]
         async fn test_insert_one() {
-            let mut conn = Sqlite::in_memory_connection().await;
+            watch_sqlx_calls(async |_, cache| {
+                let mut conn = Sqlite::in_memory_connection().await;
 
-            sqlx::query(
-                "
+                sqlx::query(
+                    "
                 CREATE TABLE Category (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     title TEXT NOT NULL
@@ -1101,46 +1118,59 @@ mod impl_set_id_for_insert {
 
                 INSERT INTO Category (title) VALUES ('category_1');
                 ",
-            )
-            .execute(&mut conn)
-            .await
-            .unwrap();
+                )
+                .execute(&mut conn)
+                .await
+                .unwrap();
+                cache.clear();
 
-            let output = Operation::<Sqlite>::exec_operation(
-                InsertOne {
-                    id: AutoGenerate,
-                    base: test_module::todo,
-                    data: Todo {
-                        title: "first_todo".to_string(),
-                        done: true,
-                        description: None,
-                    },
-                    links: SetId {
-                        id: 1,
-                        relation: <category as Link<test_module::todo>>::spec(category),
-                    },
-                },
-                &mut conn,
-            )
-            .await;
-
-            pretty_assertions::assert_eq!(
-                output,
-                Ok(LinkedOutput {
-                    id: 1,
-                    attributes: Todo {
-                        title: "first_todo".to_string(),
-                        done: true,
-                        description: None,
-                    },
-                    links: CollectionOutput {
-                        id: 1,
-                        attributes: Category {
-                            title: "category_1".to_string(),
+                let output = Operation::<Sqlite>::exec_operation(
+                    InsertOne {
+                        id: AutoGenerate,
+                        base: test_module::todo,
+                        data: Todo {
+                            title: "first_todo".to_string(),
+                            done: true,
+                            description: None,
+                        },
+                        links: SetId {
+                            id: 1,
+                            relation: <category as Link<test_module::todo>>::spec(category),
                         },
                     },
-                })
-            );
+                    &mut conn,
+                )
+                .await;
+
+                pretty_assertions::assert_eq!(
+                    cache.drain(),
+                    vec![
+                        r#"INSERT INTO "Todo" ("title", "done", "description", "fk_category_def") VALUES ($1, $2, $3, $4) RETURNING "id", "title", "done", "description", "fk_category_def";"#
+                            .to_string(),
+                        r#"SELECT "Category"."id" AS "iid", "Category"."title" AS "btitle" FROM "Category" WHERE "id" = $1;"#
+                            .to_string(),
+                    ]
+                );
+
+                pretty_assertions::assert_eq!(
+                    output,
+                    Ok(LinkedOutput {
+                        id: 1,
+                        attributes: Todo {
+                            title: "first_todo".to_string(),
+                            done: true,
+                            description: None,
+                        },
+                        links: CollectionOutput {
+                            id: 1,
+                            attributes: Category {
+                                title: "category_1".to_string(),
+                            },
+                        },
+                    })
+                );
+            })
+            .await;
         }
     }
 }
@@ -1295,7 +1325,8 @@ mod impl_set_id_for_update {
 
     use crate::{
         collections::{Collection, CollectionId},
-        expressions::single_col_expressions::UpdatingCol,
+        expressions::{ColumnEqual, single_col_expressions::UpdatingCol},
+        extentions::common_expressions::Identifier,
         links::{
             relation_optional_to_many::{
                 OptionalToMany, find_place_for_this::OneColumn, fk_name::AsIdentifier,
@@ -1303,15 +1334,77 @@ mod impl_set_id_for_update {
             update_links::SetId,
         },
         operations::{
+            CollectionOutput, LinkedOutput, Operation, OperationOutput,
+            fetch_one::FetchOne,
             insert_one::ConstraintViolation,
             update::{UpdateLink, UpdateLinkData, UpdateLinkSplit},
         },
     };
 
+    pub enum SetIdUpdatePostOp<To>
+    where
+        To: Collection,
+        To::Id: Identifier,
+    {
+        Skip,
+        Fetch(
+            FetchOne<
+                To,
+                (),
+                ColumnEqual<<To::Id as Identifier>::Identifier, <To::Id as CollectionId>::IdData>,
+            >,
+        ),
+    }
+
+    impl<To> OperationOutput for SetIdUpdatePostOp<To>
+    where
+        To: Collection,
+        To::Id: Identifier,
+    {
+        type Output =
+            Option<LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>>;
+    }
+
+    impl<S, To> Operation<S> for SetIdUpdatePostOp<To>
+    where
+        S: sqlx::Database,
+        To: Clone + Collection + Send,
+        To::Id: Identifier,
+        <To::Id as CollectionId>::IdData: Send + Clone,
+        To::OutputData: Send,
+        FetchOne<
+            To,
+            (),
+            ColumnEqual<<To::Id as Identifier>::Identifier, <To::Id as CollectionId>::IdData>,
+        >: Operation<S>,
+        FetchOne<
+            To,
+            (),
+            ColumnEqual<<To::Id as Identifier>::Identifier, <To::Id as CollectionId>::IdData>,
+        >: OperationOutput<
+            Output = Option<
+                LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>,
+            >,
+        >,
+    {
+        async fn exec_operation(
+            self,
+            pool: &mut <S as sqlx::Database>::Connection,
+        ) -> Self::Output {
+            match self {
+                SetIdUpdatePostOp::Skip => None,
+                SetIdUpdatePostOp::Fetch(fetch) => fetch.exec_operation(&mut *pool).await,
+            }
+        }
+    }
+
     impl<Key, From, To> UpdateLinkSplit
         for SetId<OptionalToMany<Key, From, To>, Option<<To::Id as CollectionId>::IdData>>
     where
-        To: Collection,
+        To: Clone + Collection,
+        To::OutputData: Clone,
+        To::Id: Identifier,
+        <To::Id as CollectionId>::IdData: Clone,
         OptionalToMany<Key, From, To>: Clone,
     {
         type Link =
@@ -1335,9 +1428,9 @@ mod impl_set_id_for_update {
                 },
                 UpdateLinkData {
                     wheres: (),
-                    update_values: self.id,
+                    update_values: self.id.clone(),
                     pre_op: (),
-                    post_op: (),
+                    post_op: self.id,
                 },
             )
         }
@@ -1346,7 +1439,10 @@ mod impl_set_id_for_update {
     impl<Key, From, To> UpdateLink
         for SetId<OptionalToMany<Key, From, To>, PhantomData<<To::Id as CollectionId>::IdData>>
     where
-        To: Collection,
+        To: Clone + Collection,
+        To::OutputData: Clone,
+        To::Id: Identifier,
+        <To::Id as CollectionId>::IdData: Clone,
         OptionalToMany<Key, From, To>: Clone,
     {
         type InitSplitForPreOp = ();
@@ -1358,11 +1454,12 @@ mod impl_set_id_for_update {
         type PreOpSplitPostOp = ();
         type PreOpSplitTake = ();
         type PreOp = ();
+
         fn pre_op(&self, _: Self::InitSplitForPreOp) -> Self::PreOp {}
 
         fn split_pre_op(
             &self,
-            _: <Self::InitSplitForPreOp as crate::operations::OperationOutput>::Output,
+            _: <Self::PreOp as OperationOutput>::Output,
         ) -> Result<
             (
                 Self::PreOpSplitWheres,
@@ -1411,7 +1508,7 @@ mod impl_set_id_for_update {
 
         type FromRow = OneColumn<
             AsIdentifier<OptionalToMany<Key, From, To>>,
-            <To::Id as CollectionId>::IdData,
+            Option<<To::Id as CollectionId>::IdData>,
         >;
 
         fn from_row(&self) -> Self::FromRow {
@@ -1423,38 +1520,61 @@ mod impl_set_id_for_update {
             }
         }
 
-        type PostOp = ();
+        type PostOp = SetIdUpdatePostOp<To>;
 
-        type InitSplitPostOp = ();
+        type InitSplitPostOp = Option<<To::Id as CollectionId>::IdData>;
 
-        fn post_op(&self, _: Self::InitSplitPostOp, _: Self::PreOpSplitPostOp) -> Self::PostOp {}
+        fn post_op(
+            &self,
+            id: Self::InitSplitPostOp,
+            _: Self::PreOpSplitPostOp,
+        ) -> Self::PostOp {
+            match id {
+                None => SetIdUpdatePostOp::Skip,
+                Some(id) => SetIdUpdatePostOp::Fetch(FetchOne {
+                    base: self.relation.to.clone(),
+                    links: (),
+                    wheres: ColumnEqual {
+                        col: self.relation.to.id().identifier(),
+                        eq: id,
+                    },
+                }),
+            }
+        }
 
         fn from_row_result(
             &self,
-            _: &<Self::FromRow as crate::from_row::FromRowData>::RData,
+            _: &Option<<To::Id as CollectionId>::IdData>,
             _: &mut Self::PostOp,
         ) {
         }
 
-        type Output = <To::Id as CollectionId>::IdData;
+        type Output =
+            Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
 
-        type PostOpOutput = ();
+        type PostOpOutput =
+            Option<LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>>;
 
         fn post_op_output(
             &self,
-            _: <Self::PostOp as crate::operations::OperationOutput>::Output,
-        ) -> Result<Self::PostOpOutput, crate::operations::insert_one::ConstraintViolation>
-        {
-            Ok(())
+            poo: <Self::PostOp as OperationOutput>::Output,
+        ) -> Result<Self::PostOpOutput, ConstraintViolation> {
+            Ok(poo)
         }
 
         fn take(
             &self,
-            from_row: <To::Id as CollectionId>::IdData,
-            _: &mut Self::PostOpOutput,
+            fk: Option<<To::Id as CollectionId>::IdData>,
+            post_op: &mut Self::PostOpOutput,
             _: &mut Self::PreOpSplitTake,
         ) -> Self::Output {
-            from_row
+            match (fk, post_op.take()) {
+                (Some(id), Some(linked)) => Some(CollectionOutput {
+                    id,
+                    attributes: linked.attributes,
+                }),
+                _ => None,
+            }
         }
     }
 
@@ -1475,14 +1595,16 @@ mod impl_set_id_for_update {
                 CollectionOutput, LinkedOutput, Operation, insert_one::InsertOne, update::Update,
             },
             test_module::{self, Category, Todo, category, todo_members},
+            track_sqlx_query::watch_sqlx_calls,
         };
 
-        #[tokio::test]
+        #[tokio::test(flavor = "current_thread")]
         async fn set_for_update_link() {
-            let mut conn = Sqlite::in_memory_connection().await;
+            watch_sqlx_calls(async |_, cache| {
+                let mut conn = Sqlite::in_memory_connection().await;
 
-            sqlx::query(
-                "
+                sqlx::query(
+                    "
                 CREATE TABLE Category (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     title TEXT NOT NULL
@@ -1504,27 +1626,36 @@ mod impl_set_id_for_update {
                     ('todo_2', false, 'description_2', NULL),
                     ('todo_3', true, 'description_3', 1);
                 ",
-            )
-            .execute(&mut conn)
-            .await
-            .unwrap();
-
-            let s = Update {
-                base: test_module::todo,
-                partial: Default::default(),
-                wheres: ColumnEqual {
-                    col: todo_members::id,
-                    eq: 1,
-                },
-                links: SetId {
-                    relation: <category as Link<test_module::todo>>::spec(category),
-                    id: None,
-                },
-            };
-
-            Operation::<Sqlite>::exec_operation(s, &mut conn)
+                )
+                .execute(&mut conn)
                 .await
                 .unwrap();
+                cache.clear();
+
+                let s = Update {
+                    base: test_module::todo,
+                    partial: Default::default(),
+                    wheres: ColumnEqual {
+                        col: todo_members::id,
+                        eq: 1,
+                    },
+                    links: SetId {
+                        relation: <category as Link<test_module::todo>>::spec(category),
+                        id: None,
+                    },
+                };
+
+                Operation::<Sqlite>::exec_operation(s, &mut conn)
+                    .await
+                    .unwrap();
+
+                pretty_assertions::assert_eq!(
+                    cache.drain(),
+                    vec![
+                        r#"UPDATE "Todo" SET "fk_category_def" =  NULL WHERE "id" = $1 RETURNING "id", "title", "done", "description", "fk_category_def";"#
+                            .to_string(),
+                    ]
+                );
 
             let row = sqlx::query(
                 "
@@ -1541,6 +1672,7 @@ WHERE id = 1;
             let fk_category_def: Option<i64> = row.get("fk_category_def");
 
             pretty_assertions::assert_eq!(fk_category_def, None);
+            let _ = cache.drain();
 
             let s = Update {
                 base: test_module::todo,
@@ -1558,6 +1690,16 @@ WHERE id = 1;
             Operation::<Sqlite>::exec_operation(s, &mut conn)
                 .await
                 .unwrap();
+
+            pretty_assertions::assert_eq!(
+                cache.drain(),
+                vec![
+                    r#"UPDATE "Todo" SET "fk_category_def" = $1 WHERE "id" = $2 RETURNING "id", "title", "done", "description", "fk_category_def";"#
+                        .to_string(),
+                    r#"SELECT "Category"."id" AS "iid", "Category"."title" AS "btitle" FROM "Category" WHERE "id" = $1;"#
+                        .to_string(),
+                ]
+            );
 
             let row = sqlx::query(
                 "
@@ -1586,6 +1728,7 @@ WHERE Todo.id = 2;
                     title: "category_2".to_string(),
                 }
             );
+            let _ = cache.drain();
 
             let s = Update {
                 base: test_module::todo,
@@ -1605,6 +1748,16 @@ WHERE Todo.id = 2;
             Operation::<Sqlite>::exec_operation(s, &mut conn)
                 .await
                 .unwrap();
+
+            pretty_assertions::assert_eq!(
+                cache.drain(),
+                vec![
+                    r#"INSERT INTO "Category" ("title") VALUES ($1) RETURNING "id", "title";"#
+                        .to_string(),
+                    r#"UPDATE "Todo" SET "fk_category_def" = $1 WHERE "id" = $2 RETURNING "id", "title", "done", "description", "fk_category_def";"#
+                        .to_string(),
+                ]
+            );
 
             let row = sqlx::query(
                 "
@@ -1633,6 +1786,7 @@ WHERE Todo.id = 2;
                     title: "category_3".to_string(),
                 }
             );
+            let _ = cache.drain();
 
             let s = InsertOne {
                 id: AutoGenerate,
@@ -1651,6 +1805,16 @@ WHERE Todo.id = 2;
             let s = Operation::<Sqlite>::exec_operation(s, &mut conn)
                 .await
                 .unwrap();
+
+            pretty_assertions::assert_eq!(
+                cache.drain(),
+                vec![
+                    r#"INSERT INTO "Todo" ("title", "done", "description", "fk_category_def") VALUES ($1, $2, $3, $4) RETURNING "id", "title", "done", "description", "fk_category_def";"#
+                        .to_string(),
+                    r#"SELECT "Category"."id" AS "iid", "Category"."title" AS "btitle" FROM "Category" WHERE "id" = $1;"#
+                        .to_string(),
+                ]
+            );
 
             pretty_assertions::assert_eq!(
                 s,
@@ -1689,6 +1853,16 @@ WHERE Todo.id = 2;
             let s = Operation::<Sqlite>::exec_operation(s, &mut conn)
                 .await
                 .unwrap();
+
+            pretty_assertions::assert_eq!(
+                cache.drain(),
+                vec![
+                    r#"INSERT INTO "Category" ("title") VALUES ($1) RETURNING "id", "title";"#
+                        .to_string(),
+                    r#"INSERT INTO "Todo" ("title", "done", "description", "fk_category_def") VALUES ($1, $2, $3, $4) RETURNING "id", "title", "done", "description", "fk_category_def";"#
+                        .to_string(),
+                ]
+            );
 
             pretty_assertions::assert_eq!(
                 s,
@@ -1807,6 +1981,8 @@ LEFT JOIN Category ON Todo.fk_category_def = Category.id;
                     ),
                 ],
             );
+            })
+            .await;
         }
     }
 }
@@ -1991,15 +2167,27 @@ mod impl_for_delete {
 
     use super::OptionalToMany;
     use crate::{
-        collections::{Collection, CollectionId},
-        links::relation_optional_to_many::{find_place_for_this::OneColumn, fk_name::AsIdentifier},
-        operations::delete::{DeleteLink, DeleteLinkData, DeleteLinkPreOp, DeleteLinkSplit},
+        collections::{Collection, CollectionId, SingleColumnId},
+        expressions::ColumnEqual,
+        extentions::common_expressions::{Identifier, Scoped, TableNameExpression},
+        links::relation_optional_to_many::{
+            find_place_for_this::OneColumn, fk_name::AsIdentifier,
+        },
+        operations::{
+            CollectionOutput, LinkedOutput,
+            delete::{DeleteLink, DeleteLinkData, DeleteLinkPreOp, DeleteLinkSplit},
+            fetch_many::LinkFetch,
+            fetch_one::FetchOne,
+        },
     };
 
     impl<Key, From, To> DeleteLinkSplit for OptionalToMany<Key, From, To>
     where
         Self: Clone,
+        From: Collection,
         To: Collection,
+        To::OutputData: Clone,
+        <To::Id as CollectionId>::IdData: Clone,
     {
         type Link = OptionalToMany<Key, From, To>;
         type InitSplitForPreOp = ();
@@ -2011,34 +2199,58 @@ mod impl_for_delete {
     impl<Wheres, Key, From, To> DeleteLinkPreOp<Wheres> for OptionalToMany<Key, From, To>
     where
         Self: Clone,
-        To: Collection,
+        From: Collection,
+        To: Collection<Id: SingleColumnId + Identifier> + TableNameExpression + Clone,
+        From: TableNameExpression + Clone,
+        To::OutputData: Clone,
+        <To::Id as CollectionId>::IdData: Clone,
         Wheres: Clone,
+        OptionalToMany<Key, From, To>: LinkFetch<
+            Output = Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>,
+        >,
     {
         type InitSplitForPreOp = ();
 
-        type PreOp = ();
+        type PreOp = FetchOne<From, OptionalToMany<Key, From, To>, Wheres>;
 
-        fn pre_op(&self, _: Self::InitSplitForPreOp, _: &Wheres) -> Self::PreOp {}
+        fn pre_op(&self, _: Self::InitSplitForPreOp, wheres: &Wheres) -> Self::PreOp {
+            FetchOne {
+                base: self.from.clone(),
+                links: self.clone(),
+                wheres: wheres.clone(),
+            }
+        }
     }
 
     impl<Key, From, To> DeleteLink for OptionalToMany<Key, From, To>
     where
         Self: Clone,
+        From: Collection,
         To: Collection,
+        To::OutputData: Clone,
+        <To::Id as CollectionId>::IdData: Clone,
     {
-        type Output = Option<<To::Id as CollectionId>::IdData>;
+        type Output =
+            Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
 
-        type PreOpOutput = ();
+        type PreOpOutput = Option<
+            LinkedOutput<
+                <From::Id as CollectionId>::IdData,
+                From::OutputData,
+                Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>,
+            >,
+        >;
 
         type PreOpSplitWheres = ();
 
-        type PreOpSplitTake = ();
+        type PreOpSplitTake =
+            Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
 
         fn split_pre_op(
             &self,
-            _: Self::PreOpOutput,
+            pre_op: Self::PreOpOutput,
         ) -> (Self::PreOpSplitWheres, Self::PreOpSplitTake) {
-            ((), ())
+            ((), pre_op.and_then(|linked| linked.links))
         }
 
         type InitSplitForWheres = ();
@@ -2071,18 +2283,151 @@ mod impl_for_delete {
 
         fn take_mut(
             &self,
-            links: <Self::DeleteReturnFromRow as crate::from_row::FromRowData>::RData,
-            _: &mut Self::PreOpSplitTake,
+            _: <Self::DeleteReturnFromRow as crate::from_row::FromRowData>::RData,
+            pre_op_split_take: &mut Self::PreOpSplitTake,
         ) -> Self::Output {
-            links
+            pre_op_split_take.take()
         }
 
         fn take_once(
             &self,
-            links: <Self::DeleteReturnFromRow as crate::from_row::FromRowData>::RData,
-            _: Self::PreOpSplitTake,
+            _: <Self::DeleteReturnFromRow as crate::from_row::FromRowData>::RData,
+            pre_op_split_take: Self::PreOpSplitTake,
         ) -> Self::Output {
-            links
+            pre_op_split_take
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct DeleteOptionalToManyLinked<Key, From, To> {
+        pub relation: OptionalToMany<Key, From, To>,
+        pub from_id: i64,
+    }
+
+    impl<Key, From, To> DeleteLinkSplit for DeleteOptionalToManyLinked<Key, From, To>
+    where
+        Self: Clone,
+        Key: Clone,
+        From: Clone + Collection,
+        To: Clone + Collection,
+        To::OutputData: Clone,
+        <To::Id as CollectionId>::IdData: Clone,
+    {
+        type Link = Self;
+        type InitSplitForPreOp = ();
+        fn init_split(self) -> (Self::Link, Self::InitSplitForPreOp, DeleteLinkData<()>) {
+            (self, (), DeleteLinkData { wheres: () })
+        }
+    }
+
+    impl<Wheres, Key, From, To> DeleteLinkPreOp<Wheres> for DeleteOptionalToManyLinked<Key, From, To>
+    where
+        Self: Clone,
+        Key: Clone,
+        From: Collection<Id: SingleColumnId + Identifier + Scoped> + TableNameExpression + Clone,
+        To: Clone + Collection<Id: SingleColumnId + Identifier> + TableNameExpression,
+        <From::Id as CollectionId>::IdData: ::std::convert::From<i64>,
+        To::OutputData: Clone,
+        <To::Id as CollectionId>::IdData: Clone,
+        Wheres: Clone,
+        OptionalToMany<Key, From, To>: LinkFetch<
+            Output = Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>,
+        >,
+    {
+        type InitSplitForPreOp = ();
+
+        type PreOp = FetchOne<
+            From,
+            OptionalToMany<Key, From, To>,
+            ColumnEqual<<From::Id as Scoped>::Scoped, <From::Id as CollectionId>::IdData>,
+        >;
+
+        fn pre_op(&self, _: Self::InitSplitForPreOp, _: &Wheres) -> Self::PreOp {
+            FetchOne {
+                base: self.relation.from.clone(),
+                links: self.relation.clone(),
+                wheres: ColumnEqual {
+                    col: self.relation.from.id().scoped(),
+                    eq: self.from_id.into(),
+                },
+            }
+        }
+    }
+
+    impl<Key, From, To> DeleteLink for DeleteOptionalToManyLinked<Key, From, To>
+    where
+        Self: Clone,
+        Key: Clone,
+        From: Clone + Collection,
+        To: Clone + Collection,
+        To::OutputData: Clone,
+        <To::Id as CollectionId>::IdData: Clone,
+    {
+        type Output =
+            Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
+
+        type PreOpOutput = Option<
+            LinkedOutput<
+                <From::Id as CollectionId>::IdData,
+                From::OutputData,
+                Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>,
+            >,
+        >;
+
+        type PreOpSplitWheres = ();
+
+        type PreOpSplitTake =
+            Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
+
+        fn split_pre_op(
+            &self,
+            pre_op: Self::PreOpOutput,
+        ) -> (Self::PreOpSplitWheres, Self::PreOpSplitTake) {
+            ((), pre_op.and_then(|linked| linked.links))
+        }
+
+        type InitSplitForWheres = ();
+
+        type Wheres = ();
+
+        fn wheres(&self, _: Self::InitSplitForWheres, _: Self::PreOpSplitWheres) -> Self::Wheres {}
+
+        type DeleteReturnExpression = AsIdentifier<OptionalToMany<Key, From, To>>;
+
+        fn delete_return_expression(&self) -> Self::DeleteReturnExpression {
+            AsIdentifier {
+                relation: self.relation.clone(),
+            }
+        }
+
+        type DeleteReturnFromRow = OneColumn<
+            AsIdentifier<OptionalToMany<Key, From, To>>,
+            Option<<To::Id as CollectionId>::IdData>,
+        >;
+
+        fn from_row(&self) -> Self::DeleteReturnFromRow {
+            OneColumn {
+                as_name: AsIdentifier {
+                    relation: self.relation.clone(),
+                },
+                as_type: PhantomData,
+            }
+        }
+
+        fn take_mut(
+            &self,
+            _: <Self::DeleteReturnFromRow as crate::from_row::FromRowData>::RData,
+            pre_op_split_take: &mut Self::PreOpSplitTake,
+        ) -> Self::Output {
+            pre_op_split_take.take()
+        }
+
+        fn take_once(
+            &self,
+            _: <Self::DeleteReturnFromRow as crate::from_row::FromRowData>::RData,
+            pre_op_split_take: Self::PreOpSplitTake,
+        ) -> Self::Output {
+            pre_op_split_take
         }
     }
 
@@ -2091,19 +2436,25 @@ mod impl_for_delete {
         use sqlx::Sqlite;
 
         use crate::{
+            collections::Collection,
             connect_in_memory::ConnectInMemory,
             expressions::ColumnEqual,
+            extentions::common_expressions::Scoped,
             links::Link,
-            operations::{LinkedOutput, Operation, delete::Delete},
-            test_module::{self, Todo, todo_members},
+            operations::{
+                CollectionOutput, LinkedOutput, Operation, delete::Delete,
+            },
+            test_module::{self, Category, Todo, category},
+            track_sqlx_query::watch_sqlx_calls,
         };
 
-        #[tokio::test]
+        #[tokio::test(flavor = "current_thread")]
         async fn test_delete_link() {
-            let mut pool = Sqlite::in_memory_connection().await;
+            watch_sqlx_calls(async |_, cache| {
+                let mut pool = Sqlite::in_memory_connection().await;
 
-            sqlx::query(
-                "
+                sqlx::query(
+                    "
                 CREATE TABLE IF NOT EXISTS Category (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     title TEXT NOT NULL
@@ -2119,36 +2470,54 @@ mod impl_for_delete {
                 INSERT INTO Category (title) VALUES ('category_1');
                 INSERT INTO Todo (title, done, description, fk_category_def) VALUES ('todo_1', true, 'description_1', 1);
                 ",
-            )
-            .execute(&mut pool)
-            .await
-            .unwrap();
+                )
+                .execute(&mut pool)
+                .await
+                .unwrap();
+                cache.clear();
 
-            let s = Delete {
-                base: test_module::todo,
-                wheres: ColumnEqual {
-                    col: todo_members::id,
-                    eq: 1,
-                },
-                links: <test_module::category as Link<test_module::todo>>::spec(
-                    test_module::category,
-                ),
-            };
-
-            let result = Operation::<Sqlite>::exec_operation(s, &mut pool).await;
-
-            pretty_assertions::assert_eq!(
-                result,
-                vec![LinkedOutput {
-                    id: 1,
-                    attributes: Todo {
-                        title: "todo_1".to_string(),
-                        done: true,
-                        description: Some("description_1".to_string()),
+                let s = Delete {
+                    base: test_module::todo,
+                    wheres: ColumnEqual {
+                        col: test_module::todo.id().scoped(),
+                        eq: 1,
                     },
-                    links: Some(1)
-                },]
-            );
+                    links: <category as Link<test_module::todo>>::spec(category),
+                };
+
+                let result = Operation::<Sqlite>::exec_operation(s, &mut pool).await;
+
+                pretty_assertions::assert_eq!(
+                    cache.drain(),
+                    vec![
+                        r#"SELECT "Todo"."id" AS "iid", "Todo"."title" AS "btitle", "Todo"."done" AS "bdone", "Todo"."description" AS "bdescription", "Category"."id" AS "lid", "Category"."title" AS "ltitle" FROM "Todo" LEFT JOIN "Category" ON "Todo"."fk_category_def" = "Category"."id" WHERE "Todo"."id" = $1;"#
+                            .to_string(),
+                        r#"DELETE FROM "Todo" WHERE "Todo"."id" = $1 RETURNING "id", "title", "done", "description", "fk_category_def";"#
+                            .to_string(),
+                    ]
+                );
+
+                pretty_assertions::assert_eq!(
+                    result,
+                    vec![LinkedOutput {
+                        id: 1,
+                        attributes: Todo {
+                            title: "todo_1".to_string(),
+                            done: true,
+                            description: Some("description_1".to_string()),
+                        },
+                        links: Some(CollectionOutput {
+                            id: 1,
+                            attributes: Category {
+                                title: "category_1".to_string(),
+                            },
+                        }),
+                    },]
+                );
+            })
+            .await;
         }
     }
 }
+
+pub use impl_for_delete::DeleteOptionalToManyLinked;

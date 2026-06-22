@@ -48,9 +48,21 @@ mod impl_std_traits_for_trait_objects {
 
 mod impl_my_types {
     use crate::{
-        gen_serde::{ListEncoding, ObjectEncoding, Serialize},
-        operations::{LinkedOutput, fetch_many::ManyOutput},
+        gen_serde::{ListEncoding, ObjectEncoding, Serialize, json_serialize_side::JsonAsString},
+        json_client::client_interface::{InsertManyOutput, InsertOneOutput},
+        operations::{LinkedOutput, fetch_many::ManyOutput, ManyLinkOutput},
     };
+
+    impl Serialize<JsonAsString> for InsertManyOutput
+    where
+        Vec<InsertOneOutput>: Serialize<JsonAsString>,
+    {
+        fn serialize(&self, ctx: &mut JsonAsString) {
+            let mut object = ObjectEncoding::serialize_start(ctx);
+            ObjectEncoding::serialize_pair(ctx, &mut object, "items", &self.items);
+            ObjectEncoding::serialize_end(ctx, object);
+        }
+    }
 
     impl<F> Serialize<F> for Box<dyn Serialize<F> + Send> {
         fn serialize(&self, ctx: &mut F) {
@@ -100,6 +112,19 @@ mod impl_my_types {
             let mut object = ctx.serialize_start();
             ctx.serialize_pair(&mut object, "items", &self.items);
             ctx.serialize_pair(&mut object, "next_item", &self.next_item);
+            ctx.serialize_end(object);
+        }
+    }
+
+    impl<F, T> Serialize<F> for ManyLinkOutput<T>
+    where
+        F: ObjectEncoding,
+        str: Serialize<F>,
+        Vec<T>: Serialize<F>,
+    {
+        fn serialize(&self, ctx: &mut F) {
+            let mut object = ctx.serialize_start();
+            ctx.serialize_pair(&mut object, "many_output", &self.many_output);
             ctx.serialize_end(object);
         }
     }
@@ -767,6 +792,31 @@ pub(crate) mod json_serialize_side {
         }
     }
 
+    impl Serialize<JsonAsString> for f64 {
+        fn serialize(&self, ctx: &mut JsonAsString) {
+            use std::fmt::Write;
+            let _ = write!(ctx.0, "{self}");
+        }
+    }
+
+    macro_rules! impl_serialize_json_vec {
+        ($t:ty) => {
+            impl Serialize<JsonAsString> for sqlx::types::Json<Vec<$t>>
+            where
+                $t: Serialize<JsonAsString>,
+            {
+                fn serialize(&self, ctx: &mut JsonAsString) {
+                    self.0.serialize(ctx);
+                }
+            }
+        };
+    }
+
+    impl_serialize_json_vec!(String);
+    impl_serialize_json_vec!(bool);
+    impl_serialize_json_vec!(i64);
+    impl_serialize_json_vec!(f64);
+
     impl ObjectEncoding for JsonAsString {
         /// `true` while the first key/value pair is still pending.
         type Object = bool;
@@ -1000,6 +1050,33 @@ pub(crate) mod json_format_side {
         i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize
     );
     impl_deserialize_json_float_for!(f32, f64);
+
+    macro_rules! impl_deserialize_json_vec {
+        ($t:ty) => {
+            impl DeserializeSpec for sqlx::types::Json<Vec<$t>> {
+                type Handler = ();
+            }
+
+            impl<'de> Deserialize<'de, JsonAsArcCursor> for sqlx::types::Json<Vec<$t>>
+            where
+                Vec<$t>: Deserialize<'de, JsonAsArcCursor>,
+            {
+                fn deserialize(
+                    _handler: Self::Handler,
+                    serialized: &mut JsonAsArcCursor,
+                ) -> Result<Self, <JsonAsArcCursor as Deserializer<'de>>::Err> {
+                    Ok(sqlx::types::Json(
+                        Vec::<$t>::deserialize((), serialized)?,
+                    ))
+                }
+            }
+        };
+    }
+
+    impl_deserialize_json_vec!(String);
+    impl_deserialize_json_vec!(bool);
+    impl_deserialize_json_vec!(i64);
+    impl_deserialize_json_vec!(f64);
 
     impl DeserializeSpec for () {
         type Handler = ();
@@ -1634,6 +1711,108 @@ pub(crate) mod json_format_side {
     }
 
     const CLOSE_BRACKET_BYTE: u8 = CLOSE_BRACKET as u8;
+
+    const PRETTY_INDENT: &str = "  ";
+
+    fn write_pretty_value(out: &mut String, s: &str, start: usize, depth: usize) -> Result<usize, String> {
+        let start = skip_ws_json(s, start);
+        let b = s.as_bytes();
+        if start >= b.len() {
+            return Err("unexpected end of input where value expected".into());
+        }
+        match b[start] {
+            OPEN_BRACE_BYTE => write_pretty_object(out, s, start, depth),
+            b'[' => write_pretty_array(out, s, start, depth),
+            _ => {
+                let end = end_of_json_value(s, start)?;
+                out.push_str(&s[start..end]);
+                Ok(end)
+            }
+        }
+    }
+
+    fn write_pretty_object(out: &mut String, s: &str, start: usize, depth: usize) -> Result<usize, String> {
+        let (map, after) = parse_json_object_at(s, start)?;
+        out.push('{');
+        if map.entries.is_empty() {
+            out.push('}');
+            return Ok(after);
+        }
+
+        out.push('\n');
+        for (idx, (_, key_range, value_range)) in map.entries.iter().enumerate() {
+            out.push_str(&PRETTY_INDENT.repeat(depth + 1));
+            out.push_str(&s[key_range.start..key_range.end]);
+            out.push(':');
+
+            let value_start = skip_ws_json(s, value_range.start);
+            let is_complex = matches!(
+                s.as_bytes().get(value_start),
+                Some(&OPEN_BRACE_BYTE) | Some(b'[')
+            );
+            if is_complex {
+                out.push('\n');
+                out.push_str(&PRETTY_INDENT.repeat(depth + 1));
+            } else {
+                out.push(' ');
+            }
+
+            write_pretty_value(out, s, value_range.start, depth + 1)?;
+            if idx + 1 < map.entries.len() {
+                out.push(',');
+            }
+            out.push('\n');
+        }
+
+        out.push_str(&PRETTY_INDENT.repeat(depth));
+        out.push('}');
+        Ok(after)
+    }
+
+    fn write_pretty_array(out: &mut String, s: &str, start: usize, depth: usize) -> Result<usize, String> {
+        let mut i = skip_ws_json(s, start);
+        if s.as_bytes().get(i) != Some(&b'[') {
+            return Err(format!("expected '[' at byte {i}"));
+        }
+        i += 1;
+        i = skip_ws_json(s, i);
+
+        out.push('[');
+        if s.as_bytes().get(i) == Some(&b']') {
+            out.push(']');
+            return Ok(i + 1);
+        }
+
+        out.push('\n');
+        loop {
+            out.push_str(&PRETTY_INDENT.repeat(depth + 1));
+            i = write_pretty_value(out, s, i, depth + 1)?;
+            i = skip_ws_json(s, i);
+            match s.as_bytes().get(i) {
+                Some(b',') => {
+                    out.push(',');
+                    out.push('\n');
+                    i += 1;
+                }
+                Some(b']') => {
+                    out.push('\n');
+                    out.push_str(&PRETTY_INDENT.repeat(depth));
+                    out.push(']');
+                    return Ok(i + 1);
+                }
+                _ => {
+                    return Err(format!("expected comma or ']' after array value at byte {i}"));
+                }
+            }
+        }
+    }
+
+    pub(crate) fn format_json_pretty(input: &str) -> Result<String, String> {
+        let start = skip_ws_json(input, 0);
+        let mut out = String::new();
+        write_pretty_value(&mut out, input, start, 0)?;
+        Ok(out)
+    }
 }
 
 /// Deserialize `Into` from `from` using `handler`, then verify no trailing input remains.
@@ -1650,6 +1829,24 @@ where
     let value = Into::deserialize(handler, &mut serialized)?;
     From::terminate(serialized)?;
     Ok(value)
+}
+
+/// Pretty-print JSON for readable test diffs.
+pub fn pretty_json(input: &str) -> String {
+    use std::sync::Arc;
+
+    let partial: json_format_side::PartialDeserialize = deserialize(
+        Arc::from(input.to_string()),
+        (),
+        json_format_side::JsonFormat,
+    )
+    .unwrap_or_else(|err| {
+        panic!("expected valid JSON in test assertion: {err}: {input:?}");
+    });
+
+    json_format_side::format_json_pretty(partial.0.as_str()).unwrap_or_else(|err| {
+        panic!("failed to pretty-print JSON: {err}: {input:?}");
+    })
 }
 
 pub trait IntoSerializedString<Format> {

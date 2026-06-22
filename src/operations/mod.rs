@@ -93,6 +93,18 @@ pub struct CollectionOutput<Id, C> {
     pub attributes: C,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ManyLinkOutput<T> {
+    pub many_output: Vec<T>,
+}
+
+impl<T> From<Vec<T>> for ManyLinkOutput<T> {
+    fn from(many_output: Vec<T>) -> Self {
+        Self { many_output }
+    }
+}
+
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct IdOutput<Id> {
