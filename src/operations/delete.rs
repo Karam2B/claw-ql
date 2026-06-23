@@ -2,12 +2,16 @@ use crate::{
     collections::{Collection, CollectionId},
     database_extention::DatabaseExt,
     execute::Executable,
-    extentions::common_expressions::{Identifier, TableNameExpression},
     fix_executor::ExecutorTrait,
     from_row::{FromRowAlias, FromRowData},
-    operations::{LinkedOutput, Operation, OperationOutput},
-    query_builder::{Expression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat},
-    statements::delete_statement::DeleteStatement,
+    operations::{
+        LinkedOutput, Operation, OperationOutput,
+        operations_expressions_crossover::{ExpressionsForOperation, TableExpressions},
+    },
+    sqlx_query_builder::{
+        Expression, ManyExpressions, StatementBuilder, basic_expressions::ManyFlat,
+        statements::delete_statement::DeleteStatement,
+    },
 };
 
 pub struct Delete<Base, Wheres, Links> {
@@ -137,7 +141,11 @@ where
     Links: DeleteLink,
 {
     type Output = Vec<
-        LinkedOutput<<Base::Id as CollectionId>::IdData, <Base as Collection>::OutputData, Links::Output>,
+        LinkedOutput<
+            <Base::Id as CollectionId>::IdData,
+            <Base as Collection>::OutputData,
+            Links::Output,
+        >,
     >;
 }
 
@@ -149,12 +157,14 @@ where
     PL: Send,
     Base: Send,
     Base: Collection,
-    Base: Identifier<Identifier: for<'q> ManyExpressions<'q, S>>,
-    Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
+    Base: TableExpressions<
+            Identifier: for<'q> ManyExpressions<'q, S>,
+            PascalCase: for<'q> Expression<'q, S>,
+        >,
     Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::OutputData>,
     Base::OutputData: Send,
     Base::Id: Send + CollectionId<IdData: Send>,
-    Base::Id: Identifier<Identifier: for<'q> ManyExpressions<'q, S>>,
+    Base::Id: ExpressionsForOperation<Identifier: for<'q> ManyExpressions<'q, S>>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row, RData = <Base::Id as CollectionId>::IdData>,
     Wheres: Send,
     Wheres: for<'q> ManyExpressions<'q, S>,
@@ -195,7 +205,7 @@ where
             let id = self.base.id();
 
             let (stmt, args) = StatementBuilder::<S>::new(DeleteStatement {
-                table_name: self.base.table_name_expression(),
+                table_name: self.base.table_name_pascal_case(),
                 wheres: ManyFlat((
                     self.wheres,
                     link.wheres(link_data.wheres, pre_op_split_wheres),
@@ -256,10 +266,13 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::expressions::ColumnEqual;
+    use crate::operations::operations_expressions_crossover::ExpressionsForOperation;
     use crate::operations::{LinkedOutput, Operation};
-    use crate::test_module::{self, *};
-    use crate::{connect_in_memory::ConnectInMemory, operations::delete::Delete};
+    use crate::sqlx_query_builder::basic_expressions::ColumnEqual;
+    use crate::test_module::*;
+    use crate::{
+        collections::Collection, connect_in_memory::ConnectInMemory, operations::delete::Delete,
+    };
     use sqlx::{Row, Sqlite};
 
     #[tokio::test]
@@ -283,11 +296,8 @@ mod test {
 
         let output = Operation::<Sqlite>::exec_operation(
             Delete {
-                base: test_module::todo,
-                wheres: ColumnEqual {
-                    col: todo_members::id,
-                    eq: 2,
-                },
+                base: TodoHandler,
+                wheres: ColumnEqual { col: "id", eq: 2 },
                 links: (),
             },
             &mut pool,

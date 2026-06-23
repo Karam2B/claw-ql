@@ -87,7 +87,7 @@ pub mod common_expressions {
                 FromRowAlias, FromRowData, FromRowError, RowPostAliased, RowPreAliased,
                 RowTwoAliased,
             },
-            query_builder::{ManyBoxedExpressions, ManyExpressions},
+            sqlx_query_builder::{ManyExpressions, trait_objects::ManyBoxedExpressions},
         };
 
         pub trait DynFromRow<R> {
@@ -233,7 +233,7 @@ pub mod common_expressions {
         use sqlx::Database;
 
         use crate::from_row::{
-            FromRowAlias, FromRowData, FromRowError, RowPreAliased, RowTwoAliased,
+            FromRowAlias, FromRowData, FromRowError, RowPostAliased, RowPreAliased, RowTwoAliased,
         };
 
         pub trait RawFromRow<S: Database> {
@@ -284,37 +284,25 @@ pub mod common_expressions {
         impl<'b, 'r, S: Database> FromRowAlias<'r, <S as Database>::Row>
             for Box<dyn RawFromRow<S> + Send + 'b>
         {
-            fn no_alias(
-                &self,
-                row: &'r S::Row,
-            ) -> Result<Self::RData, crate::prelude::from_row_alias::FromRowError> {
+            fn no_alias(&self, row: &'r S::Row) -> Result<Self::RData, FromRowError> {
                 (&**self).dyn_no_alias(row)
             }
 
-            fn pre_alias(
-                &self,
-                row: crate::prelude::from_row_alias::RowPreAliased<'r, S::Row>,
-            ) -> Result<Self::RData, crate::prelude::from_row_alias::FromRowError>
+            fn pre_alias(&self, row: RowPreAliased<'r, S::Row>) -> Result<Self::RData, FromRowError>
             where
                 S::Row: sqlx::prelude::Row,
             {
                 (&**self).dyn_pre_alias(row)
             }
 
-            fn post_alias(
-                &self,
-                _: crate::prelude::from_row_alias::RowPostAliased<'r, S::Row>,
-            ) -> Result<Self::RData, crate::prelude::from_row_alias::FromRowError>
+            fn post_alias(&self, _: RowPostAliased<'r, S::Row>) -> Result<Self::RData, FromRowError>
             where
                 S::Row: sqlx::prelude::Row,
             {
                 panic!("to be deprecated")
             }
 
-            fn two_alias(
-                &self,
-                row: crate::prelude::from_row_alias::RowTwoAliased<'r, S::Row>,
-            ) -> Result<Self::RData, crate::prelude::from_row_alias::FromRowError>
+            fn two_alias(&self, row: RowTwoAliased<'r, S::Row>) -> Result<Self::RData, FromRowError>
             where
                 S::Row: sqlx::prelude::Row,
             {
@@ -417,8 +405,8 @@ pub mod common_expressions {
 
 pub mod named_bind {
     use crate::{
-        expressions::single_col_expressions::ScopedCol,
         extentions::common_expressions::{Identifier, Scoped, V0OnInsert},
+        sqlx_query_builder::basic_expressions::ScopedColumn,
     };
 
     pub struct NamedBind<Table, Name, Value> {
@@ -438,9 +426,9 @@ pub mod named_bind {
     }
 
     impl<T: Clone, Name: Clone, V> Scoped for NamedBind<T, Name, V> {
-        type Scoped = ScopedCol<T, Name>;
-        fn scoped(&self) -> ScopedCol<T, Name> {
-            ScopedCol {
+        type Scoped = ScopedColumn<T, Name>;
+        fn scoped(&self) -> Self::Scoped {
+            ScopedColumn {
                 table: self.table.clone(),
                 col: self.name.clone(),
             }
@@ -448,7 +436,7 @@ pub mod named_bind {
     }
 
     impl<T: Clone, Name: Clone, V> Scoped for Vec<NamedBind<T, Name, V>> {
-        type Scoped = Vec<ScopedCol<T, Name>>;
+        type Scoped = Vec<ScopedColumn<T, Name>>;
         fn scoped(&self) -> Self::Scoped {
             self.iter().map(|e| e.scoped()).collect()
         }

@@ -603,7 +603,7 @@ mod test {
     use crate::{
         connect_in_memory::ConnectInMemory,
         from_row::{FromRowAlias, RowPostAliased, RowPreAliased},
-        test_module::{Category, category},
+        test_module::{Category, CategoryHandler},
     };
 
     #[tokio::test]
@@ -621,7 +621,7 @@ mod test {
         .await
         .unwrap();
 
-        let s = category
+        let s = CategoryHandler
             .pre_alias(RowPreAliased::new(&row, "cat_"))
             .unwrap();
 
@@ -632,7 +632,9 @@ mod test {
             },
         );
 
-        let s = category.post_alias(RowPostAliased::new(&row, "_")).unwrap();
+        let s = CategoryHandler
+            .post_alias(RowPostAliased::new(&row, "_"))
+            .unwrap();
 
         assert_eq!(
             s,
@@ -641,7 +643,7 @@ mod test {
             },
         );
 
-        let s = category.no_alias(&row).unwrap();
+        let s = CategoryHandler.no_alias(&row).unwrap();
 
         assert_eq!(
             s,

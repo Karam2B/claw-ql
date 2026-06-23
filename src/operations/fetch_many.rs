@@ -2,15 +2,19 @@ use crate::{
     collections::{Collection, CollectionId},
     database_extention::DatabaseExt,
     execute::Executable,
-    expressions::larger_than_or_equal::LargerThanOrEqual,
-    extentions::common_expressions::{Aliased, Scoped, V0OnInsert},
     fix_executor::ExecutorTrait,
     from_row::{FromRowAlias, FromRowData, RowPreAliased},
-    operations::{LinkedOutput, Operation, OperationOutput},
-    query_builder::{
-        Bind, Expression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat,
+    operations::{
+        LinkedOutput, Operation, OperationOutput,
+        operations_expressions_crossover::{
+            ExpressionsForOperation, OnInsert, SelfPrescribedInsert,
+        },
     },
-    statements::select_statement::SelectStatement,
+    sqlx_query_builder::{
+        ManyExpressions, StatementBuilder,
+        basic_expressions::{Bind, ManyColumnsLargerOrEqual, ManyFlat},
+        statements::select_statement::SelectStatement,
+    },
 };
 use sqlx::{Encode, Type};
 
@@ -74,14 +78,24 @@ pub trait LinkFetch {
         Self::Op: OperationOutput;
 }
 
-mod functional_impls {
+mod std_impls {
     use super::LinkFetch;
-    use crate::from_row::FromRowData;
+    use crate::from_row::{RowPostAliased, RowPreAliased, RowTwoAliased};
+    use crate::{
+        from_row::{FromRowAlias, FromRowData, FromRowError},
+        operations::operations_expressions_crossover::ExpressionsForOperation,
+    };
+    use sqlx::Row;
+
+    pub struct Empty;
 
     impl LinkFetch for () {
         type Output = ();
-        type SelectItems = ();
-        fn non_aggregating_select_items(&self) -> Self::SelectItems {}
+        // maybe should be replaced by ()
+        type SelectItems = Empty;
+        fn non_aggregating_select_items(&self) -> Self::SelectItems {
+            Empty
+        }
 
         type Join = ();
         fn non_duplicating_join_expressions(&self) -> Self::Join {}
@@ -114,6 +128,47 @@ mod functional_impls {
             _: &mut <Self::Op as crate::operations::OperationOutput>::Output,
         ) -> Self::Output {
             item
+        }
+    }
+
+    impl ExpressionsForOperation for Empty {
+        type Identifier = ();
+        fn identifier(&self) -> Self::Identifier {
+            ()
+        }
+        type Scoped = ();
+        fn scoped(&self) -> Self::Scoped {
+            ()
+        }
+        type ScopedAliased = ();
+        fn scoped_aliased(&self, _: &'static str) -> Self::ScopedAliased {
+            ()
+        }
+        type NumScopedAliased = ();
+        fn num_scoped_aliased(&self, _: usize, _: &'static str) -> Self::NumScopedAliased {
+            ()
+        }
+    }
+
+    impl FromRowData for Empty {
+        type RData = ();
+    }
+
+    impl<'r, R> FromRowAlias<'r, R> for Empty
+    where
+        R: Row,
+    {
+        fn no_alias(&self, _: &'r R) -> Result<Self::RData, FromRowError> {
+            Ok(())
+        }
+        fn pre_alias(&self, _: RowPreAliased<'r, R>) -> Result<Self::RData, FromRowError> {
+            Ok(())
+        }
+        fn post_alias(&self, _: RowPostAliased<'r, R>) -> Result<Self::RData, FromRowError> {
+            Ok(())
+        }
+        fn two_alias(&self, _: RowTwoAliased<'r, R>) -> Result<Self::RData, FromRowError> {
+            Ok(())
         }
     }
 }
@@ -158,38 +213,48 @@ where
     Wheres: for<'q> ManyExpressions<'q, S>,
     Links: Send + LinkFetch<Output: Send>,
     Links::Wheres: for<'q> ManyExpressions<'q, S>,
-    Links::SelectItems: Send + Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
+    Links::SelectItems:
+        Send + ExpressionsForOperation<ScopedAliased: for<'q> ManyExpressions<'q, S>>,
+    // Links::SelectItems: Send + Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
     Links::SelectItems: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
     Links::Join: for<'q> ManyExpressions<'q, S>,
     Links::Op: Operation<S>,
     Links::OpInput: Send,
     Base: Collection<OutputData: Send, Id: Send>,
-    Base: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
+    Base: ExpressionsForOperation<ScopedAliased: for<'q> ManyExpressions<'q, S>>,
+    // Base: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
     Base: FromRowData<RData = Base::OutputData>,
     Base: for<'r> FromRowAlias<'r, S::Row>,
     Base::Id: FromRowData<RData = <Base::Id as CollectionId>::IdData>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row>,
     Base::Id: CollectionId<IdData: Send + for<'q> Encode<'q, S> + Type<S>>,
-    Base::Id: Scoped<Scoped: for<'q> Expression<'q, S>>,
-    Base::Id: Aliased<Aliased: for<'q> Expression<'q, S>>,
+    Base::Id: ExpressionsForOperation<
+            ScopedAliased: for<'q> ManyExpressions<'q, S>,
+            Scoped: for<'q> ManyExpressions<'q, S>,
+        >,
+    // Base::Id: Scoped<Scoped: for<'q> Expression<'q, S>>,
+    // Base::Id: Aliased<Aliased: for<'q> Expression<'q, S>>,
     Links: LinkFetch<Output: Send>,
     i64: for<'q> Encode<'q, S> + Type<S>,
     OrderBy: Send + Clone,
-    OrderBy: Scoped<Scoped: for<'q> ManyExpressions<'q, S>>,
+    // OrderBy: Scoped<Scoped: for<'q> ManyExpressions<'q, S>>,
+    OrderBy: ExpressionsForOperation<Scoped: for<'q> ManyExpressions<'q, S>>,
     OrderBy: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
     First: Send,
-    First: Scoped<Scoped: for<'q> ManyExpressions<'q, S>>,
-    First: V0OnInsert<InsertInput = (), InsertExpression: for<'q> ManyExpressions<'q, S>>,
+    First: SelfPrescribedInsert<
+            InsertValue: Send + for<'q> ManyExpressions<'q, S>,
+            InsertId: Send + for<'q> ManyExpressions<'q, S>,
+        >,
 {
     async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output {
         // let db = S::singleton();
         let id = self.base.id();
         let link_items = self.links.non_aggregating_select_items();
-        let query_builder = StatementBuilder::<'_, S>::new(SelectStatement {
+        let query_builder = StatementBuilder::<S>::new(SelectStatement {
             select_items: ManyFlat((
-                id.aliased("i"),
-                self.base.aliased("b"),
-                link_items.aliased("l"),
+                id.scoped_aliased("i"),
+                self.base.scoped_aliased("b"),
+                link_items.scoped_aliased("l"),
             )),
             from: self.base.table_name().to_string(),
             joins: self.links.non_duplicating_join_expressions(),
@@ -198,14 +263,17 @@ where
             wheres: ManyFlat((
                 self.wheres,
                 self.links.where_expressions(),
-                self.cursor_first_item.map(|(id, first)| {
-                    let idents = first.scoped();
-                    let first = first.on_insert(());
-                    LargerThanOrEqual {
-                        id: ManyFlat((idents, self.base.id().scoped())),
-                        values: ManyFlat((first, Bind(id))),
-                    }
-                }),
+                self.cursor_first_item
+                    .map(|(id, first)| {
+                        let (idents, values) = first.on_insert();
+                        // let idents = first.scoped();
+                        // let first = first.on_insert(());
+                        ManyColumnsLargerOrEqual {
+                            ids: ManyFlat((idents, self.base.id().scoped())),
+                            values: ManyFlat((values, Bind(id))),
+                        }
+                    })
+                    .unwrap(),
             )),
             limit: Bind(self.limit + 1),
         });
@@ -282,12 +350,12 @@ mod test {
 
     use crate::{
         connect_in_memory::ConnectInMemory,
-        extentions::common_expressions::V0OnInsert,
         operations::{
             LinkedOutput, Operation,
             fetch_many::{FetchMany, ManyOutput},
+            operations_expressions_crossover::NamedBind,
         },
-        test_module::{self, Todo, todo_members},
+        test_module::{Todo, TodoHandler, todo_members},
     };
 
     #[tokio::test]
@@ -318,14 +386,12 @@ mod test {
 
         let output = Operation::<Sqlite>::exec_operation(
             FetchMany {
-                base: test_module::todo,
+                base: TodoHandler,
                 wheres: (),
                 links: (),
                 cursor_order_by: todo_members::title,
-                cursor_first_item: Some((
-                    4,
-                    todo_members::title.on_insert(String::from("non_unique")),
-                )),
+                // cursor_first_item: None::<(i64, ())>,
+                cursor_first_item: Some((4, todo_members::title::bind(String::from("non_unique")))),
                 limit: 2,
             },
             &mut conn,
@@ -358,275 +424,5 @@ mod test {
                 next_item: Some((6, String::from("sixth_todo"))),
             }
         );
-    }
-}
-
-#[claw_ql_macros::skip]
-mod deprecate_vec_impls {
-
-    use super::LinkFetchMany;
-    use crate::collections::CollectionId;
-    use crate::from_row::FromRowData;
-    use crate::operations::OperationOutput;
-    use crate::operations::fetch_many_cursor_multi_col::LinkFetchManyTakeId;
-    use crate::operations::fetch_many_cursor_multi_col::functional_impls::select_items_supported_in_vec::VecCollection;
-
-    mod select_items_supported_in_vec {
-        use std::ops::Not;
-
-        use sqlx::Row;
-
-        use crate::{
-            expressions::multi_col_expressions_stack_heavy::AliasedCols,
-            from_row::{FromRowAlias, FromRowData, RowTwoAliased},
-            query_builder::{
-                IsOpExpression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat,
-            },
-        };
-
-        impl IsOpExpression for (usize, AliasedCols<'static>) {
-            fn is_op(&self) -> bool {
-                self.1.cols.is_empty().not()
-            }
-        }
-
-        impl<'q, S> ManyExpressions<'q, S> for (usize, AliasedCols<'static>) {
-            fn expression(
-                self,
-                start: &'static str,
-                join: &'static str,
-                ctx: &mut StatementBuilder<'q, S>,
-            ) where
-                S: crate::database_extention::DatabaseExt,
-            {
-                let len = self.1.cols.len();
-                if len == 0 {
-                    return;
-                }
-                ctx.syntax(start);
-                for (i, each) in self.1.cols.into_iter().enumerate() {
-                    ctx.sanitize(self.1.table);
-                    ctx.syntax(&".");
-                    ctx.sanitize(each);
-                    ctx.syntax(&" AS ");
-                    ctx.sanitize_strings((self.1.alias, self.0, *each));
-                    if i < len - 1 {
-                        ctx.syntax(join);
-                    }
-                }
-            }
-        }
-
-        pub struct DynamicAliasedCols {
-            pub table: String,
-            pub cols: Vec<String>,
-            pub alias: String,
-        }
-
-        impl IsOpExpression for (usize, DynamicAliasedCols) {
-            fn is_op(&self) -> bool {
-                self.1.cols.is_empty().not()
-            }
-        }
-
-        impl<'q, S> ManyExpressions<'q, S> for (usize, DynamicAliasedCols) {
-            fn expression(
-                self,
-                start: &'static str,
-                join: &'static str,
-                ctx: &mut StatementBuilder<'q, S>,
-            ) where
-                S: crate::database_extention::DatabaseExt,
-            {
-                let len = self.1.cols.len();
-                if len == 0 {
-                    return;
-                }
-                ctx.syntax(start);
-                for (i, each) in self.1.cols.into_iter().enumerate() {
-                    ctx.sanitize(self.1.table.as_str());
-                    ctx.syntax(&".");
-                    ctx.sanitize(each.as_str());
-                    ctx.syntax(&" AS ");
-                    ctx.sanitize_strings((self.1.alias.as_str(), self.0, each.as_str()));
-                    if i < len - 1 {
-                        ctx.syntax(join);
-                    }
-                }
-            }
-        }
-
-        pub struct VecCollection<T> {
-            pub vec: Vec<T>,
-        }
-        // T: Into<DynamicAliasedCols> + Clone,
-
-        impl<T> IsOpExpression for VecCollection<T>
-        where
-            T: Into<DynamicAliasedCols> + Clone,
-        {
-            fn is_op(&self) -> bool {
-                self.vec.is_empty().not()
-            }
-        }
-
-        impl<'q, S, T> ManyExpressions<'q, S> for VecCollection<T>
-        where
-            T: Into<DynamicAliasedCols> + 'q + Clone,
-            T: ManyExpressions<'q, S>,
-        {
-            fn expression(
-                self,
-                start: &'static str,
-                join: &'static str,
-                ctx: &mut StatementBuilder<'q, S>,
-            ) where
-                S: crate::database_extention::DatabaseExt,
-            {
-                let ac = self
-                    .vec
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, e)| (i, e.into()))
-                    .collect::<Vec<_>>();
-
-                ManyExpressions::expression(ManyFlat(ac), start, join, ctx);
-            }
-        }
-
-        impl IsOpExpression for VecCollection<AliasedCols<'static>> {
-            fn is_op(&self) -> bool {
-                self.vec.is_empty().not()
-            }
-        }
-
-        impl<'q, S> ManyExpressions<'q, S> for VecCollection<AliasedCols<'static>> {
-            fn expression(
-                self,
-                start: &'static str,
-                join: &'static str,
-                ctx: &mut StatementBuilder<'q, S>,
-            ) where
-                S: crate::database_extention::DatabaseExt,
-            {
-                ManyExpressions::expression(
-                    ManyFlat(self.vec.into_iter().enumerate().collect::<Vec<_>>()),
-                    start,
-                    join,
-                    ctx,
-                );
-            }
-        }
-
-        impl<T: FromRowData> FromRowData for VecCollection<T> {
-            type RData = Vec<T::RData>;
-        }
-
-        impl<'r, R, T> FromRowAlias<'r, R> for VecCollection<T>
-        where
-            R: Row,
-            T: FromRowAlias<'r, R>,
-        {
-            fn no_alias(&self, _: &'r R) -> Result<Self::RData, crate::from_row::FromRowError> {
-                todo!()
-            }
-
-            fn pre_alias(
-                &self,
-                row: crate::from_row::RowPreAliased<'r, R>,
-            ) -> Result<Self::RData, crate::from_row::FromRowError>
-            where
-                R: Row,
-            {
-                let mut ret = vec![];
-                for (i, each) in self.vec.iter().enumerate() {
-                    let s = each.two_alias(two_alias {
-                        row: row.row,
-                        str_alias: row.alias,
-                        num_alias: Some(i),
-                    });
-                    if s.is_err() {
-                        return Err(s.err().expect("bug: expected is_err"));
-                    }
-                    ret.push(s.unwrap());
-                }
-                Ok(ret)
-            }
-
-            fn post_alias(
-                &self,
-                _: crate::from_row::RowPostAliased<'r, R>,
-            ) -> Result<Self::RData, crate::from_row::FromRowError>
-            where
-                R: Row,
-            {
-                todo!()
-            }
-
-            fn two_alias(
-                &self,
-                _: crate::from_row::RowTwoAliased<'r, R>,
-            ) -> Result<Self::RData, crate::from_row::FromRowError>
-            where
-                R: Row,
-            {
-                panic!(
-                    "bug: two_alias should never be called output of VecCollection associated imps"
-                );
-            }
-        }
-
-        // another impl for DynamicLink::SelectItems whatever that is
-    }
-
-    impl<T, I> LinkFetchManyTakeId<I> for Vec<T>
-    where
-        T: LinkFetchManyTakeId<I>,
-    {
-        fn take(
-            &self,
-            _: &I::IdData,
-            _: &mut Vec<<Self::SelectItems as FromRowData>::RData>,
-            _: &mut <Self::PostOperation as OperationOutput>::Output,
-        ) -> Self::Output
-        where
-            I: CollectionId,
-            Self::PostOperation: OperationOutput,
-            Self::SelectItems: FromRowData,
-        {
-            todo!()
-        }
-    }
-
-    impl<T> LinkFetch for Vec<T>
-    where
-        T: LinkFetch,
-    {
-        type Output = Vec<T::Output>;
-        type SelectItems = VecCollection<T::SelectItems>;
-        fn non_aggregating_select_items(&self) -> Self::SelectItems {
-            let s: Vec<_> = self
-                .iter()
-                .map(|e| e.non_aggregating_select_items())
-                .collect();
-
-            VecCollection { vec: s }
-        }
-        type Join = ();
-        fn non_duplicating_join(&self) -> Self::Join {
-            todo!()
-        }
-        type Wheres = ();
-        fn wheres(&self) -> Self::Wheres {
-            todo!()
-        }
-        type PostOperation = ();
-
-        fn post_select(&self) -> Self::PostOperation
-        where
-            Self::SelectItems: FromRowData,
-        {
-            todo!()
-        }
     }
 }

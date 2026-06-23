@@ -1,7 +1,7 @@
 mod impl_connect_in_memory {
     use crate::connect_in_memory::ConnectInMemory;
-    use sqlx::{ConnectOptions, Pool, Sqlite, sqlite::SqliteConnectOptions};
     use sqlx::pool::PoolOptions;
+    use sqlx::{ConnectOptions, Pool, Sqlite, sqlite::SqliteConnectOptions};
 
     impl ConnectInMemory for Sqlite {
         async fn in_memory_connection() -> <Self as sqlx::Database>::Connection {
@@ -26,7 +26,7 @@ mod impl_connect_in_memory {
 mod impl_database_extention {
     use crate::{
         database_extention::DatabaseExt,
-        query_builder::{Expression, OpExpression},
+        sqlx_query_builder::{Expression, OpExpression, StatementBuilder},
     };
     use sqlx::Sqlite;
 
@@ -67,10 +67,8 @@ mod impl_database_extention {
 
     impl OpExpression for IdExpression {}
     impl<'q> Expression<'q, Sqlite> for IdExpression {
-        fn expression(
-            self,
-            ctx: &mut crate::prelude::macro_derive_collection::StatementBuilder<'q, Sqlite>,
-        ) where
+        fn expression(self, ctx: &mut StatementBuilder<'q, Sqlite>)
+        where
             Sqlite: DatabaseExt,
         {
             ctx.syntax(&"\"id\" INTEGER PRIMARY KEY AUTOINCREMENT");

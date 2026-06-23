@@ -2,12 +2,17 @@ use crate::{
     collections::{Collection, CollectionId},
     database_extention::DatabaseExt,
     execute::Executable,
-    extentions::common_expressions::{Aliased, TableNameExpression},
     fix_executor::ExecutorTrait,
     from_row::{FromRowAlias, RowPreAliased},
-    operations::{LinkedOutput, Operation, OperationOutput, fetch_many::LinkFetch},
-    query_builder::{Expression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat},
-    statements::select_statement::SelectStatement,
+    operations::{
+        LinkedOutput, Operation, OperationOutput,
+        fetch_many::LinkFetch,
+        operations_expressions_crossover::{ExpressionsForOperation, TableExpressions},
+    },
+    sqlx_query_builder::{
+        Expression, ManyExpressions, StatementBuilder, basic_expressions::ManyFlat,
+        statements::select_statement::SelectStatement,
+    },
 };
 
 pub struct FetchOne<Base, Links, Wheres> {
@@ -32,15 +37,21 @@ where
     Base: Collection,
     Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::OutputData>,
     Base::Id: Send + CollectionId<IdData: Send>,
-    Base::Id: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
+    Base::Id: ExpressionsForOperation<ScopedAliased: for<'q> ManyExpressions<'q, S>>,
+    // Base::Id: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row, RData = <Base::Id as CollectionId>::IdData>,
     Base::OutputData: Send,
-    Base: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
-    Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
+    Base: TableExpressions<
+            ScopedAliased: for<'q> ManyExpressions<'q, S>,
+            PascalCase: for<'q> Expression<'q, S>,
+        >,
+    // Base: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
+    // Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
     Links: Send,
     Links: LinkFetch,
     Links::SelectItems: Send,
-    Links::SelectItems: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
+    // Links::SelectItems: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
+    Links::SelectItems: ExpressionsForOperation<ScopedAliased: for<'q> ManyExpressions<'q, S>>,
     Links::SelectItems: for<'r> FromRowAlias<'r, S::Row, RData: Send>,
     Links::Output: Send,
     Links::Join: for<'q> ManyExpressions<'q, S>,
@@ -61,11 +72,11 @@ where
             let (stmt, args) = StatementBuilder::<'_, S>::new(SelectStatement {
                 select_items: ManyFlat((
                     //
-                    id.aliased("i"),
-                    self.base.aliased("b"),
-                    lsi.aliased("l"),
+                    id.scoped_aliased("i"),
+                    self.base.scoped_aliased("b"),
+                    lsi.scoped_aliased("l"),
                 )),
-                from: self.base.table_name_expression(),
+                from: self.base.table_name_pascal_case(),
                 joins: self.links.non_duplicating_join_expressions(),
                 wheres: ManyFlat((self.wheres, self.links.where_expressions())),
                 group_by: (),

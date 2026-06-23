@@ -13,7 +13,7 @@ pub mod dynamic_migrate {
     use crate::{
         database_extention::DatabaseExt,
         on_migrate::OnMigrate,
-        query_builder::{Expression, StatementBuilder},
+        sqlx_query_builder::{Expression, StatementBuilder},
     };
 
     pub trait DynamicOnMigrate<S: Database> {

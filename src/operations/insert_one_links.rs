@@ -17,9 +17,9 @@ use crate::{
     },
     operations::{
         OperationOutput,
-        insert_one::{ConstraintViolation, InsertLinkConsumeData, InsertLinkData, InsertOneLink},
+        insert::{ConstraintViolation, InsertLinkConsumeData, InsertLinkData, InsertOneLink},
     },
-    query_builder::functional_expr::ManyFlat,
+    sqlx_query_builder::functional_expr::ManyFlat,
 };
 
 type DynCollection = Arc<DynamicCollection<Sqlite>>;
@@ -109,14 +109,19 @@ impl InsertOneLink for DatedSet<DynCollection> {
     fn insert_names(&self) -> Self::InsertNames {}
     type InsertReturning = <TimestampSelectItems<std::sync::Arc<str>> as Aliased>::Aliased;
     fn insert_returning(&self) -> Self::InsertReturning {
-        TimestampSelectItems(std::sync::Arc::clone(&self.collection.collection_name.pascal_case)).aliased("")
+        TimestampSelectItems(std::sync::Arc::clone(
+            &self.collection.collection_name.pascal_case,
+        ))
+        .aliased("")
     }
     type InsertValuesData = ();
     type InsertValues = ();
     fn insert_value(&self, _: Self::InsertValuesData, _: ()) -> Self::InsertValues {}
     type FromRow = TimestampSelectItems<std::sync::Arc<str>>;
     fn from_row(&self) -> Self::FromRow {
-        TimestampSelectItems(std::sync::Arc::clone(&self.collection.collection_name.pascal_case))
+        TimestampSelectItems(std::sync::Arc::clone(
+            &self.collection.collection_name.pascal_case,
+        ))
     }
     type TakeInput = TimestampOutput;
     type PostOp = ();

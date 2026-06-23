@@ -4,14 +4,12 @@ use crate::{
     collections::{Collection, CollectionId},
     database_extention::DatabaseExt,
     execute::Executable,
-    extentions::common_expressions::{Identifier, TableNameExpression, V0OnUpdate},
     fix_executor::ExecutorTrait,
     from_row::{FromRowAlias, FromRowData},
-    operations::{LinkedOutput, Operation, OperationOutput, insert_one::ConstraintViolation},
-    query_builder::{
-        Expression, IsOpExpression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat,
+    operations::{LinkedOutput, Operation, OperationOutput, insert::ConstraintViolation, operations_expressions_crossover::{ExpressionsForOperation, OnUpdate, TableExpressions}},
+    sqlx_query_builder::{
+        Expression, IsOpExpression, ManyExpressions, StatementBuilder, basic_expressions::ManyFlat, statements::update_statement::UpdateStatement,
     },
-    statements::update_statement::UpdateStatement,
 };
 
 pub struct Update<Base, Partial, Wheres, Links> {
@@ -187,14 +185,25 @@ where
     S: ExecutorTrait,
     Base: Clone,
     Base: Send,
-    Base: Identifier<Identifier: Send + for<'q> ManyExpressions<'q, S>>,
-    Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
+    Base: TableExpressions<
+        Identifier: Send + for<'q> ManyExpressions<'q, S>,
+        PascalCase: for<'q> Expression<'q, S>,
+    >,
+    Base: OnUpdate<
+        Partial,
+        UpdateExpression: Send + for<'q> ManyExpressions<'q, S>,
+    >,
+    Base::Id: ExpressionsForOperation<
+    Identifier: Send + for<'q> ManyExpressions<'q, S>,
+    >,
+    // Base: Identifier<Identifier: Send + for<'q> ManyExpressions<'q, S>>,
+    // Base: TableNameExpression<TableNameExpression: for<'q> Expression<'q, S>>,
     Base: Collection<OutputData: Send>,
-    Base:
-        V0OnUpdate<UpdateInput = Partial, UpdateExpression: Send + for<'q> ManyExpressions<'q, S>>,
+    // Base:
+    //     V0OnUpdate<UpdateInput = Partial, UpdateExpression: Send + for<'q> ManyExpressions<'q, S>>,
     Base: for<'r> FromRowAlias<'r, S::Row, RData = Base::OutputData>,
     Base::Id: Send + CollectionId<IdData: Send>,
-    Base::Id: Identifier<Identifier: Send + for<'q> ManyExpressions<'q, S>>,
+    // Base::Id: Identifier<Identifier: Send + for<'q> ManyExpressions<'q, S>>,
     Base::Id: for<'r> FromRowAlias<'r, S::Row, RData = <Base::Id as CollectionId>::IdData>,
     Partial: Send,
     Wheres: Send,
@@ -241,8 +250,8 @@ where
                 );
             }
 
-            let (stmt, args) = StatementBuilder::<'_, S>::new(UpdateStatement {
-                table_name: self.base.table_name_expression(),
+            let (stmt, args) = StatementBuilder::<S>::new(UpdateStatement {
+                table_name: self.base.table_name_pascal_case(),
                 wheres: ManyFlat((
                     self.wheres,
                     self_link.wheres(self_link_data.wheres),
@@ -316,10 +325,11 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::expressions::ColumnEqual;
+    use crate::collections::Collection;
     use crate::from_row::FromRowAlias;
     use crate::operations::{CollectionOutput, LinkedOutput, Operation};
-    use crate::test_module::{self, *};
+    use crate::sqlx_query_builder::basic_expressions::{ColumnEqual, ScopedColumn};
+    use crate::test_module::{Todo, TodoHandler, TodoPartial};
     use crate::update_mod::Update;
     use crate::{connect_in_memory::ConnectInMemory, operations::update::Update as UpdateOp};
     use sqlx::Sqlite;
@@ -340,9 +350,12 @@ mod test {
 
         let output = Operation::<Sqlite>::exec_operation(
             UpdateOp {
-                base: test_module::todo,
+                base: TodoHandler,
                 wheres: ColumnEqual {
-                    col: todo_members::id,
+                    col: ScopedColumn {
+                        table: ("Todo",),
+                        col: ("id",),
+                    } ,
                     eq: 2,
                 },
                 partial: TodoPartial {
@@ -376,8 +389,8 @@ mod test {
             .unwrap()
             .into_iter()
             .map(|row| CollectionOutput {
-                id: todo_members::id.no_alias(&row).unwrap(),
-                attributes: test_module::todo.no_alias(&row).unwrap(),
+                id: TodoHandler.id().no_alias(&row).unwrap(),
+                attributes: TodoHandler.no_alias(&row).unwrap(),
             })
             .collect::<Vec<_>>();
 

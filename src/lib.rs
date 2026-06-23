@@ -28,469 +28,22 @@ pub mod connect_in_memory;
 pub mod database_extention;
 pub mod dyn_vec;
 pub mod execute;
-pub mod expressions;
 pub mod extend_sqlite;
-pub mod extentions;
 pub mod from_row;
-pub mod json_client;
-pub mod json_client_v0;
-pub mod json_client_v1;
+// pub mod json_client;
 pub mod json_value_cmp;
-#[cfg(test)]
-pub mod lifetime_guide;
 pub mod links;
 pub mod on_migrate;
 pub mod operations;
-pub mod prelude;
-pub mod query_builder;
 pub mod row_utils;
 pub mod schema;
 pub mod singleton;
-pub mod statements;
+pub mod sqlx_query_builder;
 pub mod test_module;
 pub mod tuple_trait;
 pub mod update_mod;
-pub mod valid_syntax;
 pub mod macros {
     pub use claw_ql_macros::*;
-}
-
-pub mod select_items_trait_object {
-    use crate::{
-        extentions::common_expressions::Aliased,
-        from_row::{
-            FromRowAlias, FromRowData, FromRowError, RowPostAliased, RowPreAliased, RowTwoAliased,
-        },
-        query_builder::{ManyBoxedExpressions, functional_expr::ManyFlat},
-    };
-    use sqlx::Database;
-    use std::any::Any;
-
-    pub trait SelectItemsTraitObject<S, CastFromRowResult>: Send {
-        fn str_alias_erase(&self, alias: &'static str) -> Box<dyn ManyBoxedExpressions<S> + Send>;
-
-        fn num_alias_erase(
-            &self,
-            num: usize,
-            alias: &'static str,
-        ) -> Box<dyn ManyBoxedExpressions<S> + Send>;
-
-        fn no_alias_2<'r>(&self, row: &'r S::Row) -> Result<Box<dyn Any + Send>, FromRowError>
-        where
-            S: Database;
-
-        fn pre_alias_2<'r>(
-            &self,
-            row: RowPreAliased<'r, S::Row>,
-        ) -> Result<Box<dyn Any + Send>, FromRowError>
-        where
-            S: Database,
-            S::Row: sqlx::Row;
-
-        fn post_alias_2<'r>(
-            &self,
-            row: RowPostAliased<'r, S::Row>,
-        ) -> Result<Box<dyn Any + Send>, FromRowError>
-        where
-            S: Database,
-            S::Row: sqlx::Row;
-
-        fn two_alias_2<'r>(
-            &self,
-            row: RowTwoAliased<'r, S::Row>,
-        ) -> Result<Box<dyn Any + Send>, FromRowError>
-        where
-            S: Database,
-            S::Row: sqlx::Row;
-    }
-
-    pub struct ToImplSelectItems<Se, CastFromRowResult> {
-        pub select_items: Se,
-        pub cast_from_row_result: CastFromRowResult,
-    }
-
-    impl<Se, S> SelectItemsTraitObject<S, ()> for ToImplSelectItems<Se, ()>
-    where
-        Se: Send,
-        Se: Aliased<Aliased: 'static + Send + ManyBoxedExpressions<S>>,
-        Se: Aliased<NumAliased: 'static + Send + ManyBoxedExpressions<S>>,
-        Se: for<'r> FromRowAlias<'r, S::Row>,
-        Se: FromRowData<RData: Send + 'static>,
-        S: Database,
-    {
-        fn str_alias_erase(&self, alias: &'static str) -> Box<dyn ManyBoxedExpressions<S> + Send> {
-            Box::new(self.select_items.aliased(alias))
-        }
-        fn num_alias_erase(
-            &self,
-            num: usize,
-            alias: &'static str,
-        ) -> Box<dyn ManyBoxedExpressions<S> + Send> {
-            Box::new(self.select_items.num_aliased(num, alias))
-        }
-        fn no_alias_2<'r>(&self, row: &'r S::Row) -> Result<Box<dyn Any + Send>, FromRowError> {
-            Ok(Box::new(self.select_items.no_alias(row)?))
-        }
-        fn pre_alias_2<'r>(
-            &self,
-            row: RowPreAliased<'r, S::Row>,
-        ) -> Result<Box<dyn Any + Send>, FromRowError> {
-            let ret = self.select_items.pre_alias(row)?;
-            Ok(Box::new(ret))
-        }
-        fn post_alias_2<'r>(
-            &self,
-            row: RowPostAliased<'r, S::Row>,
-        ) -> Result<Box<dyn Any + Send>, FromRowError> {
-            Ok(Box::new(self.select_items.post_alias(row)?))
-        }
-        fn two_alias_2<'r>(
-            &self,
-            row: RowTwoAliased<'r, S::Row>,
-        ) -> Result<Box<dyn Any + Send>, FromRowError> {
-            Ok(Box::new(self.select_items.two_alias(row)?))
-        }
-    }
-
-    impl<'r, S, C> Aliased for Box<dyn SelectItemsTraitObject<S, C> + 'r> {
-        type Aliased = Box<dyn ManyBoxedExpressions<S> + Send>;
-
-        fn aliased(&self, alias: &'static str) -> Self::Aliased {
-            self.str_alias_erase(alias)
-        }
-
-        type NumAliased = Box<dyn ManyBoxedExpressions<S> + Send>;
-        fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
-            self.num_alias_erase(num, alias)
-        }
-    }
-
-    impl<'r, S, C> Aliased for Vec<Box<dyn SelectItemsTraitObject<S, C> + 'r>> {
-        type Aliased = ManyFlat<Vec<Box<dyn ManyBoxedExpressions<S> + Send>>>;
-
-        fn aliased(&self, alias: &'static str) -> Self::Aliased {
-            ManyFlat(
-                self.iter()
-                    .enumerate()
-                    .map(|(i, each)| each.num_alias_erase(i, alias))
-                    .collect::<Vec<_>>(),
-            )
-        }
-
-        type NumAliased = ManyFlat<Box<dyn ManyBoxedExpressions<S> + Send>>;
-        fn num_aliased(&self, _: usize, _: &'static str) -> Self::NumAliased {
-            panic!("bug: nesting where it was not expected");
-        }
-    }
-
-    impl<'r, S> FromRowData for Box<dyn SelectItemsTraitObject<S, ()> + 'r> {
-        type RData = Box<dyn Any + Send>;
-    }
-
-    impl<'r, 'b, S: Database> FromRowAlias<'r, S::Row> for Box<dyn SelectItemsTraitObject<S, ()> + 'b> {
-        fn no_alias(&self, row: &'r S::Row) -> Result<Self::RData, FromRowError> {
-            Ok(self.no_alias_2(row)?)
-        }
-        fn pre_alias(&self, row: RowPreAliased<'r, S::Row>) -> Result<Self::RData, FromRowError> {
-            Ok(self.pre_alias_2(row)?)
-        }
-        fn post_alias(&self, row: RowPostAliased<'r, S::Row>) -> Result<Self::RData, FromRowError> {
-            Ok(self.post_alias_2(row)?)
-        }
-
-        fn two_alias(&self, row: RowTwoAliased<'r, S::Row>) -> Result<Self::RData, FromRowError>
-        where
-            S::Row: sqlx::Row,
-        {
-            Ok(self.two_alias_2(row)?)
-        }
-    }
-    impl<'r, S> FromRowData for Vec<Box<dyn SelectItemsTraitObject<S, ()> + 'r>> {
-        type RData = Vec<Box<dyn Any + Send>>;
-    }
-
-    impl<'r, 'b, S: Database> FromRowAlias<'r, S::Row>
-        for Vec<Box<dyn SelectItemsTraitObject<S, ()> + 'b>>
-    {
-        fn no_alias(&self, row: &'r S::Row) -> Result<Self::RData, FromRowError> {
-            let mut v = vec![];
-            for (i, each) in self.iter().enumerate() {
-                v.push(each.two_alias(RowTwoAliased {
-                    row: row,
-                    str_alias: "",
-                    num_alias: Some(i),
-                })?);
-            }
-            Ok(v)
-        }
-        fn pre_alias(&self, row: RowPreAliased<'r, S::Row>) -> Result<Self::RData, FromRowError> {
-            let mut v = vec![];
-            for (i, each) in self.iter().enumerate() {
-                v.push(each.two_alias(RowTwoAliased {
-                    row: row.row,
-                    str_alias: row.alias,
-                    num_alias: Some(i),
-                })?);
-            }
-            Ok(v)
-        }
-        fn post_alias(&self, _: RowPostAliased<'r, S::Row>) -> Result<Self::RData, FromRowError> {
-            panic!("in the process of deprecating this method");
-        }
-
-        fn two_alias(&self, _: RowTwoAliased<'r, S::Row>) -> Result<Self::RData, FromRowError>
-        where
-            S::Row: sqlx::Row,
-        {
-            panic!("nesting where it was not expected");
-        }
-    }
-
-    #[cfg(test)]
-    mod test {
-        use std::marker::PhantomData;
-
-        use crate::{
-            connect_in_memory::ConnectInMemory,
-            json_client_v0::{
-                dynamic_collection::{DynamicCollection, DynamicField},
-                fetch_many::extending_link_trait::JsonLinkFetchMany,
-            },
-            links::{
-                DefaultRelationKey, relation_optional_to_many::OptionalToMany, timestamp::Timestamp,
-            },
-            operations::{Operation, fetch_many::FetchMany},
-        };
-        use serde_json::json;
-        use sqlx::Sqlite;
-
-        #[tokio::test]
-        async fn test_ref_link() {
-            let mut db = Sqlite::in_memory_connection().await;
-
-            sqlx::query(
-                "
-        CREATE TABLE Category ( 
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT
-        );
-        CREATE TABLE Todo ( 
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT, 
-            done BOOLEAN, 
-            description TEXT, 
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            fk_category_def INTEGER, FOREIGN KEY (fk_category_def) REFERENCES Category(id)
-        );
-
-        
-
-        INSERT INTO Category (title) VALUES 
-        ('category_1'), ('category_2'), ('category_3');
-
-        INSERT INTO Todo
-            (title, done, description, fk_category_def, created_at, updated_at)
-        VALUES
-            ('first_todo', true, 'description_1', 1, 'test_0', 'test_1'),
-            ('second_todo', false, 'description_2', NULL, 'test_2', 'test_3'),
-            ('third_todo', true, 'description_3', 2, 'test_4', 'test_5'),
-            ('fourth_todo', false, 'description_4', 2, 'test_6', 'test_7');
-    
-    ",
-            )
-            .execute(&mut db)
-            .await
-            .unwrap();
-
-            let todo_collection = DynamicCollection::<Sqlite> {
-                name: "Todo".to_string(),
-                name_lower_case: "todo".to_string(),
-                fields: vec![
-                    DynamicField {
-                        name: "title".to_string(),
-                        is_optional: false,
-                        type_info: Box::new(PhantomData::<String>),
-                    },
-                    DynamicField {
-                        name: "done".to_string(),
-                        is_optional: false,
-                        type_info: Box::new(PhantomData::<bool>),
-                    },
-                    DynamicField {
-                        name: "description".to_string(),
-                        is_optional: true,
-                        type_info: Box::new(PhantomData::<String>),
-                    },
-                ],
-            };
-
-            let category_collection = DynamicCollection::<Sqlite> {
-                name: "Category".to_string(),
-                name_lower_case: "category".to_string(),
-                fields: vec![DynamicField {
-                    name: "title".to_string(),
-                    is_optional: false,
-                    type_info: Box::new(PhantomData::<String>),
-                }],
-            };
-
-            let optional_to_many = || {
-                Box::new(OptionalToMany {
-                    from: todo_collection.clone(),
-                    to: category_collection.clone(),
-                    fk_unique_id: DefaultRelationKey,
-                }) as Box<dyn JsonLinkFetchMany<Sqlite> + Send>
-            };
-
-            let timestamp = || {
-                Box::new(Timestamp {
-                    collection: todo_collection.clone(),
-                }) as Box<dyn JsonLinkFetchMany<Sqlite> + Send>
-            };
-
-            let result = FetchMany {
-                base: todo_collection.clone(),
-                wheres: (),
-                links: optional_to_many(),
-                cursor_order_by: (),
-                cursor_first_item: None::<(i64, ())>,
-                limit: 10,
-            };
-
-            let output = Operation::<Sqlite>::exec_operation(result, &mut db).await;
-
-            pretty_assertions::assert_eq!(
-                serde_json::to_value(output).unwrap(),
-                json!({
-                    "items": [
-                        {
-                            "id": 1,
-                            "attributes": {
-                                "title": "first_todo",
-                                "done": true,
-                                "description": "description_1",
-
-                            },
-                            "links": {
-                                "id": 1,
-                                "attributes": {
-                                    "title": "category_1",
-                                }
-                            }
-                        },
-                        {
-                            "id": 2,
-                            "attributes": {
-                                "title": "second_todo",
-                                "done": false,
-                                "description": "description_2",
-                            },
-                            "links": null
-                        },
-                        {
-                            "id": 3,
-                            "attributes": {
-                                "title": "third_todo",
-                                "done": true,
-                                "description": "description_3",
-                            },
-                            "links": {
-                                "id": 2,
-                                "attributes": {
-                                    "title": "category_2",
-                                }
-                            }
-                        },
-                        {
-                            "id": 4,
-                            "attributes": {
-                                "title": "fourth_todo",
-                                "done": false,
-                                "description": "description_4",
-                            },
-                            "links": {
-                                "id": 2,
-                                "attributes": {
-                                    "title": "category_2",
-                                }
-                            }
-                        }
-                    ],
-                    "next_item": null,
-                })
-            );
-
-            let result = FetchMany {
-                base: todo_collection.clone(),
-                wheres: (),
-                links: vec![optional_to_many(), timestamp()],
-                cursor_order_by: (),
-                cursor_first_item: None::<(i64, ())>,
-                limit: 10,
-            };
-
-            let output = Operation::<Sqlite>::exec_operation(result, &mut db).await;
-
-            pretty_assertions::assert_eq!(
-                serde_json::to_value(output).unwrap(),
-                json!({
-                    "items": [
-                        {
-                            "id": 1,
-                            "attributes": {
-                                "title": "first_todo",
-                                "done": true,
-                                "description": "description_1",
-
-                            },
-                            "links": [
-                                { "id": 1, "attributes": { "title": "category_1", } },
-                                { "created_at": "test_0", "updated_at": "test_1", }
-                            ]
-                        },
-                        {
-                            "id": 2,
-                            "attributes": {
-                                "title": "second_todo",
-                                "done": false,
-                                "description": "description_2",
-                            },
-                            "links": [
-                                null,
-                                { "created_at": "test_2", "updated_at": "test_3", }
-                            ]
-                        },
-                        {
-                            "id": 3,
-                            "attributes": {
-                                "title": "third_todo",
-                                "done": true,
-                                "description": "description_3",
-                            },
-                            "links": [
-                                { "id": 2, "attributes": { "title": "category_2", } },
-                                { "created_at": "test_4", "updated_at": "test_5", }
-                            ]
-                        },
-                        {
-                            "id": 4,
-                            "attributes": {
-                                "title": "fourth_todo",
-                                "done": false,
-                                "description": "description_4",
-                            },
-                            "links": [
-                                { "id": 2, "attributes": { "title": "category_2", } },
-                                { "created_at": "test_6", "updated_at": "test_7", }
-                            ]
-                        }
-                    ],
-                    "next_item": null,
-                })
-            );
-        }
-    }
 }
 
 pub mod sqlx_error_handling {
@@ -1067,6 +620,64 @@ pub mod constraints {
             let mut string = String::new();
 
             todo!()
+        }
+    }
+}
+
+pub mod is_null {
+    pub trait IsNull {
+        fn is_null() -> bool;
+    }
+
+    impl<T> IsNull for Option<T> {
+        fn is_null() -> bool {
+            true
+        }
+    }
+
+    #[cfg(feature = "nightly_rust_specialization")]
+    impl<T> IsNull for T {
+        default fn is_null() -> bool {
+            false
+        }
+    }
+
+    #[cfg(not(feature = "nightly_rust_specialization"))]
+    mod impl_is_null_no_spectialization {
+        use std::collections::HashMap;
+
+        use super::IsNull;
+
+        macro_rules! impl_no_gens {
+            ($($ident:ident)*) => {
+                $(impl IsNull for $ident {
+                    fn is_null() -> bool {
+                        false
+                    }
+                })*
+            };
+        }
+
+        impl_no_gens!(i32 i64 f64 bool char String);
+
+        macro_rules! impl_gens {
+            ($ident:ident [$($gens:ident $(:$wheres:tt)?),*]) => {
+                impl<$($gens,)*> IsNull for $ident<$($gens,)*>
+                where $($gens:Sized $(+$wheres)? ),*
+                {
+                    fn is_null() -> bool {
+                        false
+                    }
+                }
+            };
+        }
+
+        impl_gens!(HashMap[K,V,S]);
+
+        impl<T> IsNull for sqlx::types::Json<T> {
+            fn is_null() -> bool {
+                false
+            }
         }
     }
 }

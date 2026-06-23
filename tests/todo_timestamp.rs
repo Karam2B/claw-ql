@@ -7,7 +7,7 @@ use claw_ql::{
         LinkedOutput, Operation,
         fetch_many::{FetchMany, ManyOutput},
     },
-    query_builder::StatementBuilder,
+    sqlx_query_builder::StatementBuilder,
     test_module::{self, Todo},
 };
 use sqlx::Sqlite;

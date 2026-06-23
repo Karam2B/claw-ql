@@ -15,7 +15,7 @@ pub mod fk_name {
         database_extention::DatabaseExt,
         extentions::common_expressions::TableNameExpression,
         links::relation_optional_to_many::OptionalToMany,
-        query_builder::{Expression, OpExpression, StatementBuilder},
+        sqlx_query_builder::{Expression, OpExpression, StatementBuilder},
     };
 
     #[derive(Clone)]
@@ -61,7 +61,7 @@ pub mod fk_name {
         T: 'q + TableNameExpression<LowerCaseTableNameExpression: AsRef<str>>,
     {
         fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
-            ctx.sanitize_strings((
+            ctx.sanitize_many((
                 "fk_",
                 self.relation.to.lower_case_table_name_expression().as_ref(),
                 self.relation.fk_unique_id.as_ref(),
@@ -149,7 +149,7 @@ mod impl_on_migrate {
         extentions::common_expressions::TableNameExpression,
         links::relation_optional_to_many::OptionalToMany,
         on_migrate::OnMigrate,
-        query_builder::functional_expr::ManyPossible,
+        sqlx_query_builder::functional_expr::ManyPossible,
         statements::AddColumn,
     };
 
@@ -303,7 +303,7 @@ mod optional_to_many_items_names {
             FromRowAlias, FromRowData, TryFromRowAlias,
             swich_to_base_id::{pre_alias_to_base_id, two_alias_to_base_id},
         },
-        query_builder::{
+        sqlx_query_builder::{
             IsOpExpression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat,
         },
     };
@@ -448,7 +448,7 @@ mod optional_to_many_items_names {
 pub mod join_expression {
     use crate::{
         database_extention::DatabaseExt,
-        query_builder::{Expression, OpExpression, StatementBuilder},
+        sqlx_query_builder::{Expression, OpExpression, StatementBuilder},
     };
 
     pub struct JoinExpression<ForeignTable, ForeignColumn, LocalTable, LocalColumn> {
@@ -666,7 +666,7 @@ mod impl_set_new_for_insert {
                 InsertOneLink,
             },
         },
-        query_builder::Bind,
+        sqlx_query_builder::Bind,
     };
 
     impl<Key, From, To> InsertLinkConsumeData for SetNew<OptionalToMany<Key, From, To>, To::InputData>
@@ -915,7 +915,7 @@ mod impl_set_id_for_insert {
                 ConstraintViolation, InsertLinkConsumeData, InsertLinkData, InsertOneLink,
             },
         },
-        query_builder::Bind,
+        sqlx_query_builder::Bind,
     };
 
     impl<Key, From, To> InsertLinkConsumeData
@@ -1183,7 +1183,7 @@ mod impl_set_id_for_insert_v0 {
         from_row::{FromRowAlias, FromRowData},
         links::{relation_optional_to_many::OptionalToMany, update_links::SetId},
         operations::v1_insert_one::InsertLink,
-        query_builder::{Bind, Expression, OpExpression, StatementBuilder},
+        sqlx_query_builder::{Bind, Expression, OpExpression, StatementBuilder},
     };
 
     #[derive(Clone)]
@@ -1214,7 +1214,7 @@ mod impl_set_id_for_insert_v0 {
         for LocalForeignKeyIdent<ToTableName, Key>
     {
         fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
-            ctx.sanitize_strings(("fk_", self.to_table_name.as_ref(), self.key.as_ref()));
+            ctx.sanitize_many(("fk_", self.to_table_name.as_ref(), self.key.as_ref()));
         }
     }
 
@@ -1361,8 +1361,7 @@ mod impl_set_id_for_update {
         To: Collection,
         To::Id: Identifier,
     {
-        type Output =
-            Option<LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>>;
+        type Output = Option<LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>>;
     }
 
     impl<S, To> Operation<S> for SetIdUpdatePostOp<To>
@@ -1382,9 +1381,7 @@ mod impl_set_id_for_update {
             (),
             ColumnEqual<<To::Id as Identifier>::Identifier, <To::Id as CollectionId>::IdData>,
         >: OperationOutput<
-            Output = Option<
-                LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>,
-            >,
+            Output = Option<LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>>,
         >,
     {
         async fn exec_operation(
@@ -1524,11 +1521,7 @@ mod impl_set_id_for_update {
 
         type InitSplitPostOp = Option<<To::Id as CollectionId>::IdData>;
 
-        fn post_op(
-            &self,
-            id: Self::InitSplitPostOp,
-            _: Self::PreOpSplitPostOp,
-        ) -> Self::PostOp {
+        fn post_op(&self, id: Self::InitSplitPostOp, _: Self::PreOpSplitPostOp) -> Self::PostOp {
             match id {
                 None => SetIdUpdatePostOp::Skip,
                 Some(id) => SetIdUpdatePostOp::Fetch(FetchOne {
@@ -1549,8 +1542,7 @@ mod impl_set_id_for_update {
         ) {
         }
 
-        type Output =
-            Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
+        type Output = Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
 
         type PostOpOutput =
             Option<LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>>;
@@ -2170,9 +2162,7 @@ mod impl_for_delete {
         collections::{Collection, CollectionId, SingleColumnId},
         expressions::ColumnEqual,
         extentions::common_expressions::{Identifier, Scoped, TableNameExpression},
-        links::relation_optional_to_many::{
-            find_place_for_this::OneColumn, fk_name::AsIdentifier,
-        },
+        links::relation_optional_to_many::{find_place_for_this::OneColumn, fk_name::AsIdentifier},
         operations::{
             CollectionOutput, LinkedOutput,
             delete::{DeleteLink, DeleteLinkData, DeleteLinkPreOp, DeleteLinkSplit},
@@ -2230,8 +2220,7 @@ mod impl_for_delete {
         To::OutputData: Clone,
         <To::Id as CollectionId>::IdData: Clone,
     {
-        type Output =
-            Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
+        type Output = Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
 
         type PreOpOutput = Option<
             LinkedOutput<
@@ -2363,8 +2352,7 @@ mod impl_for_delete {
         To::OutputData: Clone,
         <To::Id as CollectionId>::IdData: Clone,
     {
-        type Output =
-            Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
+        type Output = Option<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
 
         type PreOpOutput = Option<
             LinkedOutput<
@@ -2441,9 +2429,7 @@ mod impl_for_delete {
             expressions::ColumnEqual,
             extentions::common_expressions::Scoped,
             links::Link,
-            operations::{
-                CollectionOutput, LinkedOutput, Operation, delete::Delete,
-            },
+            operations::{CollectionOutput, LinkedOutput, Operation, delete::Delete},
             test_module::{self, Category, Todo, category},
             track_sqlx_query::watch_sqlx_calls,
         };

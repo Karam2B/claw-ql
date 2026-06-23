@@ -47,24 +47,23 @@ mod impl_std_traits_for_trait_objects {
 }
 
 mod impl_my_types {
-    use crate::{
-        gen_serde::{ListEncoding, ObjectEncoding, Serialize, json_serialize_side::JsonAsString},
-        json_client::client_interface::{InsertManyOutput, InsertOneOutput},
-        operations::{LinkedOutput, fetch_many::ManyOutput, ManyLinkOutput},
+    use crate::gen_serde::{
+        ListEncoding, ObjectEncoding, Serialize, json_serialize_side::JsonAsString,
     };
 
-    impl Serialize<JsonAsString> for InsertManyOutput
-    where
-        Vec<InsertOneOutput>: Serialize<JsonAsString>,
-    {
-        fn serialize(&self, ctx: &mut JsonAsString) {
-            let mut object = ObjectEncoding::serialize_start(ctx);
-            ObjectEncoding::serialize_pair(ctx, &mut object, "items", &self.items);
-            ObjectEncoding::serialize_end(ctx, object);
+    impl<F> Serialize<F> for Box<dyn Serialize<F>> {
+        fn serialize(&self, ctx: &mut F) {
+            Serialize::serialize(&**self, ctx)
         }
     }
 
     impl<F> Serialize<F> for Box<dyn Serialize<F> + Send> {
+        fn serialize(&self, ctx: &mut F) {
+            Serialize::serialize(&**self, ctx)
+        }
+    }
+
+    impl<F> Serialize<F> for Box<dyn Serialize<F> + Send + Sync> {
         fn serialize(&self, ctx: &mut F) {
             Serialize::serialize(&**self, ctx)
         }
@@ -81,51 +80,6 @@ mod impl_my_types {
                 ctx.serialize_value(&mut list, value);
             }
             ctx.serialize_end(list);
-        }
-    }
-
-    impl<F, I, C, L> Serialize<F> for LinkedOutput<I, C, L>
-    where
-        I: Serialize<F>,
-        C: Serialize<F>,
-        L: Serialize<F>,
-        str: Serialize<F>,
-        F: ObjectEncoding,
-    {
-        fn serialize(&self, ctx: &mut F) {
-            let mut object = ctx.serialize_start();
-            ctx.serialize_pair(&mut object, "id", &self.id);
-            ctx.serialize_pair(&mut object, "attributes", &self.attributes);
-            ctx.serialize_pair(&mut object, "links", &self.links);
-            ctx.serialize_end(object);
-        }
-    }
-
-    impl<F, T, Next> Serialize<F> for ManyOutput<T, Next>
-    where
-        F: ObjectEncoding,
-        str: Serialize<F>,
-        Vec<T>: Serialize<F>,
-        Option<Next>: Serialize<F>,
-    {
-        fn serialize(&self, ctx: &mut F) {
-            let mut object = ctx.serialize_start();
-            ctx.serialize_pair(&mut object, "items", &self.items);
-            ctx.serialize_pair(&mut object, "next_item", &self.next_item);
-            ctx.serialize_end(object);
-        }
-    }
-
-    impl<F, T> Serialize<F> for ManyLinkOutput<T>
-    where
-        F: ObjectEncoding,
-        str: Serialize<F>,
-        Vec<T>: Serialize<F>,
-    {
-        fn serialize(&self, ctx: &mut F) {
-            let mut object = ctx.serialize_start();
-            ctx.serialize_pair(&mut object, "many_output", &self.many_output);
-            ctx.serialize_end(object);
         }
     }
 }
@@ -826,12 +780,8 @@ pub(crate) mod json_serialize_side {
             true
         }
 
-        fn serialize_pair<K, V>(
-            &mut self,
-            first: &mut Self::Object,
-            key: &K,
-            value: &V,
-        ) where
+        fn serialize_pair<K, V>(&mut self, first: &mut Self::Object, key: &K, value: &V)
+        where
             Self: Sized,
             K: Serialize<Self> + ?Sized,
             V: Serialize<Self> + ?Sized,
@@ -1065,9 +1015,7 @@ pub(crate) mod json_format_side {
                     _handler: Self::Handler,
                     serialized: &mut JsonAsArcCursor,
                 ) -> Result<Self, <JsonAsArcCursor as Deserializer<'de>>::Err> {
-                    Ok(sqlx::types::Json(
-                        Vec::<$t>::deserialize((), serialized)?,
-                    ))
+                    Ok(sqlx::types::Json(Vec::<$t>::deserialize((), serialized)?))
                 }
             }
         };
@@ -1714,7 +1662,12 @@ pub(crate) mod json_format_side {
 
     const PRETTY_INDENT: &str = "  ";
 
-    fn write_pretty_value(out: &mut String, s: &str, start: usize, depth: usize) -> Result<usize, String> {
+    fn write_pretty_value(
+        out: &mut String,
+        s: &str,
+        start: usize,
+        depth: usize,
+    ) -> Result<usize, String> {
         let start = skip_ws_json(s, start);
         let b = s.as_bytes();
         if start >= b.len() {
@@ -1731,7 +1684,12 @@ pub(crate) mod json_format_side {
         }
     }
 
-    fn write_pretty_object(out: &mut String, s: &str, start: usize, depth: usize) -> Result<usize, String> {
+    fn write_pretty_object(
+        out: &mut String,
+        s: &str,
+        start: usize,
+        depth: usize,
+    ) -> Result<usize, String> {
         let (map, after) = parse_json_object_at(s, start)?;
         out.push('{');
         if map.entries.is_empty() {
@@ -1769,7 +1727,12 @@ pub(crate) mod json_format_side {
         Ok(after)
     }
 
-    fn write_pretty_array(out: &mut String, s: &str, start: usize, depth: usize) -> Result<usize, String> {
+    fn write_pretty_array(
+        out: &mut String,
+        s: &str,
+        start: usize,
+        depth: usize,
+    ) -> Result<usize, String> {
         let mut i = skip_ws_json(s, start);
         if s.as_bytes().get(i) != Some(&b'[') {
             return Err(format!("expected '[' at byte {i}"));
@@ -1801,7 +1764,9 @@ pub(crate) mod json_format_side {
                     return Ok(i + 1);
                 }
                 _ => {
-                    return Err(format!("expected comma or ']' after array value at byte {i}"));
+                    return Err(format!(
+                        "expected comma or ']' after array value at byte {i}"
+                    ));
                 }
             }
         }

@@ -6,7 +6,9 @@ use crate::{
     fix_executor::ExecutorTrait,
     from_row::{FromRowAlias, FromRowData},
     operations::{LinkedOutput, Operation, OperationOutput},
-    query_builder::{Expression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat},
+    sqlx_query_builder::{
+        Expression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat,
+    },
     statements::insert_statement::{InsertStatement, One},
 };
 

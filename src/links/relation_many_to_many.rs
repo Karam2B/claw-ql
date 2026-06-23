@@ -21,7 +21,7 @@ pub mod junction_names {
         expressions::standard_naming_conventions::ConjuctionTableName,
         extentions::common_expressions::TableNameExpression,
         links::relation_many_to_many::ManyToMany,
-        query_builder::{Expression, OpExpression, StatementBuilder},
+        sqlx_query_builder::{Expression, OpExpression, StatementBuilder},
     };
 
     #[derive(Clone)]
@@ -46,7 +46,7 @@ pub mod junction_names {
         TableLower: AsRef<str> + 'q,
     {
         fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
-            ctx.sanitize_strings((self.table_lower.as_ref(), "_id"));
+            ctx.sanitize_many((self.table_lower.as_ref(), "_id"));
         }
     }
 
@@ -92,7 +92,7 @@ pub mod junction_names {
 mod migration_expressions {
     use crate::{
         database_extention::DatabaseExt,
-        query_builder::{Expression, ManyExpressions, OpExpression, StatementBuilder},
+        sqlx_query_builder::{Expression, ManyExpressions, OpExpression, StatementBuilder},
     };
 
     pub struct OnDeleteCascade;
@@ -130,7 +130,6 @@ mod impl_on_migrate {
 
     use crate::{
         collections::{Collection, SingleColumnId},
-        expressions::{ColumnDefinition, foriegn_key},
         extentions::common_expressions::TableNameExpression,
         links::relation_many_to_many::{
             ManyToMany,
@@ -138,8 +137,10 @@ mod impl_on_migrate {
             migration_expressions::{CompositePrimaryKey, OnDeleteCascade},
         },
         on_migrate::OnMigrate,
-        query_builder::functional_expr::{ManyFlat, ManyPossible},
-        statements::create_table_statement::{CreateTable, expressions::create_table},
+        sqlx_query_builder::basic_expressions::{ColumnDefinition, ManyFlat, foriegn_key},
+        sqlx_query_builder::statements::create_table_statement::{
+            CreateTable, expressions::create_table,
+        },
     };
 
     impl<Key, From, To> OnMigrate for ManyToMany<Key, From, To>
@@ -150,7 +151,7 @@ mod impl_on_migrate {
     {
         type Statements = CreateTable<
             create_table,
-            crate::expressions::standard_naming_conventions::ConjuctionTableName<
+            ConjuctionTableName<
                 From::LowerCaseTableNameExpression,
                 To::LowerCaseTableNameExpression,
                 Key,
@@ -217,7 +218,7 @@ mod many_to_many_items {
             FromRowAlias, FromRowData, TryFromRowAlias,
             swich_to_base_id::{pre_alias_to_base_id, two_alias_to_base_id},
         },
-        query_builder::{
+        sqlx_query_builder::{
             IsOpExpression, ManyExpressions, StatementBuilder, functional_expr::ManyFlat,
         },
     };
@@ -353,7 +354,7 @@ mod many_to_many_items {
 mod many_to_many_joins {
     use crate::{
         database_extention::DatabaseExt,
-        query_builder::{Expression, ManyExpressions, OpExpression, StatementBuilder},
+        sqlx_query_builder::{Expression, ManyExpressions, OpExpression, StatementBuilder},
     };
 
     #[allow(dead_code)]
@@ -376,252 +377,22 @@ mod many_to_many_joins {
     }
 }
 
-mod post_op {
-    use std::collections::HashMap;
-
-    use sqlx::{Decode, Encode, Row, Type};
-
-    use crate::{
-        collections::{Collection, CollectionId, SingleColumnId},
-        database_extention::DatabaseExt,
-        execute::Executable,
-        expressions::table,
-        extentions::{
-            Members,
-            common_expressions::{Identifier, TableNameExpression},
-        },
-        fix_executor::ExecutorTrait,
-        from_row::FromRowAlias,
-        links::relation_many_to_many::ManyToMany,
-        links::relation_optional_to_many::join_expression::JoinExpression,
-        operations::{CollectionOutput, Operation, OperationOutput},
-        query_builder::{Expression, OpExpression, StatementBuilder},
-        statements::select_statement::SelectStatement,
-    };
-
-    pub type ManyToManyLinkedMap<FromId, ToId, ToOutput> =
-        HashMap<FromId, Vec<CollectionOutput<ToId, ToOutput>>>;
-
-    #[derive(Clone)]
-    pub struct ColumnIn<Col, V> {
-        pub col: Col,
-        pub values: Vec<V>,
-    }
-
-    impl<Col, V> OpExpression for ColumnIn<Col, V> {}
-
-    impl<'q, S, Col, V> Expression<'q, S> for ColumnIn<Col, V>
-    where
-        S: DatabaseExt,
-        Col: Expression<'q, S> + 'q,
-        V: 'q + Encode<'q, S> + Type<S> + Clone,
-    {
-        fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
-            self.col.expression(ctx);
-            ctx.syntax(" IN (");
-            for (i, value) in self.values.into_iter().enumerate() {
-                if i > 0 {
-                    ctx.syntax(", ");
-                }
-                ctx.bind(value);
-            }
-            ctx.syntax(")");
-        }
-    }
-
-    struct PostOpSelect {
-        junction_table: String,
-        from_col: String,
-        to_table: String,
-        to_cols: Vec<String>,
-    }
-
-    impl OpExpression for PostOpSelect {}
-
-    impl<'q, S> Expression<'q, S> for PostOpSelect
-    where
-        S: DatabaseExt,
-    {
-        fn expression(self, ctx: &mut StatementBuilder<'q, S>) {
-            ctx.sanitize(&self.junction_table);
-            ctx.syntax(".");
-            ctx.sanitize(&self.from_col);
-            ctx.syntax(r#" AS "from_id", "#);
-            ctx.sanitize(&self.to_table);
-            ctx.syntax(".");
-            ctx.sanitize("id");
-            for col in &self.to_cols {
-                ctx.syntax(", ");
-                ctx.sanitize(&self.to_table);
-                ctx.syntax(".");
-                ctx.sanitize(col);
-            }
-        }
-    }
-
-    pub struct FetchManyToManyLinked<Key, From, To>
-    where
-        From: Collection,
-        To: Collection + Members + TableNameExpression,
-    {
-        pub link: ManyToMany<Key, From, To>,
-        pub from_ids: Vec<<From::Id as CollectionId>::IdData>,
-        junction_table: String,
-        from_col: String,
-        to_table: String,
-        to_cols: Vec<String>,
-    }
-
-    impl<Key, From, To> Clone for FetchManyToManyLinked<Key, From, To>
-    where
-        Key: Clone,
-        From: Collection + Clone,
-        To: Collection + Members + TableNameExpression + Clone,
-        <From::Id as CollectionId>::IdData: Clone,
-    {
-        fn clone(&self) -> Self {
-            Self {
-                link: self.link.clone(),
-                from_ids: self.from_ids.clone(),
-                junction_table: self.junction_table.clone(),
-                from_col: self.from_col.clone(),
-                to_table: self.to_table.clone(),
-                to_cols: self.to_cols.clone(),
-            }
-        }
-    }
-
-    impl<Key, From, To> OperationOutput for FetchManyToManyLinked<Key, From, To>
-    where
-        From: Collection,
-        To: Collection + Members + TableNameExpression,
-    {
-        type Output = ManyToManyLinkedMap<
-            <From::Id as CollectionId>::IdData,
-            <To::Id as CollectionId>::IdData,
-            To::OutputData,
-        >;
-    }
-
-    impl<Key, From, To> FetchManyToManyLinked<Key, From, To>
-    where
-        Key: Clone + AsRef<str>,
-        From: Collection<Id: SingleColumnId> + TableNameExpression + Clone,
-        To: Collection<Id: SingleColumnId> + TableNameExpression + Members + Clone,
-    {
-        pub fn new(
-            link: ManyToMany<Key, From, To>,
-            from_ids: Vec<<From::Id as CollectionId>::IdData>,
-        ) -> Self {
-            let to = link.to.clone();
-            Self {
-                junction_table: format!(
-                    "ct_{}{}{}",
-                    link.from.table_name_lower_case(),
-                    link.to.table_name_lower_case(),
-                    link.relation_key.as_ref()
-                ),
-                from_col: format!("{}_id", link.from.table_name_lower_case()),
-                to_table: to.table_name().to_string(),
-                to_cols: to.members_names(),
-                link,
-                from_ids,
-            }
-        }
-    }
-
-    impl<S, Key, From, To> Operation<S> for FetchManyToManyLinked<Key, From, To>
-    where
-        S: DatabaseExt + ExecutorTrait,
-        Key: Clone + AsRef<str> + Send,
-        From: Collection<Id: SingleColumnId> + TableNameExpression + Clone + Send,
-        <From::Id as CollectionId>::IdData:
-            Copy + Clone + std::hash::Hash + Eq + Send + for<'q> Encode<'q, S> + Type<S> + for<'r> Decode<'r, S>,
-        To: Collection<Id: SingleColumnId + Identifier> + TableNameExpression + Members + Clone + Send,
-        To::OutputData: Send,
-        <To::Id as CollectionId>::IdData: Send,
-        To: for<'r> FromRowAlias<'r, S::Row, RData = To::OutputData>,
-        To::Id: for<'r> FromRowAlias<'r, S::Row, RData = <To::Id as CollectionId>::IdData>,
-        <To::Id as Identifier>::Identifier: for<'q> Expression<'q, S>,
-        <To as TableNameExpression>::TableNameExpression: for<'q> Expression<'q, S> + Clone,
-        <To as TableNameExpression>::LowerCaseTableNameExpression: AsRef<str>,
-        for<'a> &'a str: sqlx::ColumnIndex<S::Row>,
-    {
-        async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output {
-            if self.from_ids.is_empty() {
-                return HashMap::new();
-            }
-
-            let junction = self.junction_table.clone();
-            let from_col = self.from_col.clone();
-
-            let (stmt, args) = StatementBuilder::<'_, S>::new(SelectStatement {
-                select_items: PostOpSelect {
-                    junction_table: junction.clone(),
-                    from_col: from_col.clone(),
-                    to_table: self.to_table,
-                    to_cols: self.to_cols,
-                },
-                from: table(junction.clone()),
-                joins: JoinExpression {
-                    join_type: "INNER JOIN",
-                    foreign_table: self.link.to.table_name_expression(),
-                    foreign_column: self.link.to.id().identifier(),
-                    local_table: table(junction.clone()),
-                    local_column: self.link.to_junction_column(),
-                },
-                wheres: ColumnIn {
-                    col: table(junction).col(from_col),
-                    values: self.from_ids,
-                },
-                group_by: (),
-                order: (),
-                limit: (),
-            })
-            .unwrap();
-
-            let rows = S::fetch_all(
-                &mut *pool,
-                Executable {
-                    string: &stmt,
-                    arguments: args,
-                },
-            )
-            .await
-            .unwrap();
-
-            let to = self.link.to.clone();
-            let to_id = self.link.to.id();
-            let mut map = HashMap::new();
-
-            for row in rows {
-                let from_id = row
-                    .try_get::<<From::Id as CollectionId>::IdData, _>("from_id")
-                    .unwrap();
-                let id = to_id.no_alias(&row).unwrap();
-                let attributes = to.no_alias(&row).unwrap();
-                map.entry(from_id)
-                    .or_insert_with(Vec::new)
-                    .push(CollectionOutput { id, attributes });
-            }
-
-            map
-        }
-    }
-}
-
 mod impl_link_fetch_many {
     use std::collections::HashSet;
 
     use crate::{
         collections::{Collection, CollectionId, SingleColumnId},
-        extentions::{Members, common_expressions::{Aliased, TableNameExpression}},
-        from_row::FromRowData,
-        links::relation_many_to_many::{
-            ManyToMany, post_op::FetchManyToManyLinked,
+        extentions::{
+            Members,
+            common_expressions::{Aliased, TableNameExpression},
         },
-        links::relation_many_to_many::post_op::ManyToManyLinkedMap,
-        operations::{CollectionOutput, ManyLinkOutput, OperationOutput, fetch_many::LinkFetch},
+        from_row::FromRowData,
+        links::relation_many_to_many::ManyToMany,
+        operations::{
+            CollectionOutput, ManyLinkOutput, OperationOutput,
+            fetch_linked_records::{FetchManyToManyLinked, ManyToManyLinkedMap},
+            fetch_many::LinkFetch,
+        },
     };
 
     impl<Key, From, To> LinkFetch for ManyToMany<Key, From, To>
@@ -655,7 +426,8 @@ mod impl_link_fetch_many {
 
         type Op = FetchManyToManyLinked<Key, From, To>;
 
-        type Output = ManyLinkOutput<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
+        type Output =
+            ManyLinkOutput<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
 
         fn take_many(
             &self,
@@ -691,10 +463,7 @@ mod impl_link_fetch_many {
             Self::SelectItems: FromRowData,
         {
             let mut seen = HashSet::new();
-            let from_ids = input
-                .into_iter()
-                .filter(|id| seen.insert(*id))
-                .collect();
+            let from_ids = input.into_iter().filter(|id| seen.insert(*id)).collect();
             FetchManyToManyLinked::new(self.clone(), from_ids)
         }
     }
@@ -705,249 +474,30 @@ pub type ManyToManyFetchOne<Key, From, To> = ManyToMany<Key, From, To>;
 mod impl_mutate_links {
     use std::marker::PhantomData;
 
-    use sqlx::{Decode, Encode, Row, Type};
-
     use crate::{
         collections::{Collection, CollectionId, SingleColumnId},
-        database_extention::DatabaseExt,
-        execute::Executable,
-        expressions::{ColumnEqual, table},
-        expressions::single_col_expressions::UpdatingCol,
+        expressions::{ColumnEqual, single_col_expressions::UpdatingCol},
         extentions::{
             Members,
-            common_expressions::{Aliased, Identifier, Scoped, TableNameExpression},
+            common_expressions::{Identifier, Scoped, TableNameExpression},
         },
-        fix_executor::ExecutorTrait,
-        from_row::{FromRowAlias, FromRowData},
+        from_row::FromRowData,
         links::{
             relation_many_to_many::ManyToMany,
-            relation_optional_to_many::find_place_for_this::OneColumn,
-            update_links::SetId,
+            relation_optional_to_many::find_place_for_this::OneColumn, update_links::SetId,
         },
         operations::{
-            CollectionOutput, LinkedOutput, ManyLinkOutput, Operation, OperationOutput,
+            CollectionOutput, LinkedOutput, ManyLinkOutput, OperationOutput,
             delete::{DeleteLink, DeleteLinkData, DeleteLinkPreOp, DeleteLinkSplit},
+            fetch_linked_records::{FetchManyToManyLinked, ManyToManyLinkedMap},
             fetch_one::FetchOne,
             insert_one::{
-                ConstraintViolation, InsertLinkConsumeData, InsertLinkData,
-                InsertOneLink,
+                ConstraintViolation, InsertLinkConsumeData, InsertLinkData, InsertOneLink,
             },
+            junction::{DeleteJunctionRow, InsertJunctionAndFetch, InsertJunctionRow},
             update::{UpdateLink, UpdateLinkData, UpdateLinkSplit},
         },
-        query_builder::{
-            Bind, Expression, ManyExpressions, StatementBuilder,
-            functional_expr::ManyFlat,
-        },
-        statements::{
-            delete_statement::DeleteStatement,
-            insert_statement::{InsertStatement, One},
-            select_statement::SelectStatement,
-        },
     };
-
-    impl<Key, From, To> ManyToMany<Key, From, To>
-    where
-        Key: Clone + AsRef<str>,
-        From: Collection<Id: SingleColumnId> + TableNameExpression + Clone,
-        To: Collection<Id: SingleColumnId> + TableNameExpression + Clone,
-    {
-        fn junction_table_as_str(&self) -> String {
-            format!(
-                "ct_{}{}{}",
-                self.from.table_name_lower_case(),
-                self.to.table_name_lower_case(),
-                self.relation_key.as_ref()
-            )
-        }
-
-        fn from_junction_col_as_str(&self) -> String {
-            format!("{}_id", self.from.table_name_lower_case())
-        }
-
-        fn to_junction_col_as_str(&self) -> String {
-            format!("{}_id", self.to.table_name_lower_case())
-        }
-    }
-
-    #[derive(Clone)]
-    pub struct InsertJunctionRow<Key, From, To> {
-        link: ManyToMany<Key, From, To>,
-        from_id: i64,
-        to_id: i64,
-    }
-
-    impl<Key, From, To> OperationOutput for InsertJunctionRow<Key, From, To>
-    where
-        From: Collection,
-        To: Collection,
-    {
-        type Output = ();
-    }
-
-    impl<S, Key, From, To> Operation<S> for InsertJunctionRow<Key, From, To>
-    where
-        S: DatabaseExt + ExecutorTrait,
-        Key: Clone + AsRef<str> + Send,
-        From: Collection<Id: SingleColumnId> + TableNameExpression + Clone + Send,
-        <From as TableNameExpression>::LowerCaseTableNameExpression: AsRef<str>,
-        <From::Id as CollectionId>::IdData:
-            Send + for<'q> Encode<'q, S> + Type<S> + Copy,
-        To: Collection<Id: SingleColumnId> + TableNameExpression + Clone + Send,
-        <To as TableNameExpression>::LowerCaseTableNameExpression: AsRef<str>,
-        <To::Id as CollectionId>::IdData:
-            Send + for<'q> Encode<'q, S> + Type<S> + Copy,
-        i64: for<'q> Encode<'q, S> + Type<S> + Send,
-    {
-        async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output {
-            let (stmt, args) = StatementBuilder::<'_, S>::new(InsertStatement {
-                table_name: self.link.junction_table_name(),
-                identifiers: ManyFlat((
-                    self.link.from_junction_column(),
-                    self.link.to_junction_column(),
-                )),
-                values: One(ManyFlat((Bind(self.from_id), Bind(self.to_id)))),
-                returning: (),
-            })
-            .unwrap();
-
-            S::execute(
-                &mut *pool,
-                Executable {
-                    string: &stmt,
-                    arguments: args,
-                },
-            )
-            .await
-            .unwrap();
-        }
-    }
-
-    #[derive(Clone)]
-    pub struct DeleteJunctionRow<Key, From, To> {
-        link: ManyToMany<Key, From, To>,
-        from_id: i64,
-        to_id: i64,
-    }
-
-    impl<Key, From, To> OperationOutput for DeleteJunctionRow<Key, From, To>
-    where
-        From: Collection,
-        To: Collection,
-    {
-        type Output = ();
-    }
-
-    impl<S, Key, From, To> Operation<S> for DeleteJunctionRow<Key, From, To>
-    where
-        S: DatabaseExt + ExecutorTrait,
-        Key: Clone + AsRef<str> + Send,
-        From: Collection<Id: SingleColumnId> + TableNameExpression + Clone + Send,
-        <From as TableNameExpression>::LowerCaseTableNameExpression: AsRef<str>,
-        <From::Id as CollectionId>::IdData:
-            Send + for<'q> Encode<'q, S> + Type<S> + Copy,
-        To: Collection<Id: SingleColumnId> + TableNameExpression + Clone + Send,
-        <To as TableNameExpression>::LowerCaseTableNameExpression: AsRef<str>,
-        <To::Id as CollectionId>::IdData:
-            Send + for<'q> Encode<'q, S> + Type<S> + Copy,
-        i64: for<'q> Encode<'q, S> + Type<S> + Send,
-    {
-        async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output {
-            let junction = self.link.junction_table_as_str();
-            let from_col = self.link.from_junction_col_as_str();
-            let to_col = self.link.to_junction_col_as_str();
-
-            let (stmt, args) = StatementBuilder::<'_, S>::new(DeleteStatement {
-                table_name: self.link.junction_table_name(),
-                wheres: ManyFlat((
-                    ColumnEqual {
-                        col: table(junction.clone()).col(from_col),
-                        eq: self.from_id,
-                    },
-                    ColumnEqual {
-                        col: table(junction).col(to_col),
-                        eq: self.to_id,
-                    },
-                )),
-                returning: (),
-            })
-            .unwrap();
-
-            S::execute(
-                &mut *pool,
-                Executable {
-                    string: &stmt,
-                    arguments: args,
-                },
-            )
-            .await
-            .unwrap();
-        }
-    }
-
-    #[derive(Clone)]
-    pub struct InsertJunctionAndFetch<Key, From, To> {
-        link: ManyToMany<Key, From, To>,
-        from_id: i64,
-        to_id: i64,
-    }
-
-    impl<Key, From, To> OperationOutput for InsertJunctionAndFetch<Key, From, To>
-    where
-        From: Collection,
-        To: Collection,
-    {
-        type Output = LinkedOutput<<To::Id as CollectionId>::IdData, To::OutputData, ()>;
-    }
-
-    impl<S, Key, From, To> Operation<S> for InsertJunctionAndFetch<Key, From, To>
-    where
-        S: DatabaseExt + ExecutorTrait,
-        Key: Clone + AsRef<str> + Send,
-        From: Collection<Id: SingleColumnId> + TableNameExpression + Clone + Send,
-        <From as TableNameExpression>::LowerCaseTableNameExpression: AsRef<str>,
-        <From::Id as CollectionId>::IdData:
-            Send + for<'q> Encode<'q, S> + Type<S> + Copy,
-        To: Collection<Id: SingleColumnId + Identifier> + TableNameExpression + Members + Clone + Send,
-        <To as TableNameExpression>::LowerCaseTableNameExpression: AsRef<str>,
-        <To as TableNameExpression>::TableNameExpression: for<'q> Expression<'q, S>,
-        <To::Id as CollectionId>::IdData:
-            ::std::convert::From<i64> + Send + 'static + for<'q> Encode<'q, S> + Type<S> + Copy,
-        <To::Id as Identifier>::Identifier: for<'q> Expression<'q, S>,
-        To::Id: Send
-            + Aliased<Aliased: for<'q> ManyExpressions<'q, S>>
-            + for<'r> FromRowAlias<'r, S::Row, RData = <To::Id as CollectionId>::IdData>,
-        To: Aliased<Aliased: for<'q> ManyExpressions<'q, S>>,
-        To: for<'r> FromRowAlias<'r, S::Row, RData = To::OutputData>,
-        To::OutputData: Send,
-        ColumnEqual<
-            <To::Id as Identifier>::Identifier,
-            <To::Id as CollectionId>::IdData,
-        >: Send,
-        i64: for<'q> Encode<'q, S> + Type<S> + Send,
-    {
-        async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output {
-            InsertJunctionRow {
-                link: self.link.clone(),
-                from_id: self.from_id,
-                to_id: self.to_id,
-            }
-            .exec_operation(&mut *pool)
-            .await;
-
-            let to_id = <To::Id as CollectionId>::IdData::from(self.to_id);
-            FetchOne {
-                base: self.link.to.clone(),
-                links: (),
-                wheres: ColumnEqual {
-                    col: self.link.to.id().identifier(),
-                    eq: to_id,
-                },
-            }
-            .exec_operation(&mut *pool)
-            .await
-            .expect("linked row should exist")
-        }
-    }
 
     impl<Key, From, To> InsertLinkConsumeData
         for SetId<ManyToMany<Key, From, To>, <To::Id as CollectionId>::IdData>
@@ -960,8 +510,7 @@ mod impl_mutate_links {
         From: Clone,
         To: Clone,
     {
-        type Link =
-            SetId<ManyToMany<Key, From, To>, PhantomData<<To::Id as CollectionId>::IdData>>;
+        type Link = SetId<ManyToMany<Key, From, To>, PhantomData<<To::Id as CollectionId>::IdData>>;
 
         fn consume_data(
             self,
@@ -1046,11 +595,7 @@ mod impl_mutate_links {
             _: Self::PreOpToPostOp,
         ) -> (Self::PostOp, Self::TakeInput) {
             (
-                InsertJunctionAndFetch {
-                    link: self.relation.clone(),
-                    from_id: from_id.into(),
-                    to_id: to_id.into(),
-                },
+                InsertJunctionAndFetch::new(self.relation.clone(), from_id.into(), to_id.into()),
                 (),
             )
         }
@@ -1126,11 +671,7 @@ mod impl_mutate_links {
         type PreOpSplitTake = ();
         type PreOp = InsertJunctionRow<Key, From, To>;
         fn pre_op(&self, _: Self::InitSplitForPreOp) -> Self::PreOp {
-            InsertJunctionRow {
-                link: self.relation.clone(),
-                from_id: self.from_id,
-                to_id: self.to_id,
-            }
+            InsertJunctionRow::new(self.relation.clone(), self.from_id, self.to_id)
         }
         fn split_pre_op(
             &self,
@@ -1152,8 +693,7 @@ mod impl_mutate_links {
         type UpdateNames = ();
         fn update_names(&self) -> Self::UpdateNames {}
         type InitSplitForUpdateValues = i64;
-        type UpdateValues =
-            UpdatingCol<<From::Id as Identifier>::Identifier, Option<i64>>;
+        type UpdateValues = UpdatingCol<<From::Id as Identifier>::Identifier, Option<i64>>;
         fn update_values(
             &self,
             values: Self::InitSplitForUpdateValues,
@@ -1299,8 +839,7 @@ mod impl_mutate_links {
         type UpdateNames = ();
         fn update_names(&self) -> Self::UpdateNames {}
         type InitSplitForUpdateValues = i64;
-        type UpdateValues =
-            UpdatingCol<<From::Id as Identifier>::Identifier, Option<i64>>;
+        type UpdateValues = UpdatingCol<<From::Id as Identifier>::Identifier, Option<i64>>;
         fn update_values(
             &self,
             values: Self::InitSplitForUpdateValues,
@@ -1316,11 +855,7 @@ mod impl_mutate_links {
         type PostOp = DeleteJunctionRow<Key, From, To>;
         type InitSplitPostOp = ();
         fn post_op(&self, _: Self::InitSplitPostOp, _: Self::PreOpSplitPostOp) -> Self::PostOp {
-            DeleteJunctionRow {
-                link: self.relation.clone(),
-                from_id: self.from_id,
-                to_id: self.to_id,
-            }
+            DeleteJunctionRow::new(self.relation.clone(), self.from_id, self.to_id)
         }
         fn from_row_result(&self, _: &(), _: &mut Self::PostOp) {}
         type Output = CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>;
@@ -1342,71 +877,6 @@ mod impl_mutate_links {
                 id: linked.id,
                 attributes: linked.attributes,
             }
-        }
-    }
-
-    #[derive(Clone)]
-    #[allow(dead_code)]
-    pub struct SelectJunctionToIds<Key, From, To> {
-        link: ManyToMany<Key, From, To>,
-        from_id: i64,
-    }
-
-    impl<Key, From, To> OperationOutput for SelectJunctionToIds<Key, From, To>
-    where
-        From: Collection,
-        To: Collection,
-    {
-        type Output = Vec<i64>;
-    }
-
-    impl<S, Key, From, To> Operation<S> for SelectJunctionToIds<Key, From, To>
-    where
-        S: DatabaseExt + ExecutorTrait,
-        Key: Clone + AsRef<str> + Send,
-        From: Collection<Id: SingleColumnId> + TableNameExpression + Clone + Send,
-        <From as TableNameExpression>::LowerCaseTableNameExpression: AsRef<str>,
-        <From::Id as CollectionId>::IdData:
-            for<'q> Encode<'q, S> + Type<S> + Send + Copy,
-        To: Collection<Id: SingleColumnId> + TableNameExpression + Clone + Send,
-        <To as TableNameExpression>::LowerCaseTableNameExpression: AsRef<str>,
-        <To::Id as CollectionId>::IdData:
-            for<'r> Decode<'r, S> + for<'q> Encode<'q, S> + Type<S> + Send + Copy,
-        i64: for<'r> Decode<'r, S> + for<'q> Encode<'q, S> + Type<S> + Send,
-        for<'a> &'a str: sqlx::ColumnIndex<S::Row>,
-    {
-        async fn exec_operation(self, pool: &mut S::Connection) -> Self::Output {
-            let junction = self.link.junction_table_as_str();
-            let from_col = self.link.from_junction_col_as_str();
-            let to_col = self.link.to_junction_col_as_str();
-
-            let (stmt, args) = StatementBuilder::<'_, S>::new(SelectStatement {
-                select_items: table(junction.clone()).col(to_col.clone()),
-                from: table(junction.clone()),
-                joins: (),
-                wheres: ColumnEqual {
-                    col: table(junction).col(from_col),
-                    eq: self.from_id,
-                },
-                group_by: (),
-                order: (),
-                limit: (),
-            })
-            .unwrap();
-
-            let rows = S::fetch_all(
-                &mut *pool,
-                Executable {
-                    string: &stmt,
-                    arguments: args,
-                },
-            )
-            .await
-            .unwrap();
-
-            rows.into_iter()
-                .map(|row| row.try_get::<i64, _>(to_col.as_str()).unwrap())
-                .collect()
         }
     }
 
@@ -1445,16 +915,9 @@ mod impl_mutate_links {
         Key: Clone + AsRef<str>,
     {
         type InitSplitForPreOp = ();
-        type PreOp = crate::links::relation_many_to_many::post_op::FetchManyToManyLinked<
-            Key,
-            From,
-            To,
-        >;
+        type PreOp = FetchManyToManyLinked<Key, From, To>;
         fn pre_op(&self, _: Self::InitSplitForPreOp, _: &Wheres) -> Self::PreOp {
-            crate::links::relation_many_to_many::post_op::FetchManyToManyLinked::new(
-                self.link.clone(),
-                vec![self.from_id.into()],
-            )
+            FetchManyToManyLinked::new(self.link.clone(), vec![self.from_id.into()])
         }
     }
 
@@ -1469,7 +932,7 @@ mod impl_mutate_links {
     {
         type Output =
             ManyLinkOutput<CollectionOutput<<To::Id as CollectionId>::IdData, To::OutputData>>;
-        type PreOpOutput = crate::links::relation_many_to_many::post_op::ManyToManyLinkedMap<
+        type PreOpOutput = ManyToManyLinkedMap<
             <From::Id as CollectionId>::IdData,
             <To::Id as CollectionId>::IdData,
             To::OutputData,
@@ -1511,6 +974,7 @@ mod impl_mutate_links {
     }
 }
 
+pub use crate::operations::fetch_linked_records::FetchManyToManyLinked;
 pub use impl_mutate_links::{DeleteManyToManyLinked, RemoveJunctionId, SetJunctionId};
 
 #[cfg(test)]
@@ -1522,22 +986,18 @@ mod test {
         connect_in_memory::ConnectInMemory,
         expressions::ColumnEqual,
         extentions::common_expressions::Scoped,
-        links::{
-            DefaultRelationKey,
-            relation_many_to_many::ManyToMany,
-        },
+        links::{DefaultRelationKey, relation_many_to_many::ManyToMany},
         on_migrate::OnMigrate,
         operations::{
             CollectionOutput, LinkedOutput, ManyLinkOutput, Operation,
             fetch_many::{FetchMany, ManyOutput},
             fetch_one::FetchOne,
         },
-        query_builder::{Expression, StatementBuilder},
+        sqlx_query_builder::{Expression, StatementBuilder},
         test_module::{self, Category, Tag, Todo},
     };
 
-    fn todo_to_tag_link()
-    -> ManyToMany<DefaultRelationKey, test_module::todo, test_module::tag> {
+    fn todo_to_tag_link() -> ManyToMany<DefaultRelationKey, test_module::todo, test_module::tag> {
         ManyToMany {
             relation_key: DefaultRelationKey,
             from: test_module::todo,
@@ -1653,18 +1113,18 @@ mod test {
                         },
                         links: ManyLinkOutput {
                             many_output: vec![
-                            CollectionOutput {
-                                id: 1,
-                                attributes: Tag {
-                                    title: "urgent".to_string(),
+                                CollectionOutput {
+                                    id: 1,
+                                    attributes: Tag {
+                                        title: "urgent".to_string(),
+                                    },
                                 },
-                            },
-                            CollectionOutput {
-                                id: 2,
-                                attributes: Tag {
-                                    title: "home".to_string(),
+                                CollectionOutput {
+                                    id: 2,
+                                    attributes: Tag {
+                                        title: "home".to_string(),
+                                    },
                                 },
-                            },
                             ],
                         },
                     },
@@ -1677,11 +1137,11 @@ mod test {
                         },
                         links: ManyLinkOutput {
                             many_output: vec![CollectionOutput {
-                            id: 1,
-                            attributes: Tag {
-                                title: "urgent".to_string(),
-                            },
-                        },],
+                                id: 1,
+                                attributes: Tag {
+                                    title: "urgent".to_string(),
+                                },
+                            },],
                         },
                     },
                 ],
@@ -1737,18 +1197,18 @@ mod test {
                 },
                 links: ManyLinkOutput {
                     many_output: vec![
-                    CollectionOutput {
-                        id: 1,
-                        attributes: Tag {
-                            title: "urgent".to_string(),
+                        CollectionOutput {
+                            id: 1,
+                            attributes: Tag {
+                                title: "urgent".to_string(),
+                            },
                         },
-                    },
-                    CollectionOutput {
-                        id: 2,
-                        attributes: Tag {
-                            title: "home".to_string(),
+                        CollectionOutput {
+                            id: 2,
+                            attributes: Tag {
+                                title: "home".to_string(),
+                            },
                         },
-                    },
                     ],
                 },
             })
@@ -1800,18 +1260,18 @@ mod test {
                         },
                         links: ManyLinkOutput {
                             many_output: vec![
-                            CollectionOutput {
-                                id: 1,
-                                attributes: Tag {
-                                    title: "urgent".to_string(),
+                                CollectionOutput {
+                                    id: 1,
+                                    attributes: Tag {
+                                        title: "urgent".to_string(),
+                                    },
                                 },
-                            },
-                            CollectionOutput {
-                                id: 2,
-                                attributes: Tag {
-                                    title: "review".to_string(),
+                                CollectionOutput {
+                                    id: 2,
+                                    attributes: Tag {
+                                        title: "review".to_string(),
+                                    },
                                 },
-                            },
                             ],
                         },
                     },
@@ -1822,11 +1282,11 @@ mod test {
                         },
                         links: ManyLinkOutput {
                             many_output: vec![CollectionOutput {
-                            id: 2,
-                            attributes: Tag {
-                                title: "review".to_string(),
-                            },
-                        },],
+                                id: 2,
+                                attributes: Tag {
+                                    title: "review".to_string(),
+                                },
+                            },],
                         },
                     },
                 ],
@@ -1874,7 +1334,9 @@ mod test {
                         done: false,
                         description: None,
                     },
-                    links: ManyLinkOutput { many_output: vec![] },
+                    links: ManyLinkOutput {
+                        many_output: vec![]
+                    },
                 },],
                 next_item: None,
             }

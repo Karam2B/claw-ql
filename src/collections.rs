@@ -43,21 +43,105 @@ pub trait CollectionId {
     type IdData;
 }
 
-pub struct AutoGenerate;
-pub struct Manual<T>(pub T);
-
-pub trait CreateIdFor<Id: CollectionId> {
-    type Result;
-    fn create_id(self, id_spec: &Id) -> Option<Self::Result>;
-}
-
 pub trait SingleColumnId: CollectionId + AsRef<str> {}
 
 #[derive(Clone, Debug)]
-pub struct SingleIncremintalInt<T>(pub T);
+pub struct SingleIncremintalInt<ForTable>(pub ForTable);
 
+mod impl_single_incremintal_int {
+    use super::SingleIncremintalInt;
+    use crate::collections::{CollectionId, SingleColumnId};
+
+    impl<T> AsRef<str> for SingleIncremintalInt<T> {
+        fn as_ref(&self) -> &str {
+            "id"
+        }
+    }
+
+    impl<T> CollectionId for SingleIncremintalInt<T> {
+        type IdData = i64;
+    }
+
+    impl<T> SingleColumnId for SingleIncremintalInt<T> {}
+}
+
+mod single_incremintal_int_from_row {
+    use sqlx::{ColumnIndex, Decode, Row, Type};
+
+    use super::SingleIncremintalInt;
+    use crate::from_row::{
+        FromRowAlias, FromRowData, FromRowError, RowPostAliased, RowPreAliased, RowTwoAliased,
+        TryFromRowAlias,
+    };
+
+    impl<T> FromRowData for SingleIncremintalInt<T> {
+        type RData = i64;
+    }
+
+    impl<'r, R: Row, T> FromRowAlias<'r, R> for SingleIncremintalInt<T>
+    where
+        R: Row + 'r,
+        i64: Type<R::Database> + Decode<'r, R::Database>,
+        for<'a> &'a str: ColumnIndex<R>,
+    {
+        fn no_alias(&self, row: &'r R) -> Result<Self::RData, FromRowError> {
+            Ok(row.try_get("id")?)
+        }
+        fn pre_alias(&self, row: RowPreAliased<'r, R>) -> Result<Self::RData, FromRowError> {
+            Ok(row.try_get("id")?)
+        }
+        fn post_alias(&self, row: RowPostAliased<'r, R>) -> Result<Self::RData, FromRowError> {
+            Ok(row.try_get("id")?)
+        }
+        fn two_alias(&self, row: RowTwoAliased<'r, R>) -> Result<Self::RData, FromRowError> {
+            Ok(row.try_get("id")?)
+        }
+    }
+
+    impl<'r, R: Row, T> TryFromRowAlias<'r, R> for SingleIncremintalInt<T>
+    where
+        R: Row + 'r,
+        i64: Type<R::Database> + Decode<'r, R::Database>,
+        for<'a> &'a str: ColumnIndex<R>,
+    {
+        fn try_no_alias(&self, row: &'r R) -> Result<Option<Self::RData>, FromRowError> {
+            Ok(row.get("id"))
+        }
+
+        fn try_pre_alias(
+            &self,
+            row: RowPreAliased<'r, R>,
+        ) -> Result<Option<Self::RData>, FromRowError>
+        where
+            R: Row,
+        {
+            Ok(row.get("id"))
+        }
+
+        fn try_two_alias(
+            &self,
+            row: RowTwoAliased<'r, R>,
+        ) -> Result<Option<Self::RData>, FromRowError>
+        where
+            R: Row,
+        {
+            Ok(row.get("id"))
+        }
+
+        fn try_post_alias(
+            &self,
+            row: RowPostAliased<'r, R>,
+        ) -> Result<Option<Self::RData>, FromRowError>
+        where
+            R: Row,
+        {
+            Ok(row.get("id"))
+        }
+    }
+}
+
+#[claw_ql_macros::skip]
 pub(crate) mod impl_id {
-
     use sqlx::Sqlite;
     use tracing::warn;
 
@@ -65,11 +149,13 @@ pub(crate) mod impl_id {
         collections::{
             AutoGenerate, CollectionId, CreateIdFor, Manual, SingleColumnId, SingleIncremintalInt,
         },
-        expressions::single_col_expressions::{AliasedCol, ScopedCol, UpdatingCol},
         extentions::common_expressions::{
             Aliased, Identifier, MigrateExpression, Scoped, V0OnUpdate,
         },
-        query_builder::{Bind, Expression, OpExpression, SanitizeMany, StatementBuilder},
+        sqlx_query_builder::{
+            Expression, OpExpression, StatementBuilder,
+            basic_expressions::{AliasedScopedColumn, Bind, ScopedColumn, UpdatingColumn},
+        },
         update_mod::Update,
     };
 
@@ -103,76 +189,80 @@ pub(crate) mod impl_id {
 
     impl Aliased for SingleIncremintalInt<&'static str> {
         type Aliased =
-            AliasedCol<&'static str, &'static str, SanitizeMany<(&'static str, &'static str)>>;
+            AliasedScopedColumn<(&'static str,), (&'static str,), (&'static str, &'static str)>;
         fn aliased(&self, alias: &'static str) -> Self::Aliased {
-            AliasedCol {
-                table: self.0,
-                col: "id",
-                alias: SanitizeMany((alias, "id")),
+            AliasedScopedColumn {
+                table: (&self.0,),
+                column: ("id",),
+                alias: (alias, "id"),
             }
         }
-        type NumAliased = AliasedCol<
-            &'static str,
-            &'static str,
-            SanitizeMany<(&'static str, usize, &'static str)>,
+        type NumAliased = AliasedScopedColumn<
+            (&'static str,),
+            (&'static str,),
+            (&'static str, usize, &'static str),
         >;
         fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
-            AliasedCol {
-                table: self.0,
-                col: "id",
-                alias: SanitizeMany((alias, num, "id")),
+            AliasedScopedColumn {
+                table: (&self.0,),
+                column: ("id",),
+                alias: (alias, num, "id"),
             }
         }
     }
 
     impl Aliased for SingleIncremintalInt<String> {
-        type Aliased = AliasedCol<String, &'static str, SanitizeMany<(&'static str, &'static str)>>;
+        type Aliased =
+            AliasedScopedColumn<(String,), (&'static str,), (&'static str, &'static str)>;
         fn aliased(&self, alias: &'static str) -> Self::Aliased {
-            AliasedCol {
-                table: self.0.clone(),
-                col: "id",
-                alias: SanitizeMany((alias, "id")),
+            AliasedScopedColumn {
+                table: (self.0.clone(),),
+                column: ("id",),
+                alias: (alias, "id"),
             }
         }
         type NumAliased =
-            AliasedCol<String, &'static str, SanitizeMany<(&'static str, usize, &'static str)>>;
+            AliasedScopedColumn<(String,), (&'static str,), (&'static str, usize, &'static str)>;
         fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
-            AliasedCol {
-                table: self.0.clone(),
-                col: "id",
-                alias: SanitizeMany((alias, num, "id")),
+            AliasedScopedColumn {
+                table: (self.0.clone(),),
+                column: ("id",),
+                alias: (alias, num, "id"),
             }
         }
     }
 
     impl Aliased for SingleIncremintalInt<std::sync::Arc<str>> {
-        type Aliased =
-            AliasedCol<std::sync::Arc<str>, &'static str, SanitizeMany<(&'static str, &'static str)>>;
+        type Aliased = AliasedScopedColumn<
+            (std::sync::Arc<str>,),
+            (&'static str,),
+            (&'static str, &'static str),
+        >;
         fn aliased(&self, alias: &'static str) -> Self::Aliased {
-            AliasedCol {
-                table: std::sync::Arc::clone(&self.0),
-                col: "id",
-                alias: SanitizeMany((alias, "id")),
+            AliasedScopedColumn {
+                table: (std::sync::Arc::clone(&self.0),),
+                column: ("id",),
+                alias: (alias, "id"),
             }
         }
-        type NumAliased = AliasedCol<
-            std::sync::Arc<str>,
-            &'static str,
-            SanitizeMany<(&'static str, usize, &'static str)>,
+        type NumAliased = AliasedScopedColumn<
+            (std::sync::Arc<str>,),
+            (&'static str,),
+            (&'static str, usize, &'static str),
         >;
         fn num_aliased(&self, num: usize, alias: &'static str) -> Self::NumAliased {
-            AliasedCol {
-                table: std::sync::Arc::clone(&self.0),
-                col: "id",
-                alias: SanitizeMany((alias, num, "id")),
+            AliasedScopedColumn {
+                table: (std::sync::Arc::clone(&self.0),),
+                column: ("id",),
+                alias: (alias, num, "id"),
             }
         }
     }
 
     impl Scoped for SingleIncremintalInt<&'static str> {
-        type Scoped = ScopedCol<&'static str, &'static str>;
+        type Scoped = ScopedColumn<&'static str, &'static str>;
         fn scoped(&self) -> Self::Scoped {
-            ScopedCol {
+            ScopedColumn {
                 table: self.0,
                 col: "id",
             }
@@ -180,9 +270,9 @@ pub(crate) mod impl_id {
     }
 
     impl Scoped for SingleIncremintalInt<String> {
-        type Scoped = ScopedCol<String, &'static str>;
+        type Scoped = ScopedColumn<String, &'static str>;
         fn scoped(&self) -> Self::Scoped {
-            ScopedCol {
+            ScopedColumn {
                 table: self.0.clone(),
                 col: "id",
             }
@@ -190,9 +280,9 @@ pub(crate) mod impl_id {
     }
 
     impl Scoped for SingleIncremintalInt<std::sync::Arc<str>> {
-        type Scoped = ScopedCol<std::sync::Arc<str>, &'static str>;
+        type Scoped = ScopedColumn<std::sync::Arc<str>, &'static str>;
         fn scoped(&self) -> Self::Scoped {
-            ScopedCol {
+            ScopedColumn {
                 table: std::sync::Arc::clone(&self.0),
                 col: "id",
             }
@@ -215,9 +305,9 @@ pub(crate) mod impl_id {
 
     impl V0OnUpdate for SingleIncremintalInt<&'static str> {
         type UpdateInput = Update<i64>;
-        type UpdateExpression = UpdatingCol<&'static str, Update<i64>>;
+        type UpdateExpression = UpdatingColumn<&'static str, Update<i64>>;
         fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression {
-            UpdatingCol {
+            UpdatingColumn {
                 col: self.identifier(),
                 set: input,
             }
@@ -226,9 +316,9 @@ pub(crate) mod impl_id {
 
     impl V0OnUpdate for SingleIncremintalInt<String> {
         type UpdateInput = Update<i64>;
-        type UpdateExpression = UpdatingCol<String, Update<i64>>;
+        type UpdateExpression = UpdatingColumn<String, Update<i64>>;
         fn on_update(self, input: Self::UpdateInput) -> Self::UpdateExpression {
-            UpdatingCol {
+            UpdatingColumn {
                 col: self.0,
                 set: input,
             }

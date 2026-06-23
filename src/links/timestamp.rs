@@ -32,7 +32,7 @@ pub mod expressions {
     pub mod sql_default {
         use crate::{
             database_extention::DatabaseExt,
-            query_builder::{Expression, OpExpression, StatementBuilder},
+            sqlx_query_builder::{Expression, OpExpression, StatementBuilder},
         };
 
         pub struct SqlDefault<T> {
@@ -58,7 +58,7 @@ pub mod expressions {
     pub mod current_timestamp {
         use crate::{
             database_extention::DatabaseExt,
-            query_builder::{Expression, OpExpression, StatementBuilder},
+            sqlx_query_builder::{Expression, OpExpression, StatementBuilder},
         };
 
         pub struct CurrentTimestamp;
@@ -78,7 +78,7 @@ pub mod expressions {
     pub mod verbatim_statement {
         use crate::{
             database_extention::DatabaseExt,
-            query_builder::{Expression, OpExpression, StatementBuilder},
+            sqlx_query_builder::{Expression, OpExpression, StatementBuilder},
         };
 
         pub struct VerbatimStatement<S> {
@@ -111,7 +111,7 @@ pub mod expressions {
     pub mod create_trigger {
         use crate::{
             database_extention::DatabaseExt,
-            query_builder::{
+            sqlx_query_builder::{
                 Expression, ManyExpressions, OpExpression, PossibleExpression, StatementBuilder,
             },
         };
@@ -272,7 +272,7 @@ mod impl_on_migrate {
             },
         },
         on_migrate::OnMigrate,
-        query_builder::functional_expr::{ManyImplExpression, ManyPossible},
+        sqlx_query_builder::functional_expr::{ManyImplExpression, ManyPossible},
         statements::AddColumn,
     };
 
@@ -296,7 +296,11 @@ mod impl_on_migrate {
         C: TableNameExpression,
     {
         type Statements = ManyImplExpression<
-            ManyPossible<(TimestampAddColumn<C>, TimestampAddColumn<C>, TimestampCreateTrigger<C>)>,
+            ManyPossible<(
+                TimestampAddColumn<C>,
+                TimestampAddColumn<C>,
+                TimestampCreateTrigger<C>,
+            )>,
         >;
 
         fn statments(&self) -> Self::Statements {
@@ -360,7 +364,7 @@ pub mod impl_fetch_many {
         from_row::{FromRowAlias, FromRowData},
         links::timestamp::{Timestamp, TimestampOutput},
         operations::fetch_many::LinkFetch,
-        query_builder::SanitizeMany,
+        sqlx_query_builder::SanitizeMany,
     };
 
     #[derive(Debug, Clone)]
